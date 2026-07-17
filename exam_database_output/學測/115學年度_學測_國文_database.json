@@ -1,0 +1,2575 @@
+[
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "1",
+        "page_number": 2,
+        "question_text": "下列各組「」內的字，讀音前後相同的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "取枕「攲」臥／風光「旖」旎",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "略「諳」水性／「喑」啞難言",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "「枇」杷甘美／「毗」鄰而居",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "燎原莫「遏」／登門拜「謁」",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "2",
+        "page_number": 2,
+        "question_text": "下列文句，完全沒有錯別字的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "詐騙行為絕不可姑息，方能以儆效尤",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "人工智慧日新月異，影響力無遠弗界",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "大伯退休後離群所居，仍常惦念老友",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "老吳自詡滿腹經綸，卻昧於人情事故",
+                "image_paths": []
+            }
+        ],
+        "answer": "A",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "3",
+        "page_number": 2,
+        "question_text": "依據資料甲、乙，下列敘述最適當的是：\n\n甲、鄭用錫、林占梅為清代新竹文學名家，鄭用錫次子鄭如梁娶林占梅之妹為妻。林占梅年幼喪父，由叔父林祥雲撫養成人。\n乙、鄭用錫曾寫給林占梅一首祝賀詩：「四方男子志，今更挂桑弧。天上誕麟種，人間浴鳳雛。共誇田得玉，早叶夢投珠。清福知誰享，孤山一幅圖。」",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "遞送賀詩的信封上，可題「鳳侶鸞儔」呼應詩意",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "詩中藉「得玉」、「投珠」，讚美林占梅玉樹臨風",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "若鄭用錫一併附上箋札，末尾署名前可自稱「家岳父」",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "若鄭用錫同時寫信向林祥雲致賀，可稱林祥雲「姻兄」",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "4",
+        "page_number": 2,
+        "question_text": "依據右框，下列篇章的解讀，最適當的是：\n\n| 韓非：有這些情況，國家可能走向敗亡啊！ |\n| :--- |\n| ①大臣甚貴，偏黨眾強。 |\n| ②聽以爵，不以眾言參驗。 |\n| ③無禮而侮大鄰，貪愎而拙交。 |\n| ④境內之傑不事，而求封外之士。 |\n| ⑤財物寡，無守戰之備而輕攻伐。 |\n| ⑥大臣隆盛，外藉敵國，內困百姓，以攻怨讎。 |",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                530,
+                530,
+                750,
+                950
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "〈鴻門宴〉中，范增指沛公「其志不在小」，意在避免楚軍陷入①②",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "〈燭之武退秦師〉中，晉文公謂「失其所與，不知」，意在避免晉國陷入③",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "〈諫逐客書〉中，李斯以「藉寇兵而齎盜糧」為喻，意在警示執政者勿陷入④⑥",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "《孟子》中，孟子舉出「塗有餓莩而不知發，人死，則曰：『非我也，歲也。』」的荒謬，意在警示執政者勿陷入⑤",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q4_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "5",
+        "page_number": 2,
+        "question_text": "下列是一段古文，依據文意，甲、乙、丙、丁、戊排列順序最適當的是：\n\n夫三代之君，惟不忍鄙其民而欺之，\n甲、及其不可聽也\n乙、以觀其意之所嚮\n丙、而服其不然之心\n丁、故天下有故，而其議及於百姓\n戊、則又反覆而諭之，以窮極其說\n是以其民親而愛之。(蘇軾〈書論〉)",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "乙丙丁戊甲",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "丙丁戊甲乙",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "丁乙甲戊丙",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "戊丙甲乙丁",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "6",
+        "page_number": 3,
+        "shared_context": "6-8為題組。閱讀下文，回答6-8題。\n\n1906年，早田文藏根據小西成章採自南投烏松坑山的一份無名針葉樹標本，在當時植物學期刊上發表裸子植物新種─臺灣杉。由於它無法歸入任何一個現生裸子植物的「屬」，早田文藏因此新立了「臺灣杉屬」，使臺灣原生植物走上國際舞臺。\n不久後，臺灣杉相繼在中國大陸湖北、雲南、福建和緬甸、越南北部被發現，臺灣特有屬的位階不再，但有研究發現：臺灣杉堪稱活化石，它最古老的化石紀錄可溯至阿拉斯加約一億年前的白堊紀地層，在整個新生代，也零星分布於歐亞大陸和北美洲。令學者驚訝的是，億萬年來臺灣杉似乎未改變樣貌，與現生臺灣杉在形態上幾無差別。此外，雖然目前僅分布於東亞幾處地區，但在悠久的地質年代裡，臺灣杉曾廣闊分布於北半球，甚至靠近北極圈，似乎暗示它曾具有適應多樣環境的能力。\n依據現生臺灣杉族群DNA取樣的結果，發現：雖然臺灣杉整體的遺傳多樣性很低，但臺灣島與亞洲大陸的臺灣杉在遺傳上分化程度較高，各自演化出新的或保留了獨特的古老基因型。進一步以分子鐘分析，兩地的臺灣杉分離至少有兩、三百萬年。學者於是推測，臺灣杉的祖先應該原本在東亞廣泛分布，受第四紀冰河期影響而導致分布破碎化。雲南、越南北部和臺灣島的臺灣杉擁有最高的遺傳多樣性，這些地方很可能是臺灣杉祖先在冰河期的避難所，其餘則是從避難所擴張出去的族群。（改寫自游旨价《通往世界的植物─臺灣高山植物的時空旅史》）",
+        "question_text": "關於上文書寫方式與內容，敘述最適當的是：",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                750,
+                100,
+                950,
+                900
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "以「臺灣杉如何被發現」、「臺灣杉的祖先如何繁衍擴張族群」為說明主軸",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "從早田文藏獲得標本與化石而建立一個新屬，使臺灣杉進入國際視野說起",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "結合時間與空間，揭示由亞洲南部擴散而出的臺灣杉，遠古曾廣布北半球",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "引學者看法，指出時空環境對臺灣杉分布的影響，第四紀冰河期尤為關鍵",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q8_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "7",
+        "page_number": 3,
+        "shared_context": "6-8為題組。閱讀下文，回答6-8題。\n\n1906年，早田文藏根據小西成章採自南投烏松坑山的一份無名針葉樹標本，在當時植物學期刊上發表裸子植物新種─臺灣杉。由於它無法歸入任何一個現生裸子植物的「屬」，早田文藏因此新立了「臺灣杉屬」，使臺灣原生植物走上國際舞臺。\n不久後，臺灣杉相繼在中國大陸湖北、雲南、福建和緬甸、越南北部被發現，臺灣特有屬的位階不再，但有研究發現：臺灣杉堪稱活化石，它最古老的化石紀錄可溯至阿拉斯加約一億年前的白堊紀地層，在整個新生代，也零星分布於歐亞大陸和北美洲。令學者驚訝的是，億萬年來臺灣杉似乎未改變樣貌，與現生臺灣杉在形態上幾無差別。此外，雖然目前僅分布於東亞幾處地區，但在悠久的地質年代裡，臺灣杉曾廣闊分布於北半球，甚至靠近北極圈，似乎暗示它曾具有適應多樣環境的能力。\n依據現生臺灣杉族群DNA取樣的結果，發現：雖然臺灣杉整體的遺傳多樣性很低，但臺灣島與亞洲大陸的臺灣杉在遺傳上分化程度較高，各自演化出新的或保留了獨特的古老基因型。進一步以分子鐘分析，兩地的臺灣杉分離至少有兩、三百萬年。學者於是推測，臺灣杉的祖先應該原本在東亞廣泛分布，受第四紀冰河期影響而導致分布破碎化。雲南、越南北部和臺灣島的臺灣杉擁有最高的遺傳多樣性，這些地方很可能是臺灣杉祖先在冰河期的避難所，其餘則是從避難所擴張出去的族群。（改寫自游旨价《通往世界的植物─臺灣高山植物的時空旅史》）",
+        "question_text": "關於①、②是否符合上文內容，最適當的研判是：\n\n①臺灣杉從悠久的地質年代存活至今，基因雖有所演化，外貌幾乎不變。\n②臺灣島的臺灣杉遺傳多樣性高，故「臺灣杉屬」應為裸子植物特有屬。",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                750,
+                100,
+                950,
+                900
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "①、②皆符合",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "①、②皆不符合",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "①符合，②不符合",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "①不符合，②符合",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q8_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "8",
+        "page_number": 3,
+        "shared_context": "6-8為題組。閱讀下文，回答6-8題。\n\n1906年，早田文藏根據小西成章採自南投烏松坑山的一份無名針葉樹標本，在當時植物學期刊上發表裸子植物新種─臺灣杉。由於它無法歸入任何一個現生裸子植物的「屬」，早田文藏因此新立了「臺灣杉屬」，使臺灣原生植物走上國際舞臺。\n不久後，臺灣杉相繼在中國大陸湖北、雲南、福建和緬甸、越南北部被發現，臺灣特有屬的位階不再，但有研究發現：臺灣杉堪稱活化石，它最古老的化石紀錄可溯至阿拉斯加約一億年前的白堊紀地層，在整個新生代，也零星分布於歐亞大陸和北美洲。令學者驚訝的是，億萬年來臺灣杉似乎未改變樣貌，與現生臺灣杉在形態上幾無差別。此外，雖然目前僅分布於東亞幾處地區，但在悠久的地質年代裡，臺灣杉曾廣闊分布於北半球，甚至靠近北極圈，似乎暗示它曾具有適應多樣環境的能力。\n依據現生臺灣杉族群DNA取樣的結果，發現：雖然臺灣杉整體的遺傳多樣性很低，但臺灣島與亞洲大陸的臺灣杉在遺傳上分化程度較高，各自演化出新的或保留了獨特的古老基因型。進一步以分子鐘分析，兩地的臺灣杉分離至少有兩、三百萬年。學者於是推測，臺灣杉的祖先應該原本在東亞廣泛分布，受第四紀冰河期影響而導致分布破碎化。雲南、越南北部和臺灣島的臺灣杉擁有最高的遺傳多樣性，這些地方很可能是臺灣杉祖先在冰河期的避難所，其餘則是從避難所擴張出去的族群。（改寫自游旨价《通往世界的植物─臺灣高山植物的時空旅史》）",
+        "question_text": "下列方框內是一段學術論文摘要，內容與上文第三段畫底線處相近。關於二者寫作方式的異同，敘述最適當的是：\n\n| 本研究使用五個cpDNA 序列片段，分析臺灣杉屬族群間的遺傳變異，結果只找到八種cpDNA 單套型，而在臺灣的臺灣杉屬族群中只發現一種cpDNA 單套型，且此單套型與東南亞洲大陸所有臺灣杉屬族群普遍存在的單套型，有八個突變步驟的差異，顯示兩者存在極大分化。 |",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                750,
+                100,
+                950,
+                900
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "摘要的口吻不忌冷硬，上文則筆調溫婉淺近，並加入個人的感受吸引讀者",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "摘要不忌用專有名詞，上文則幾乎不用專有名詞，但引用數據讓讀者易懂",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "二者皆揭示研究方法與主要發現，並述及研究限制與他人觀點，以求審慎",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "二者立場皆客觀，但摘要是研究者自述成果，上文是寫作者綜述既有成果",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q8_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "9",
+        "page_number": 4,
+        "shared_context": "9-10為題組。閱讀下文，回答9-10題。\n\n《福爾摩斯新探案》是柯南‧道爾的福爾摩斯系列最後一本短篇小說集。\n其中，〈王冠寶石案〉使用第三人稱的敘述方式，這種寫法，少了華生作為敘述者特有的平靜和虔敬，在先前的小說集裡僅見於〈最後致意〉。〈王冠寶石案〉不但老套地「把福爾摩斯蠟像擺在窗口」，部分細節也出現疑點。\n一般讀者雖不必像福爾摩斯迷那樣，知道在1903年之前，歌劇《霍夫曼的故事》裡的〈威尼斯船歌〉從未出版過任何小提琴獨奏的唱片，但多少知道那個年代的唱片或圓筒錄音，不可能持續播五分鐘，掩護福爾摩斯偷聽其他人的對話。\n小說集裡另有兩篇故事由主角福爾摩斯自述，這全新的寫法未替兩篇小說增色。\n〈皮膚變白的軍人〉中有人在麻風病患的床上睡過一夜，竟染上一種不是麻風病卻狀似麻風病的疾患，這種巧合實在牽強。又先前的故事說華生太太死於1893年，這故事卻說發生在1903年華生結婚期間，福爾摩斯迷於是懷疑善良的華生結過不只一次婚。\n至於〈獅鬃毛〉，先別管故事裡的水母是否真那麼危險，問題是，福爾摩斯說他原先未發現麥菲遜死於海中生物攻擊，是因為他看到死者的毛巾是乾的，以致誤判死者沒下過水。如此說來，麥菲遜與殺人水母纏鬥時，半根頭髮都沒溼嘍……唉！\n身為醫生的柯南‧道爾，曾在1891年公開指出科赫宣稱「結核菌素能治療結核病」絕不可信。由於當時不少人接受沃羅諾夫醫生發明的回春手術，將動物腺體移植到人類身上，他寫下小說集裡的〈爬行人〉，描寫一名著名生理學教授注射了一種據稱能返老還童的藥後，出現詭異行為，藉以再次批判現實世界的偽科學。（改寫自馬丁‧費德著，柯清心譯《柯南‧道爾所不知道的福爾摩斯》）",
+        "question_text": "上文第三段末尾的「唉」，感嘆的原因最可能是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "道爾線索布置顯得片面粗疏",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "道爾誇大了水母的生物特性",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "福爾摩斯不是善於敘事的人",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "福爾摩斯不能坦誠面對錯誤",
+                "image_paths": []
+            }
+        ],
+        "answer": "A",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "10",
+        "page_number": 4,
+        "shared_context": "9-10為題組。閱讀下文，回答9-10題。\n\n《福爾摩斯新探案》是柯南‧道爾的福爾摩斯系列最後一本短篇小說集。\n其中，〈王冠寶石案〉使用第三人稱的敘述方式，這種寫法，少了華生作為敘述者特有的平靜和虔敬，在先前的小說集裡僅見於〈最後致意〉。〈王冠寶石案〉不但老套地「把福爾摩斯蠟像擺在窗口」，部分細節也出現疑點。\n一般讀者雖不必像福爾摩斯迷那樣，知道在1903年之前，歌劇《霍夫曼的故事》裡的〈威尼斯船歌〉從未出版過任何小提琴獨奏的唱片，但多少知道那個年代的唱片或圓筒錄音，不可能持續播五分鐘，掩護福爾摩斯偷聽其他人的對話。\n小說集裡另有兩篇故事由主角福爾摩斯自述，這全新的寫法未替兩篇小說增色。\n〈皮膚變白的軍人〉中有人在麻風病患的床上睡過一夜，竟染上一種不是麻風病卻狀似麻風病的疾患，這種巧合實在牽強。又先前的故事說華生太太死於1893年，這故事卻說發生在1903年華生結婚期間，福爾摩斯迷於是懷疑善良的華生結過不只一次婚。\n至於〈獅鬃毛〉，先別管故事裡的水母是否真那麼危險，問題是，福爾摩斯說他原先未發現麥菲遜死於海中生物攻擊，是因為他看到死者的毛巾是乾的，以致誤判死者沒下過水。如此說來，麥菲遜與殺人水母纏鬥時，半根頭髮都沒溼嘍……唉！\n身為醫生的柯南‧道爾，曾在1891年公開指出科赫宣稱「結核菌素能治療結核病」絕不可信。由於當時不少人接受沃羅諾夫醫生發明的回春手術，將動物腺體移植到人類身上，他寫下小說集裡的〈爬行人〉，描寫一名著名生理學教授注射了一種據稱能返老還童的藥後，出現詭異行為，藉以再次批判現實世界的偽科學。（改寫自馬丁‧費德著，柯清心譯《柯南‧道爾所不知道的福爾摩斯》）",
+        "question_text": "依據上文，有關柯南•道爾創作福爾摩斯小說，敘述最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "福爾摩斯故事常以華生為敘述者，在改變敘事者時便容易出現寫作的失誤",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "小說融入歌劇，若讀者不懂歌劇內容，便無法察覺音樂時間不夠掩護偷聽",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "小說出現一些時間的矛盾時，福爾摩斯迷可能會順應錯誤，產生新的解釋",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "柯南•道爾總能在作品中呈現醫生專業，並常借用小說批判現實中的醫學",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "11",
+        "page_number": 5,
+        "question_text": "依據上文，關於中國古代的「俠」，敘述最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "由於社會重文輕武，導致俠與菁英士人處於對立狀態",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "俠有激昂慷慨的氣概，可追溯到古代儒家的議政傳統",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "東漢俠的勢力遠逾以往，乃促成名士的集體反抗行動",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "俠風狂放進取的一面，與儒者不屈服的批判精神相契",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "12",
+        "page_number": 5,
+        "question_text": "關於①、②是否符合上文寫作策略，最適當的研判是：\n①以西方騎士為對照，闡述中國之「士」與武力的關係。\n②通過儒家思想與俠的比較，說明中國古代俠文化的興衰。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "①、②皆符合",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "①、②皆不符合",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "①符合，②不符合",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "①不符合，②無法判斷",
+                "image_paths": []
+            }
+        ],
+        "answer": "B",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "13",
+        "page_number": 5,
+        "question_text": "依據上文，如果想為畫線處提供文獻佐證，最適合引用的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "桀紂之失天下也，失其民也，失其民者，失其心也",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "殘賊之人，謂之一夫，聞誅一夫紂矣，未聞弒君也",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "天行有常，不為堯存，不為桀亡，應之以治則吉，應之以亂則凶",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "紂之不善，不如是之甚也，是以君子惡居下流，天下之惡皆歸焉",
+                "image_paths": []
+            }
+        ],
+        "answer": "B",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "14",
+        "page_number": 5,
+        "shared_context": "14-15為題組。閱讀下表，回答14-15題。\n\n| 量詞的類別 | | 例子 |\n| :--- | :--- | :--- |\n| 名量詞 表示人、事、物數量的單位 | 專用量詞 | 個體量詞：個 位 條 張 顆 本 輛 艘 <br> 集合量詞：副 套 打 群 <br> 度量衡量詞：公尺 公斤 公升 公頃 <br> 不定量詞：些 點 <br> 準量詞：星期 小時 |\n| | 借用量詞 | 腔（一腔熱血） 身（一身傲骨） 床（一床棉被） 葉（一葉扁舟） |\n| 動量詞 表示動作次數的單位 | 專用量詞 | 下 回 次 趟 場 遍 頓 遭 |\n| | 借用量詞 | 眼（看一眼） 腳（踢兩腳） 刀（切五刀） 口（咬幾口） |",
+        "question_text": "依據上表，對右框5個量詞進行分類，最適當的是：\n①夫人與禽各為一「類」。\n②孟嘗君予車五十「乘」。\n③劉姥姥留神打量了黛玉一「番」。\n④見靖驚喜，召坐，環飲十數「巡」。\n⑤或當龍戰三二十「載」，建少功業。",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                700,
+                120,
+                850,
+                900
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "【圖形選項，請參見題幹附圖】",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "【圖形選項，請參見題幹附圖】",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "【圖形選項，請參見題幹附圖】",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "【圖形選項，請參見題幹附圖】",
+                "image_paths": []
+            }
+        ],
+        "answer": "B",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q14_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "15",
+        "page_number": 5,
+        "shared_context": "14-15為題組。閱讀下表，回答14-15題。\n\n| 量詞的類別 | | 例子 |\n| :--- | :--- | :--- |\n| 名量詞 表示人、事、物數量的單位 | 專用量詞 | 個體量詞：個 位 條 張 顆 本 輛 艘 <br> 集合量詞：副 套 打 群 <br> 度量衡量詞：公尺 公斤 公升 公頃 <br> 不定量詞：些 點 <br> 準量詞：星期 小時 |\n| | 借用量詞 | 腔（一腔熱血） 身（一身傲骨） 床（一床棉被） 葉（一葉扁舟） |\n| 動量詞 表示動作次數的單位 | 專用量詞 | 下 回 次 趟 場 遍 頓 遭 |\n| | 借用量詞 | 眼（看一眼） 腳（踢兩腳） 刀（切五刀） 口（咬幾口） |",
+        "question_text": "依據上表，關於「名量詞中的借用量詞」與「動量詞中的借用量詞」，敘述不適當的是：",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                700,
+                120,
+                850,
+                900
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "前者與數詞「一」結合時，「一」即表示「滿」、「全」的意思",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "後者可作為某種行為的次數單位，也表示該行為所憑藉的事物",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "二者都可將名詞借用為量詞，且須與數詞結合，才會產生量詞意義",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "二者都可凸顯事物或動作的形象性，藉以營造出鮮明具體的畫面感",
+                "image_paths": []
+            }
+        ],
+        "answer": "B",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q14_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "16",
+        "page_number": 6,
+        "shared_context": "16-18為題組。閱讀下文，回答16-18題。\n「肥皂」一詞古已有之。宋代筆記《雞肋編》中提到：「浙中少皂莢，澡面、浣衣皆用肥珠子。……子圓黑肥大，肉亦厚，膏潤於皂莢，故一名肥皂。」「皂莢」，據明代李時珍《本草綱目》所述，莢之樹皂，故名。枝間多刺，夏開細黃花。結莢有三種：一種小如豬牙，全無滋潤；一種長而肥厚，多脂而黏；一種長而瘦薄，枯燥不黏。以多脂者為佳。《本草綱目》另收錄「肥皂莢」，此樹生高山中，五、六月開白花。結莢長三、四寸，而肥厚多肉，內有黑子數顆，大如指頭，不正圓，其色如漆而甚堅。\n皂莢、肥皂莢的果實皆富含皂素，將果實搗碎加水揉搓，出現白色泡沫，即可供洗濯之用。肥皂莢還可製成類似今日香皂的「肥皂團」。在南宋周密《武林舊事》中，臨安已有專門販售肥皂團的商鋪。《本草綱目》記載了肥皂團的製作方法與功用：「十月採莢，煮熟，搗爛和白麵及諸香作丸。澡身面，去垢而膩潤，勝於皂莢也。」\n香皂的身影也在明清文學作品中出現。《金瓶梅》第27回，寫西門慶等著丫頭取「茉莉花肥皂」洗臉，潘金蓮則調侃他「臉洗得比人家屁股還白」。清初李漁《閒情偶寄》稱香皂「以江南六合縣出者為第一，但價值稍昂，又恐遠不能致，多則浴體，少則止以浴面。」《紅樓夢》第58回中，襲人讓婆子給伶人芳官送去花露油、香皂洗頭。可知香皂在富貴家庭中已普遍使用，不過，尋常百姓家並不多見。\n現代肥皂係由油脂與鹼性物質經「皂化反應」製成。工業皂以高溫皂化，製程快、成本低，清潔力強，能滿足消費需求。但添加的人工香料、防腐劑，可能刺激皮膚，且製程常伴隨環境汙染，不利永續發展。隨著環保意識抬頭與自然生活風潮興起，以植物油與草本萃取物低溫皂化製成的手工皂重獲青睞。它保留了天然甘油，保溼力高，且與古代肥皂團相同，皆可生物分解。",
+        "question_text": "依據上文，關於皂莢與肥皂莢，敘述最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "無論皂莢或肥皂莢，其洗淨力強弱均取決於莢果短長",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "皂莢與肥皂莢皆須將莢果煮熟後搗碎，方能用於洗滌",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "不同品種的皂莢，去垢力有別，但滋潤程度皆優於肥皂莢",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "皂莢名「皂」，與顏色有關；肥皂莢名「肥」，與莢果有關",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "17",
+        "page_number": 6,
+        "shared_context": "16-18為題組。閱讀下文，回答16-18題。\n「肥皂」一詞古已有之。宋代筆記《雞肋編》中提到：「浙中少皂莢，澡面、浣衣皆用肥珠子。……子圓黑肥大，肉亦厚，膏潤於皂莢，故一名肥皂。」「皂莢」，據明代李時珍《本草綱目》所述，莢之樹皂，故名。枝間多刺，夏開細黃花。結莢有三種：一種小如豬牙，全無滋潤；一種長而肥厚，多脂而黏；一種長而瘦薄，枯燥不黏。以多脂者為佳。《本草綱目》另收錄「肥皂莢」，此樹生高山中，五、六月開白花。結莢長三、四寸，而肥厚多肉，內有黑子數顆，大如指頭，不正圓，其色如漆而甚堅。\n皂莢、肥皂莢的果實皆富含皂素，將果實搗碎加水揉搓，出現白色泡沫，即可供洗濯之用。肥皂莢還可製成類似今日香皂的「肥皂團」。在南宋周密《武林舊事》中，臨安已有專門販售肥皂團的商鋪。《本草綱目》記載了肥皂團的製作方法與功用：「十月採莢，煮熟，搗爛和白麵及諸香作丸。澡身面，去垢而膩潤，勝於皂莢也。」\n香皂的身影也在明清文學作品中出現。《金瓶梅》第27回，寫西門慶等著丫頭取「茉莉花肥皂」洗臉，潘金蓮則調侃他「臉洗得比人家屁股還白」。清初李漁《閒情偶寄》稱香皂「以江南六合縣出者為第一，但價值稍昂，又恐遠不能致，多則浴體，少則止以浴面。」《紅樓夢》第58回中，襲人讓婆子給伶人芳官送去花露油、香皂洗頭。可知香皂在富貴家庭中已普遍使用，不過，尋常百姓家並不多見。\n現代肥皂係由油脂與鹼性物質經「皂化反應」製成。工業皂以高溫皂化，製程快、成本低，清潔力強，能滿足消費需求。但添加的人工香料、防腐劑，可能刺激皮膚，且製程常伴隨環境汙染，不利永續發展。隨著環保意識抬頭與自然生活風潮興起，以植物油與草本萃取物低溫皂化製成的手工皂重獲青睞。它保留了天然甘油，保溼力高，且與古代肥皂團相同，皆可生物分解。",
+        "question_text": "關於「香皂」在上文所引明清文學作品中的文化意涵，闡釋最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "具洗滌功能，藉以傳達對人心淨化的期許",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "因價格不菲，可區別身分階層與生活品味",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "融入地域元素，呈現製造地植物分布的特色",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "展現工藝水準，配合不同功能需求而客製化",
+                "image_paths": []
+            }
+        ],
+        "answer": "B",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "18",
+        "page_number": 6,
+        "shared_context": "16-18為題組。閱讀下文，回答16-18題。\n「肥皂」一詞古已有之。宋代筆記《雞肋編》中提到：「浙中少皂莢，澡面、浣衣皆用肥珠子。……子圓黑肥大，肉亦厚，膏潤於皂莢，故一名肥皂。」「皂莢」，據明代李時珍《本草綱目》所述，莢之樹皂，故名。枝間多刺，夏開細黃花。結莢有三種：一種小如豬牙，全無滋潤；一種長而肥厚，多脂而黏；一種長而瘦薄，枯燥不黏。以多脂者為佳。《本草綱目》另收錄「肥皂莢」，此樹生高山中，五、六月開白花。結莢長三、四寸，而肥厚多肉，內有黑子數顆，大如指頭，不正圓，其色如漆而甚堅。\n皂莢、肥皂莢的果實皆富含皂素，將果實搗碎加水揉搓，出現白色泡沫，即可供洗濯之用。肥皂莢還可製成類似今日香皂的「肥皂團」。在南宋周密《武林舊事》中，臨安已有專門販售肥皂團的商鋪。《本草綱目》記載了肥皂團的製作方法與功用：「十月採莢，煮熟，搗爛和白麵及諸香作丸。澡身面，去垢而膩潤，勝於皂莢也。」\n香皂的身影也在明清文學作品中出現。《金瓶梅》第27回，寫西門慶等著丫頭取「茉莉花肥皂」洗臉，潘金蓮則調侃他「臉洗得比人家屁股還白」。清初李漁《閒情偶寄》稱香皂「以江南六合縣出者為第一，但價值稍昂，又恐遠不能致，多則浴體，少則止以浴面。」《紅樓夢》第58回中，襲人讓婆子給伶人芳官送去花露油、香皂洗頭。可知香皂在富貴家庭中已普遍使用，不過，尋常百姓家並不多見。\n現代肥皂係由油脂與鹼性物質經「皂化反應」製成。工業皂以高溫皂化，製程快、成本低，清潔力強，能滿足消費需求。但添加的人工香料、防腐劑，可能刺激皮膚，且製程常伴隨環境汙染，不利永續發展。隨著環保意識抬頭與自然生活風潮興起，以植物油與草本萃取物低溫皂化製成的手工皂重獲青睞。它保留了天然甘油，保溼力高，且與古代肥皂團相同，皆可生物分解。",
+        "question_text": "依據上文，關於現代手工皂與工業皂，敘述最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "二者製作原理與肥皂團並無不同，差別在於潔淨成分的來源",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "二者在「皂化反應」製程中，因分別合成皂素或香料而有差別",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "前者添加植物油，環境成本低；後者添加防腐劑，洗後抗菌力高",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "前者成分較天然，洗後肌膚不乾澀；後者保存期限長，銷售價格低",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "19",
+        "page_number": 7,
+        "shared_context": "19-21為題組。閱讀下文，回答19-21題。\n西元八世紀左右的盛唐，出現一種新型態的草書，後人以「狂草」稱呼。唐代狂草真跡存世者寥寥無幾，草書名品多以摹本、臨本、仿本或刻本的形式廣為流傳。今傳世名聲最大、影響最廣的狂草作品，堪稱唐代僧人懷素的〈自敘帖〉長卷。\n〈自敘帖〉本幅部分書有126行，702字，是懷素自述出身、經歷與交遊的重要文獻。懷素二十餘歲即以草書聞名，並以驚人的即席表演結交當代名公。〈自敘帖〉中將近一半篇幅節錄眾人觀其作書有感所撰之詩作，描述他在眾人圍觀下激情揮毫的景況，例如：「奔蛇走虺勢入座，驟雨旋風聲滿堂」、「筆下唯看激電流，字成只畏盤龍走」、「醉來信手兩三行，醒後卻書書不得」、「心手相師勢轉奇，詭形怪狀翻合宜」、「忽然絕叫三五聲，滿壁縱橫千萬字」、「遠鶴無前侶，孤雲寄太虛。狂來輕世界，醉裡得真如」等，為八世紀的書法表演現場留下難得的紀錄。懷素的書法表演頗富神異色彩，筆下充滿驚奇的物象變化，詩作中還有人強調連懷素自己也不知如何寫成的。在觀賞者眼中，懷素能在草書中興風作浪、幻化出種種物象的能力，恐怕是當時人的普遍認知與期待，是唐代佛道盛行、社會瀰漫濃厚宗教氛圍下的產物。\n〈自敘帖〉書法用筆迅速，筆勢連綿，然字形結構謹守草法，線條穩定圓轉。全卷可見節奏緩起漸快，卷中段以後愈書愈放，但絕非倚靠靈感驅使的即興之作。國立故宮博物院藏本〈自敘帖〉，每行第一字墨色飽滿，漸寫漸乾，直到寫完行末最後一字。所謂「法度」看似不存在，卻其實無所不在，是興風作浪的浪漫藉以依存的基礎。（改寫自盧慧紋〈興風作浪的浪漫〉）",
+        "question_text": "依據上文，關於〈自敘帖〉中詩作對懷素其人其書的描述，說明最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "以奔蛇、走虺、遠鶴等物象，說明運筆時身形的伸展變化",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "以盤龍走、滿壁縱橫，形容其運筆速度時而迅疾時而徐緩",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "下筆時近乎顛狂且不忌飲酒，觀者卻能從中印證佛道之理",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "心手相師，乍看怪異不合常軌，卻能引發觀者多重的聯想",
+                "image_paths": []
+            }
+        ],
+        "answer": "D",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "20",
+        "page_number": 7,
+        "shared_context": "19-21為題組。閱讀下文，回答19-21題。\n西元八世紀左右的盛唐，出現一種新型態的草書，後人以「狂草」稱呼。唐代狂草真跡存世者寥寥無幾，草書名品多以摹本、臨本、仿本或刻本的形式廣為流傳。今傳世名聲最大、影響最廣的狂草作品，堪稱唐代僧人懷素的〈自敘帖〉長卷。\n〈自敘帖〉本幅部分書有126行，702字，是懷素自述出身、經歷與交遊的重要文獻。懷素二十餘歲即以草書聞名，並以驚人的即席表演結交當代名公。〈自敘帖〉中將近一半篇幅節錄眾人觀其作書有感所撰之詩作，描述他在眾人圍觀下激情揮毫的景況，例如：「奔蛇走虺勢入座，驟雨旋風聲滿堂」、「筆下唯看激電流，字成只畏盤龍走」、「醉來信手兩三行，醒後卻書書不得」、「心手相師勢轉奇，詭形怪狀翻合宜」、「忽然絕叫三五聲，滿壁縱橫千萬字」、「遠鶴無前侶，孤雲寄太虛。狂來輕世界，醉裡得真如」等，為八世紀的書法表演現場留下難得的紀錄。懷素的書法表演頗富神異色彩，筆下充滿驚奇的物象變化，詩作中還有人強調連懷素自己也不知如何寫成的。在觀賞者眼中，懷素能在草書中興風作浪、幻化出種種物象的能力，恐怕是當時人的普遍認知與期待，是唐代佛道盛行、社會瀰漫濃厚宗教氛圍下的產物。\n〈自敘帖〉書法用筆迅速，筆勢連綿，然字形結構謹守草法，線條穩定圓轉。全卷可見節奏緩起漸快，卷中段以後愈書愈放，但絕非倚靠靈感驅使的即興之作。國立故宮博物院藏本〈自敘帖〉，每行第一字墨色飽滿，漸寫漸乾，直到寫完行末最後一字。所謂「法度」看似不存在，卻其實無所不在，是興風作浪的浪漫藉以依存的基礎。（改寫自盧慧紋〈興風作浪的浪漫〉）",
+        "question_text": "關於上文對〈自敘帖〉的敘述，最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "觀者可以透過墨色由濃到淡的變化，推想其換行蘸墨的規律",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "藉助神異力量書寫的怪奇字形，具奔放不拘且震懾人心之美",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "以摹本、臨本、仿本或刻本的形式流傳，故宮所藏為唯一存世真跡",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "後人可從中了解懷素的交遊、師承，以及書寫時的構思和創作理念",
+                "image_paths": []
+            }
+        ],
+        "answer": "A",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "21",
+        "page_number": 7,
+        "shared_context": "19-21為題組。閱讀下文，回答19-21題。\n西元八世紀左右的盛唐，出現一種新型態的草書，後人以「狂草」稱呼。唐代狂草真跡存世者寥寥無幾，草書名品多以摹本、臨本、仿本或刻本的形式廣為流傳。今傳世名聲最大、影響最廣的狂草作品，堪稱唐代僧人懷素的〈自敘帖〉長卷。\n〈自敘帖〉本幅部分書有126行，702字，是懷素自述出身、經歷與交遊的重要文獻。懷素二十餘歲即以草書聞名，並以驚人的即席表演結交當代名公。〈自敘帖〉中將近一半篇幅節錄眾人觀其作書有感所撰之詩作，描述他在眾人圍觀下激情揮毫的景況，例如：「奔蛇走虺勢入座，驟雨旋風聲滿堂」、「筆下唯看激電流，字成只畏盤龍走」、「醉來信手兩三行，醒後卻書書不得」、「心手相師勢轉奇，詭形怪狀翻合宜」、「忽然絕叫三五聲，滿壁縱橫千萬字」、「遠鶴無前侶，孤雲寄太虛。狂來輕世界，醉裡得真如」等，為八世紀的書法表演現場留下難得的紀錄。懷素的書法表演頗富神異色彩，筆下充滿驚奇的物象變化，詩作中還有人強調連懷素自己也不知如何寫成的。在觀賞者眼中，懷素能在草書中興風作浪、幻化出種種物象的能力，恐怕是當時人的普遍認知與期待，是唐代佛道盛行、社會瀰漫濃厚宗教氛圍下的產物。\n〈自敘帖〉書法用筆迅速，筆勢連綿，然字形結構謹守草法，線條穩定圓轉。全卷可見節奏緩起漸快，卷中段以後愈書愈放，但絕非倚靠靈感驅使的即興之作。國立故宮博物院藏本〈自敘帖〉，每行第一字墨色飽滿，漸寫漸乾，直到寫完行末最後一字。所謂「法度」看似不存在，卻其實無所不在，是興風作浪的浪漫藉以依存的基礎。（改寫自盧慧紋〈興風作浪的浪漫〉）",
+        "question_text": "依據上文，關於懷素〈自敘帖〉中所錄眾人詩作的價值，敘述最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "留存盛唐時藝文活動的珍貴剪影",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "記錄當時不被人知的狂草書法家",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "提供後人臨摹狂草的造型與布局",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "揭示法度為浪漫得以穩定的憑藉",
+                "image_paths": []
+            }
+        ],
+        "answer": "A",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "22",
+        "page_number": 8,
+        "shared_context": "22-24為題組。閱讀下文，回答22-24題。\n\n綿州江水之東津，魴魚鱍鱍色勝銀。\n漁人漾舟沉大網，截江一擁數百鱗。\n眾魚常才盡卻棄，赤鯉騰出如有神。\n潛龍無聲老蛟怒，迴風颯颯吹沙塵。\n饔子左右揮霜刀，鱠飛金盤白雪高。\n徐州禿尾不足憶，漢陰槎頭遠遁逃。\n魴魚肥美知第一，既飽歡娛亦蕭瑟。\n君不見朝來割素鬐，咫尺波濤永相失。\n（杜甫〈觀打魚歌〉）\n\n（前八句）敘打魚事。魴魚味美，故漁人取之。眾魚、赤鯉、潛龍、老蛟，俱屬伴說。\n（後八句）復記魚鱠。鱠飛，言其薄；金盤，言其華；白雪高，言其潔且多；一句中含數義。禿尾、槎頭，亦屬伴說。\n\n盧注：此魚一經剖割，永與波濤相失，漁人能不見之而傷心乎？\n鍾云：數語可當一篇戒殺文。\n\n此詩從來誤會以魴為鱠，……今詳玩詩意，乃知作鱠者謂赤鯉，魴其陪襯也。\n前八句，敘打魚事，鱍鱍、數百，皆眾魚常才爾。赤鯉騰出，特筆以表之，乃是主句。\n後八句，志啖鱠事。鱠鯉堆盤，使人神旺，則凡禿尾、槎頭之類魴者，俱退舍矣。\n末再繳醒之，言魴魚固其美者，然當厭飫之餘，無復朵頤焉，況忍多戕物命乎？不見赤鯉就烹朝來之苦若是乎？",
+        "question_text": "下列關於甲詩的解讀，最適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "「色勝銀」、「數百鱗」凸顯魴魚帶來可觀的收入",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "「徐州」、「漢陰」襯托出「綿州」廚師的刀工佳",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "「既飽歡娛亦蕭瑟」指出口腹之慾滿足後終難免悵然",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "「咫尺波濤永相失」感嘆竭澤而漁將造成長遠的損失",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "23",
+        "page_number": 8,
+        "shared_context": "22-24為題組。閱讀下文，回答22-24題。\n\n綿州江水之東津，魴魚鱍鱍色勝銀。\n漁人漾舟沉大網，截江一擁數百鱗。\n眾魚常才盡卻棄，赤鯉騰出如有神。\n潛龍無聲老蛟怒，迴風颯颯吹沙塵。\n饔子左右揮霜刀，鱠飛金盤白雪高。\n徐州禿尾不足憶，漢陰槎頭遠遁逃。\n魴魚肥美知第一，既飽歡娛亦蕭瑟。\n君不見朝來割素鬐，咫尺波濤永相失。\n（杜甫〈觀打魚歌〉）\n\n（前八句）敘打魚事。魴魚味美，故漁人取之。眾魚、赤鯉、潛龍、老蛟，俱屬伴說。\n（後八句）復記魚鱠。鱠飛，言其薄；金盤，言其華；白雪高，言其潔且多；一句中含數義。禿尾、槎頭，亦屬伴說。\n\n盧注：此魚一經剖割，永與波濤相失，漁人能不見之而傷心乎？\n鍾云：數語可當一篇戒殺文。\n\n此詩從來誤會以魴為鱠，……今詳玩詩意，乃知作鱠者謂赤鯉，魴其陪襯也。\n前八句，敘打魚事，鱍鱍、數百，皆眾魚常才爾。赤鯉騰出，特筆以表之，乃是主句。\n後八句，志啖鱠事。鱠鯉堆盤，使人神旺，則凡禿尾、槎頭之類魴者，俱退舍矣。\n末再繳醒之，言魴魚固其美者，然當厭飫之餘，無復朵頤焉，況忍多戕物命乎？不見赤鯉就烹朝來之苦若是乎？",
+        "question_text": "依據丙解，許多人解讀甲詩時所產生的誤解，主要是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "誤以為名貴魴魚最適合做魚鱠",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "不知鯉魚才是金盤魚鱠主角",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "不了解赤鯉經烹煮之後會變苦",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "錯認禿尾、槎頭與魴魚同類",
+                "image_paths": []
+            }
+        ],
+        "answer": "B",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "24",
+        "page_number": 8,
+        "shared_context": "22-24為題組。閱讀下文，回答22-24題。\n\n綿州江水之東津，魴魚鱍鱍色勝銀。\n漁人漾舟沉大網，截江一擁數百鱗。\n眾魚常才盡卻棄，赤鯉騰出如有神。\n潛龍無聲老蛟怒，迴風颯颯吹沙塵。\n饔子左右揮霜刀，鱠飛金盤白雪高。\n徐州禿尾不足憶，漢陰槎頭遠遁逃。\n魴魚肥美知第一，既飽歡娛亦蕭瑟。\n君不見朝來割素鬐，咫尺波濤永相失。\n（杜甫〈觀打魚歌〉）\n\n（前八句）敘打魚事。魴魚味美，故漁人取之。眾魚、赤鯉、潛龍、老蛟，俱屬伴說。\n（後八句）復記魚鱠。鱠飛，言其薄；金盤，言其華；白雪高，言其潔且多；一句中含數義。禿尾、槎頭，亦屬伴說。\n\n盧注：此魚一經剖割，永與波濤相失，漁人能不見之而傷心乎？\n鍾云：數語可當一篇戒殺文。\n\n此詩從來誤會以魴為鱠，……今詳玩詩意，乃知作鱠者謂赤鯉，魴其陪襯也。\n前八句，敘打魚事，鱍鱍、數百，皆眾魚常才爾。赤鯉騰出，特筆以表之，乃是主句。\n後八句，志啖鱠事。鱠鯉堆盤，使人神旺，則凡禿尾、槎頭之類魴者，俱退舍矣。\n末再繳醒之，言魴魚固其美者，然當厭飫之餘，無復朵頤焉，況忍多戕物命乎？不見赤鯉就烹朝來之苦若是乎？",
+        "question_text": "對於甲詩的詮釋，乙注、丙解說明相同的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "「禿尾」、「槎頭」皆意在陪襯魴魚",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "「白雪高」、「堆盤」凸顯魚鱠味美",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "魴魚之滋味鮮美，可供製作佳餚美饌",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "不忍戕物，諷諫主政者不可魚肉百姓",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "25",
+        "page_number": 8,
+        "question_text": "下列各組「」內的詞，意義前後相同的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "昔者，仲尼「與」於蜡賓／夫子喟然嘆曰，吾「與」點也",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "今歲春雪甚盛，梅花「為」寒所勒／不者，若屬皆且「為」所虜",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "以其無禮於晉，且貳「於」楚也／此非孟德之困「於」周郎者乎",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "問今是何世，「乃」不知有漢／「乃」知真人之興也，非英雄所冀",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "臣聞吏議逐客，「竊」以為過矣／「竊」慕管夫人之墨竹，紙上生風",
+                "image_paths": []
+            }
+        ],
+        "answer": "BE",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "26",
+        "page_number": 9,
+        "question_text": "下列文句畫底線的詞語，運用適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "自古以來，官商沆瀣一氣，貪贓枉法之事層出不窮",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "談判桌上務必謹言慎行，以免授人以柄而遭受意外損失",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "老張一再競標失利，老闆裁示將他調離現職，不次拔擢",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "籃球校隊屢嘗敗績，今年秣馬厲兵，誓言贏下比賽，一雪前恥",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "王經理發現錯誤後，立即調整方向，曲突徙薪，有效解決問題",
+                "image_paths": []
+            }
+        ],
+        "answer": "ABD",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "27",
+        "page_number": 9,
+        "question_text": "關於下文的寫作特色，分析適當的是：\n次日晨起，復至峽，觀香爐紫烟，心動。僧曰：「至黃巖之文殊塔，瀑勢乃極。」杖而往，磴狹且多折，芒草割人面。少進，石愈嶔。白日蒸厓，如行熱冶中，微聞諸客皆有嗟嘆聲。既至半，力皆憊，遊者昏昏愁墮，一客眩思返。余曰：「戀軀惜命，何用遊山？且而與其死於床笫，孰若死於一片冷石也？」客大笑，勇百倍。頃之，躋其巔，入黃巖寺。少定，折而至前嶺，席文殊塔觀瀑。瀑注青壁下，雷奔海立，孤搴萬仞，峽風逆之，簾捲而上，忽焉橫曳，東披西帶。（袁宏道〈開先寺至黃巖寺觀瀑記〉）",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "藉「割」、「蒸」二字所引發的身體痛感，呈現攀爬時的艱辛",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "在敘事寫景中插入對話，藉提問反映忘身以遂其志的生命態度",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "對比客的退縮與作者的豪情，諷刺人以好遊為名而實不能涉險",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "運用動詞的連續切換，捕捉瀑布在峽風作用之下瞬息多變的姿態",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "以宗教空間的轉換為寫景主線，景隨步移，營造山林幽寂的禪意",
+                "image_paths": []
+            }
+        ],
+        "answer": "ABD",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "28",
+        "page_number": 9,
+        "question_text": "文學除了以視覺接收，也會以聽覺感受。關於文學的聲音表現，敘述適當的是：",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                450,
+                830,
+                600,
+                900
+            ]
+        ],
+        "options": [
+            {
+                "key": "A",
+                "value": "元代雜劇中註明曲牌的文字可合樂而歌，穿插其間的口白不用押韻",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "詞在宋代可合樂而歌，僅注重押韻；後世轉以誦讀為主，才講求平仄",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "四言詩音節多為「二/二」，如「蒹葭/蒼蒼，白露/為霜」；五言詩音節多為「二/三」，如「飄飄/何所似，天地/一沙鷗」",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "駢文雖以誦讀為主，但注重平仄相諧，如張李德和〈畫菊自序〉「人為萬物之靈，志有萬端之異」，前後句的二、四、六字平仄相對",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "新月派的新詩講求韻律，有時會押「行內韻」─即一句內有兩個同韻字，如徐志摩〈再別康橋〉「是夕陽中的新娘」、「夏蟲也為我沉默」",
+                "image_paths": []
+            }
+        ],
+        "answer": "ACDE",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q28_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "29",
+        "page_number": 9,
+        "question_text": "關於樂曲的彈奏與聆聽，符合下文敘述的是：\n甲、孔子學鼓琴於師襄子而不進。師襄子曰：「夫子可以進矣！」孔子曰：「丘已得其曲矣，未得其數也。」有間，曰：「夫子可以進矣！」曰：「丘已得其數矣，未得其意也。」有間，復曰：「夫子可以進矣！」曰：「丘已得其人矣，未得其類也。」有間，曰：「……必作此樂也，默然思，戚然而悵，以王天下，以朝諸侯者，其惟文王乎？」師襄子避席再拜曰：「善！師以為文王之操也。」（《韓詩外傳》）\n乙、孔子鼓瑟，曾子、子貢側門而聽。曲終，曾子曰：「嗟乎！夫子瑟聲殆有貪狼之志，邪僻之行，何其不仁，趨利之甚。」子貢以為然，……以曾子之言告。子曰：「……丘鼓瑟，有鼠出游，狸見於屋，循梁微行，造焉而避，厭目曲脊，求而不得，丘以瑟淫其音，參以丘為貪狼邪僻，不亦宜乎！」（《韓詩外傳》）",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "聆聽者常將個人意念投射於樂曲，如子貢善經商，遂覺曲中有趨利之心",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "聆聽者的體悟往往超出創作者原意，如孔子認為師襄子因詠文王而作曲",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "聆聽者對樂曲的細究，可使體悟由技巧轉入意境，如孔子持續探索師襄子的樂曲",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "彈奏者通常樂意聆聽者成為知音，如師襄子讚許孔子之見，孔子接受曾子的評論",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "彈奏者心思可能自樂曲流露，如師襄子聽出孔子上進之心，曾子聽出孔子貪狼之志",
+                "image_paths": []
+            }
+        ],
+        "answer": "CD",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "30",
+        "page_number": 10,
+        "shared_context": "30-31為題組。閱讀下文，回答30-31題。\n\n（甲）表，下言於上，故須先曰「臣某言」，後曰「臣某誠惶誠恐，稽首頓首」。\n\n（乙）今南方已定，兵甲已足，當獎率三軍，北定中原。庶竭駑鈍，攘除姦凶，興復漢室，還於舊都，此臣所以報先帝而忠陛下之職分也。至於斟酌損益，進盡忠言，則攸之、禕、允之任也。願陛下託臣以討賊興復之效，不效，則治臣之罪，以告先帝之靈。若無興德之言，則責攸之、禕、允等之慢，以彰其咎。陛下亦宜自課，以諮諏善道，察納雅言，深追先帝遺詔，臣不勝受恩感激。今當遠離，臨表涕泣，不知所云。（諸葛亮〈出師表〉）\n\n〈出師表〉違異了「表」的典型特質。全篇始於「臣亮言」，但這位說話的「臣」受劉備遺命：「若嗣子可輔，輔之，如其不才，君可自取」，其實具有廢立的權柄。文中十三次提及「先帝」，使「陛下」成了虛位，故「討賊興復之效」乃陛下「託」臣而非「命」臣。又此表也不以「誠惶誠恐，稽首頓首」結束，而是頗具生離死別意味的真情流露：「今當遠離，臨表涕泣，不知所云」，是以格外感人。（改寫自柯慶明〈「表」、「奏」作為文學類型之美感特質的研究〉）\n\n（丙）陛下即祚，復蒙試用，遂受上將之任，統領二州，內參機事，實所不堪。……臣以區區之質，而當鐘鼎之任；以闇鈍之才，而奉明明之政。顧恩念責，亦臣竭節授命之秋也。謹條遵奉舊訓權時之宜十四事，奏如左，庶以蒸螢增明太陽，言不足採。（曹操〈陳損益表〉）\n東漢建安元年，曹操迎漢獻帝至許都，受封司空，進呈此表。",
+        "question_text": "「表」是古代官員進言的媒介，自信與謙敬的聲音常並存表中。關於乙、丙文的敘述，適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "乙文推薦後起新秀擔當內政，並表示若識人不明願受責罰",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "丙文勇於指出囿於舊訓之十四事應及時揚棄，以重振朝綱",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "二文均感恩國君禮遇舊臣，在國家需要用人之時賦予重任",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "二文均謙稱自己能力有限，但願意在當前時局中承擔使命",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "二文均期許自己為朝廷效力，並盼國君充分授權以為後盾",
+                "image_paths": []
+            }
+        ],
+        "answer": "CD",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "31",
+        "page_number": 10,
+        "shared_context": "30-31為題組。閱讀下文，回答30-31題。\n\n（甲）表，下言於上，故須先曰「臣某言」，後曰「臣某誠惶誠恐，稽首頓首」。\n\n（乙）今南方已定，兵甲已足，當獎率三軍，北定中原。庶竭駑鈍，攘除姦凶，興復漢室，還於舊都，此臣所以報先帝而忠陛下之職分也。至於斟酌損益，進盡忠言，則攸之、禕、允之任也。願陛下託臣以討賊興復之效，不效，則治臣之罪，以告先帝之靈。若無興德之言，則責攸之、禕、允等之慢，以彰其咎。陛下亦宜自課，以諮諏善道，察納雅言，深追先帝遺詔，臣不勝受恩感激。今當遠離，臨表涕泣，不知所云。（諸葛亮〈出師表〉）\n\n〈出師表〉違異了「表」的典型特質。全篇始於「臣亮言」，但這位說話的「臣」受劉備遺命：「若嗣子可輔，輔之，如其不才，君可自取」，其實具有廢立的權柄。文中十三次提及「先帝」，使「陛下」成了虛位，故「討賊興復之效」乃陛下「託」臣而非「命」臣。又此表也不以「誠惶誠恐，稽首頓首」結束，而是頗具生離死別意味的真情流露：「今當遠離，臨表涕泣，不知所云」，是以格外感人。（改寫自柯慶明〈「表」、「奏」作為文學類型之美感特質的研究〉）\n\n（丙）陛下即祚，復蒙試用，遂受上將之任，統領二州，內參機事，實所不堪。……臣以區區之質，而當鐘鼎之任；以闇鈍之才，而奉明明之政。顧恩念責，亦臣竭節授命之秋也。謹條遵奉舊訓權時之宜十四事，奏如左，庶以蒸螢增明太陽，言不足採。（曹操〈陳損益表〉）\n東漢建安元年，曹操迎漢獻帝至許都，受封司空，進呈此表。",
+        "question_text": "甲文運用文體知識，深入解讀乙文表層文字下的聲音，若循此方式觀察丙文，關於乙、丙文違異「表」的典型特質，敘述適當的是：",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "A",
+                "value": "乙文屢言「先帝」，使「下言於上」的「上」並非唯一，以重申其輔政重任",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "乙文以「臨表涕泣」取代表的常用套語，使老臣的稟告增添了父執輩的溫度",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "丙文以「不堪」表達對數項要職難以抉擇的猶豫，也暗示朝廷全仰賴其支撐",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "丙文以「蒸螢」對比「太陽」，暗諷國君之智遠不如己，流露恃才傲物的性格",
+                "image_paths": []
+            },
+            {
+                "key": "E",
+                "value": "二文的進言口吻，雖減省部分常見的應酬詞語，但仍符合身為臣下應有的態度",
+                "image_paths": []
+            }
+        ],
+        "answer": "ABE",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國語文綜合能力測驗",
+        "sub_subject": "國文",
+        "question_number": "32",
+        "page_number": 11,
+        "shared_context": "32-36 為題組。閱讀下文，回答32-36 題。\n\n【聽見她的聲音】\n在文學與歷史的敘事中，女性的聲音長期被忽略、壓抑或誤讀……\n「聽見她的聲音」，不僅是在文本中發掘女性話語的紀錄，更在於理解女性能否主動發聲，或如何被表達、被建構。\n\n【歸有光】\n我認為：三代王教修明，內外順治，「閨門之事皆可歌詠而傳道之」。所述雖「婦人女子之常，而事之至微者」，但「幽閑貞靜之德，隱然寓於其間，而足以章明王者之化」。可惜的是，此後女子在史傳作者眼中，必有「非平常之行」，乃能「著美名」於後世，導致女性「罕可紀述」，幾近銷聲匿跡。\n\n【甲】\n下列三段節錄文字，都出自歸有光的作品：\n〈項脊軒志〉：一日，大母過余曰：「吾兒，久不見若影，何竟日默默在此，大類女郎也？」比去，以手闔門，自語曰：「吾家讀書久不效，兒之成，則可待乎？」頃之，持一象笏至，曰：「此吾祖太常公宣德間執此以朝，他日汝當用之。」\n〈先妣事略〉：有光七歲，與從兄有嘉入學。每陰風細雨，從兄輒留，有光意戀戀，不得留也。孺人中夜覺寢，促有光暗誦《孝經》，即熟讀，無一字齟齬，乃喜。\n〈祭外姑文〉：昔吾亡妻，能孝於吾父母，友於吾女兄弟，知夫人(按：即外姑，指妻子的母親)之能教也；粗食之養，未嘗不甘，知夫人之儉也。",
+        "question_text": "歸有光的抒情散文中，有意識地留存了家族女性的聲音，而成為其特色，請回答下列問題：\n（1）依據甲文所引三段文字，文中的「大母」、「孺人」、「夫人」對自己角色所擔負責任的認知，共通點是什麼？（占2分，作答字數：10字以內。）\n（2）當代學者指出歸有光書寫女性，取材固然與後世史傳不同，但也有其所本。請依據上述的「我認為……」，說明：\n① 他的取材有別於後世史傳的內容是什麼？\n② 他的特定標準是什麼？（占4分，作答字數：①、②各15字以內。）",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                150,
+                370,
+                250,
+                500
+            ],
+            [
+                260,
+                790,
+                360,
+                890
+            ]
+        ],
+        "options": [],
+        "answer": "",
+        "image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q32_Gap_0_1784320723447.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/Q32_Gap_1_1784320723504.png"
+        ],
+        "question_type": "簡答題",
+        "scoring_criteria": "第32題 一、滿分參考答案： (1) 教育栽培子孫。 (2) ①取材女子日常生活的平凡小事。 ②幽閑貞靜之德，能章明王者教化。 二、評分原則： 第32題 (1) 評分原則 給分 能正確寫出參考答案之文句 2分 未作答或答案完全錯誤 0分 第32題 (2) ① 評分原則 給分 能正確寫出參考答案之文句 2分 未作答或答案完全錯誤 0分\n(續前頁)\n第32題(2)② 評分原則：能正確寫出參考答案之文句給2分，未作答或答案完全錯誤給0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "rubric_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Rubric_32_p0_0_1784320532676.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/Rubric_32_p1_0_1784320532776.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "32(1)",
+        "page_number": 11,
+        "shared_context": "32-36 為題組。閱讀下文，回答32-36 題。\n\n[甲文]\n歸有光\n我認為：三代王教修明，內外順治，「閨門之事皆可歌詠而傳道之」。所述雖「婦人女子之常，而事之至微者」，但「幽閑貞靜之德，隱然寓於其間，而足以章明王者之化」。可惜的是，此後女子在史傳作者眼中，必有「非平常之行」，乃能「著美名」於後世，導致女性「罕可紀述」，幾近銷聲匿跡。\n下列三段節錄文字，都出自歸有光的作品：\n〈項脊軒志〉：一日，大母過余曰：「吾兒，久不見若影，何竟日默默在此，大類女郎也？」比去，以手闔門，自語曰：「吾家讀書久不效，兒之成，則可待乎？」頃之，持一象笏至，曰：「此吾祖太常公宣德間執此以朝，他日汝當用之。」\n〈先妣事略〉：有光七歲，與從兄有嘉入學。每陰風細雨，從兄輒留，有光意戀戀，不得留也。孺人中夜覺寢，促有光暗誦《孝經》，即熟讀，無一字齟齬，乃喜。\n〈祭外姑文〉：昔吾亡妻，能孝於吾父母，友於吾女兄弟，知夫人(按：即外姑，指妻子的母親)之能教也；粗食之養，未嘗不甘，知夫人之儉也。",
+        "question_text": "依據甲文所引三段文字，文中的「大母」、「孺人」、「夫人」對自己角色所擔負責任的認知，共通點是什麼？（占2分，作答字數：10字以內。）",
+        "has_image": false,
+        "options": [],
+        "answer": "教育栽培子孫。",
+        "question_type": "簡答題",
+        "scoring_criteria": "能正確寫出參考答案之文句得2分，未作答或答案完全錯誤得0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "image_bboxes": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "32(2)",
+        "page_number": 11,
+        "shared_context": "32-36 為題組。閱讀下文，回答32-36 題。\n\n[甲文]\n歸有光\n我認為：三代王教修明，內外順治，「閨門之事皆可歌詠而傳道之」。所述雖「婦人女子之常，而事之至微者」，但「幽閑貞靜之德，隱然寓於其間，而足以章明王者之化」。可惜的是，此後女子在史傳作者眼中，必有「非平常之行」，乃能「著美名」於後世，導致女性「罕可紀述」，幾近銷聲匿跡。\n下列三段節錄文字，都出自歸有光的作品：\n〈項脊軒志〉：一日，大母過余曰：「吾兒，久不見若影，何竟日默默在此，大類女郎也？」比去，以手闔門，自語曰：「吾家讀書久不效，兒之成，則可待乎？」頃之，持一象笏至，曰：「此吾祖太常公宣德間執此以朝，他日汝當用之。」\n〈先妣事略〉：有光七歲，與從兄有嘉入學。每陰風細雨，從兄輒留，有光意戀戀，不得留也。孺人中夜覺寢，促有光暗誦《孝經》，即熟讀，無一字齟齬，乃喜。\n〈祭外姑文〉：昔吾亡妻，能孝於吾父母，友於吾女兄弟，知夫人(按：即外姑，指妻子的母親)之能教也；粗食之養，未嘗不甘，知夫人之儉也。",
+        "question_text": "當代學者指出歸有光書寫女性，取材固然與後世史傳不同，但也有其所本。請依據上述的「我認為……」，說明：①他的取材有別於後世史傳的內容是什麼？ ②他的特定標準是什麼？（占4分，作答字數：①、②各15字以內。）",
+        "has_image": false,
+        "options": [],
+        "answer": "①取材女子日常生活的平凡小事。②幽閑貞靜之德，能章明王者教化。",
+        "question_type": "簡答題",
+        "scoring_criteria": "①能正確寫出參考答案之文句得2分，未作答或答案完全錯誤得0分。②能正確寫出參考答案之文句得2分，未作答或答案完全錯誤得0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "image_bboxes": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國語文綜合能力測驗",
+        "sub_subject": "國文",
+        "question_number": "33",
+        "page_number": 12,
+        "shared_context": "丙\\n以前生活比較艱苦，小孩又多，養不活，很多人只好把女兒送給人家做媳婦仔。我們也不例外，七個女兒中除了最大的和最小的，其餘那五個都曾經送給別人養。第六個女兒養到四、五歲時，屘嬸婆又來強要我們把女兒送給她親戚，一直說：「她會疼她啦！她只有兩個兒子而已！」我先生只好又把女兒抱給他們。那麼多個女兒都是他抱給人背走的，我都不忍心，把頭轉走，不敢看。這個女兒真的是「媳婦仔王」，因為他們沒有生女兒，所以很疼愛她。但後來要她「作新娘」，沒想到她還是不肯，實在對不住。因為她和養兄沒有感情，不願意和他結婚。她養母很生氣，但養父親自來家裡跟我們說：「她已經和一個男的在交往，人家也打算來訂親了。那個男的我去探聽過，聽說很乖啦！既然不能在一起，就不要勉強。不然，像我這樣，就一輩子不幸福了。」她養母也是小時候養大的，「作新娘」後，兩個感情並不好。（改寫自曾秋美訪問整理《消失中的台灣阿嬤‧將女兒送養的阿母——曾林阿珠》）",
+        "question_text": "乙、丙文中，都存在面對社會觀念、習俗的難題，請回答下列問題：\\n（1）乙文提到的「理所當然」，指的是什麼？（占2分，作答字數：15字以內。）\\n（2）丙文的受訪者知道六女兒對「作新娘」的想法後，①有何反應？②此反應背後的原因為何？（占4分，作答字數：合計40字以內。）",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "（1）略（需結合乙文閱讀）。\\n（2）①不忍心，把頭轉走，不敢看。②因為那麼多個女兒都是先生抱給人背走的，心中感到不捨與無奈。",
+        "question_type": "簡答題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "image_paths": [],
+        "scoring_criteria": "第33題 一、滿分參考答案：(1)長輩所主張的高壓控制方式。或：打罵碎念管束。(2)①覺得很抱歉；②基於習俗約定或養父母對她的疼愛，應該嫁卻不肯嫁，所以很抱歉。二、評分原則：第33題(1)能正確寫出參考答案之文句給2分，未作答或答案完全錯誤給0分。第33題(2)能寫出參考答案大意，且敘述完整給4分，答案敘述部分錯誤或不完整給2分，未作答或答案完全錯誤給0分。",
+        "rubric_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Rubric_33_p1_0_1784320532808.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "33(1)",
+        "page_number": 12,
+        "shared_context": "33-36 為題組。閱讀下文，回答33-36 題。\n\n[乙文]\n作為一位母親，如果不選擇「你無理取鬧，我不睬你」，也不以打罵碎唸管束，那麼她所碰上的難題不但超乎想像，要處理的委屈恐怕也成倍增長。如果長輩在旁，複雜度往往更高。想耐心等待哭泣的雲朵飄去，接納他表達情緒的自由時，就會被貼上「怎麼都不教小孩？」「不教以後他長大很難控制」的標籤。我練習克制脾氣，盡可能耐心走過他們哭泣、踢東西等情緒。有時得忍耐譴責，背對著理所當然的教養方式，爭取時間讓孩子認識自己的負面情緒。看看內心湧動出多少黑色河流，在高大濃密的黑森林裡，試著踏出一條日光照得到的路徑。（改寫自李欣倫〈水面下〉）\n\n[丙文]\n以前生活比較艱苦，小孩又多，養不活，很多人只好把女兒送給人家做媳婦仔。我們也不例外，七個女兒中除了最大的和最小的，其餘那五個都曾經送給別人養。第六個女兒養到四、五歲時，屘嬸婆又來強要我們把女兒送給她親戚，一直說：「她會疼她啦！她只有兩個兒子而已！」我先生只好又把女兒抱給他們。那麼多個女兒都是他抱給人背走的，我都不忍心，把頭轉走，不敢看。這個女兒真的是「媳婦仔王」，因為他們沒有生女兒，所以很疼愛她。但後來要她「作新娘」，沒想到她還是不肯，實在對不住。因為她和養兄沒有感情，不願意和他結婚。她養母很生氣，但養父親自來家裡跟我們說：「她已經和一個男的在交往，人家也打算來訂親了。那個男的我去探聽過，聽說很乖啦！既然不能在一起，就不要勉強。不然，像我這樣，就一輩子不幸福了。」她養母也是小時候養大的，「作新娘」後，兩個感情並不好。（改寫自曾秋美訪問整理《消失中的台灣阿嬤‧將女兒送養的阿母曾林阿珠》）",
+        "question_text": "乙文提到的「理所當然」，指的是什麼？（占2分，作答字數：15字以內。）",
+        "has_image": false,
+        "options": [],
+        "answer": "長輩所主張的高壓控制方式。或：打罵碎念管束。",
+        "question_type": "簡答題",
+        "scoring_criteria": "能正確寫出參考答案之文句得2分，未作答或答案完全錯誤得0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "image_bboxes": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "33(2)",
+        "page_number": 12,
+        "shared_context": "33-36 為題組。閱讀下文，回答33-36 題。\n\n[乙文]\n作為一位母親，如果不選擇「你無理取鬧，我不睬你」，也不以打罵碎唸管束，那麼她所碰上的難題不但超乎想像，要處理的委屈恐怕也成倍增長。如果長輩在旁，複雜度往往更高。想耐心等待哭泣的雲朵飄去，接納他表達情緒的自由時，就會被貼上「怎麼都不教小孩？」「不教以後他長大很難控制」的標籤。我練習克制脾氣，盡可能耐心走過他們哭泣、踢東西等情緒。有時得忍耐譴責，背對著理所當然的教養方式，爭取時間讓孩子認識自己的負面情緒。看看內心湧動出多少黑色河流，在高大濃密的黑森林裡，試著踏出一條日光照得到的路徑。（改寫自李欣倫〈水面下〉）\n\n[丙文]\n以前生活比較艱苦，小孩又多，養不活，很多人只好把女兒送給人家做媳婦仔。我們也不例外，七個女兒中除了最大的和最小的，其餘那五個都曾經送給別人養。第六個女兒養到四、五歲時，屘嬸婆又來強要我們把女兒送給她親戚，一直說：「她會疼她啦！她只有兩個兒子而已！」我先生只好又把女兒抱給他們。那麼多個女兒都是他抱給人背走的，我都不忍心，把頭轉走，不敢看。這個女兒真的是「媳婦仔王」，因為他們沒有生女兒，所以很疼愛她。但後來要她「作新娘」，沒想到她還是不肯，實在對不住。因為她和養兄沒有感情，不願意和他結婚。她養母很生氣，但養父親自來家裡跟我們說：「她已經和一個男的在交往，人家也打算來訂親了。那個男的我去探聽過，聽說很乖啦！既然不能在一起，就不要勉強。不然，像我這樣，就一輩子不幸福了。」她養母也是小時候養大的，「作新娘」後，兩個感情並不好。（改寫自曾秋美訪問整理《消失中的台灣阿嬤‧將女兒送養的阿母曾林阿珠》）",
+        "question_text": "丙文的受訪者知道六女兒對「作新娘」的想法後，①有何反應？②此反應背後的原因為何？（占4分，作答字數：合計40字以內。）",
+        "has_image": false,
+        "options": [],
+        "answer": "①覺得很抱歉；②基於習俗約定或養父母對她的疼愛，應該嫁卻不肯嫁，所以很抱歉。",
+        "question_type": "簡答題",
+        "scoring_criteria": "能寫出參考答案大意，且敘述完整得4分，答案敘述部分錯誤或不完整得2分，未作答或答案完全錯誤得0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "image_bboxes": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115年學測國語文綜合能力測驗",
+        "sub_subject": "國文",
+        "question_number": "34",
+        "page_number": 12,
+        "shared_context": "丙\\n以前生活比較艱苦，小孩又多，養不活，很多人只好把女兒送給人家做媳婦仔。我們也不例外，七個女兒中除了最大的和最小的，其餘那五個都曾經送給別人養。第六個女兒養到四、五歲時，屘嬸婆又來強要我們把女兒送給她親戚，一直說：「她會疼她啦！她只有兩個兒子而已！」我先生只好又把女兒抱給他們。那麼多個女兒都是他抱給人背走的，我都不忍心，把頭轉走，不敢看。這個女兒真的是「媳婦仔王」，因為他們沒有生女兒，所以很疼愛她。但後來要她「作新娘」，沒想到她還是不肯，實在對不住。因為她和養兄沒有感情，不願意和他結婚。她養母很生氣，但養父親自來家裡跟我們說：「她已經和一個男的在交往，人家也打算來訂親了。那個男的我去探聽過，聽說很乖啦！既然不能在一起，就不要勉強。不然，像我這樣，就一輩子不幸福了。」她養母也是小時候養大的，「作新娘」後，兩個感情並不好。（改寫自曾秋美訪問整理《消失中的台灣阿嬤‧將女兒送養的阿母——曾林阿珠》）",
+        "question_text": "乙文的「我」、丙文的「六女兒」皆因自我的覺醒，而以具體行動勇敢挑戰傳統觀念。請回答下列問題：\\n（1）乙文的「我」，基於何種考量，因此而採取了什麼行動？（占4分，作答字數：合計40字以內。）\\n（2）丙文的「六女兒」，基於何種認知，因此而採取了什麼行動？（占4分，作答字數：合計30字以內。）",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "（1）乙文的「我」：[依據乙文內容作答]\\n（2）丙文的「六女兒」：基於與養兄沒有感情的認知，採取了拒絕與其結婚（不肯作新娘），並與其他男子交往、訂親的行動。",
+        "question_type": "混合題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "image_paths": [],
+        "scoring_criteria": "第34題 一、滿分參考答案： (1) 基於讓孩子學習認識自己的負面情緒，耐心陪伴孩子。 或：基於讓小孩有表達情緒的自由，承受譴責，對抗長輩高壓控制的教養方式。 (2) 基於婚姻要有感情基礎，不接受「作新娘」的安排。 或：基於與養兄沒有感情，拒絕與養兄結婚。 二、評分原則： 第34題（1） 評分原則 給分 能寫出參考答案大意，且敘述完整 4分 答案敘述部分錯誤或不完整 2分 未作答或答案完全錯誤 0分 第34題（2） 評分原則 給分 能寫出參考答案大意，且敘述完整 4分 答案敘述部分錯誤或不完整 2分 未作答或答案完全錯誤 0分",
+        "rubric_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/Rubric_34_p2_0_1784320532911.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "34(1)",
+        "page_number": 12,
+        "shared_context": "33-36 為題組。閱讀下文，回答33-36 題。\n\n[乙文]\n作為一位母親，如果不選擇「你無理取鬧，我不睬你」，也不以打罵碎唸管束，那麼她所碰上的難題不但超乎想像，要處理的委屈恐怕也成倍增長。如果長輩在旁，複雜度往往更高。想耐心等待哭泣的雲朵飄去，接納他表達情緒的自由時，就會被貼上「怎麼都不教小孩？」「不教以後他長大很難控制」的標籤。我練習克制脾氣，盡可能耐心走過他們哭泣、踢東西等情緒。有時得忍耐譴責，背對著理所當然的教養方式，爭取時間讓孩子認識自己的負面情緒。看看內心湧動出多少黑色河流，在高大濃密的黑森林裡，試著踏出一條日光照得到的路徑。（改寫自李欣倫〈水面下〉）\n\n[丙文]\n以前生活比較艱苦，小孩又多，養不活，很多人只好把女兒送給人家做媳婦仔。我們也不例外，七個女兒中除了最大的和最小的，其餘那五個都曾經送給別人養。第六個女兒養到四、五歲時，屘嬸婆又來強要我們把女兒送給她親戚，一直說：「她會疼她啦！她只有兩個兒子而已！」我先生只好又把女兒抱給他們。那麼多個女兒都是他抱給人背走的，我都不忍心，把頭轉走，不敢看。這個女兒真的是「媳婦仔王」，因為他們沒有生女兒，所以很疼愛她。但後來要她「作新娘」，沒想到她還是不肯，實在對不住。因為她和養兄沒有感情，不願意和他結婚。她養母很生氣，但養父親自來家裡跟我們說：「她已經和一個男的在交往，人家也打算來訂親了。那個男的我去探聽過，聽說很乖啦！既然不能在一起，就不要勉強。不然，像我這樣，就一輩子不幸福了。」她養母也是小時候養大的，「作新娘」後，兩個感情並不好。（改寫自曾秋美訪問整理《消失中的台灣阿嬤‧將女兒送養的阿母曾林阿珠》）",
+        "question_text": "乙文的「我」，基於何種考量，因此而採取了什麼行動？（占4分，作答字數：合計40字以內。）",
+        "has_image": false,
+        "options": [],
+        "answer": "基於讓孩子學習認識自己的負面情緒，耐心陪伴孩子。或：基於讓小孩有表達情緒的自由，承受譴責，對抗長輩高壓控制的教養方式。",
+        "question_type": "簡答題",
+        "scoring_criteria": "能寫出參考答案大意，且敘述完整得4分，答案敘述部分錯誤或不完整得2分，未作答或答案完全錯誤得0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "image_bboxes": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "34(2)",
+        "page_number": 12,
+        "shared_context": "33-36 為題組。閱讀下文，回答33-36 題。\n\n[乙文]\n作為一位母親，如果不選擇「你無理取鬧，我不睬你」，也不以打罵碎唸管束，那麼她所碰上的難題不但超乎想像，要處理的委屈恐怕也成倍增長。如果長輩在旁，複雜度往往更高。想耐心等待哭泣的雲朵飄去，接納他表達情緒的自由時，就會被貼上「怎麼都不教小孩？」「不教以後他長大很難控制」的標籤。我練習克制脾氣，盡可能耐心走過他們哭泣、踢東西等情緒。有時得忍耐譴責，背對著理所當然的教養方式，爭取時間讓孩子認識自己的負面情緒。看看內心湧動出多少黑色河流，在高大濃密的黑森林裡，試著踏出一條日光照得到的路徑。（改寫自李欣倫〈水面下〉）\n\n[丙文]\n以前生活比較艱苦，小孩又多，養不活，很多人只好把女兒送給人家做媳婦仔。我們也不例外，七個女兒中除了最大的和最小的，其餘那五個都曾經送給別人養。第六個女兒養到四、五歲時，屘嬸婆又來強要我們把女兒送給她親戚，一直說：「她會疼她啦！她只有兩個兒子而已！」我先生只好又把女兒抱給他們。那麼多個女兒都是他抱給人背走的，我都不忍心，把頭轉走，不敢看。這個女兒真的是「媳婦仔王」，因為他們沒有生女兒，所以很疼愛她。但後來要她「作新娘」，沒想到她還是不肯，實在對不住。因為她和養兄沒有感情，不願意和他結婚。她養母很生氣，但養父親自來家裡跟我們說：「她已經和一個男的在交往，人家也打算來訂親了。那個男的我去探聽過，聽說很乖啦！既然不能在一起，就不要勉強。不然，像我這樣，就一輩子不幸福了。」她養母也是小時候養大的，「作新娘」後，兩個感情並不好。（改寫自曾秋美訪問整理《消失中的台灣阿嬤‧將女兒送養的阿母曾林阿珠》）",
+        "question_text": "丙文的「六女兒」，基於何種認知，因此而採取了什麼行動？（占4分，作答字數：合計30字以內。）",
+        "has_image": false,
+        "options": [],
+        "answer": "基於婚姻要有感情基礎，不接受「作新娘」的安排。或：基於與養兄沒有感情，拒絕與養兄結婚。",
+        "question_type": "簡答題",
+        "scoring_criteria": "能寫出參考答案大意，且敘述完整得4分，答案敘述部分錯誤或不完整得2分，未作答或答案完全錯誤得0分。",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "image_bboxes": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "35",
+        "page_number": 12,
+        "question_text": "關於甲、乙、丙文所呈現的「她的聲音」，敘述最適當的是：",
+        "has_image": false,
+        "options": [
+            {
+                "key": "A",
+                "value": "甲文中敘寫三位女性親屬的聲音各有用意，如「持笏」即暗喻大母為家中掌權者",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "乙文是女性主動發聲，「黑色河流」、「黑森林」的比喻委婉傳達反抗傳統的不安",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "丙文記錄受訪者及其記憶中他人的聲音，敘事的時間跨度大，事件場景未必其親歷",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "三文皆呈現不同世代女性的聲音，代間隔閡雖不免形成對立，最終仍能找到平衡點",
+                "image_paths": []
+            }
+        ],
+        "answer": "C",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "115學測",
+        "exam_source": "115學測國文",
+        "sub_subject": "國文",
+        "question_number": "36",
+        "page_number": 12,
+        "question_text": "依據本題組所有資料，下列關於「她的聲音」被「聽見」的推論是否正確，最適當的研判是：\n①舊時代的女性常因社會限制而受到忽略，人們甚至視靜默不出聲為女性的特質。\n②教育普及促使當代關注女性的聲音，女性的自我敘說往往比受訪紀錄更直擊人心。\n③看重非平常之行的史傳使女性聲音難以真實呈現，當代口述歷史則可呈現多元的聲音。",
+        "has_image": false,
+        "options": [
+            {
+                "key": "A",
+                "value": "①、③皆正確，②無法判斷",
+                "image_paths": []
+            },
+            {
+                "key": "B",
+                "value": "①、②皆無法判斷，③正確",
+                "image_paths": []
+            },
+            {
+                "key": "C",
+                "value": "①錯誤，②無法判斷，③正確",
+                "image_paths": []
+            },
+            {
+                "key": "D",
+                "value": "①正確，②錯誤，③無法判斷",
+                "image_paths": []
+            }
+        ],
+        "answer": "A",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png",
+        "question_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國綜試卷_題目.pdf",
+        "answer_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_01-115學測國語文綜合能力測驗答案_解答.pdf",
+        "rubric_pdf_path": "gsat_exam_papers_only/國文/115學年度學科能力測驗國綜_115學測國文考科國綜非選擇題參考答案與評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_03.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_04.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_05.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_06.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_07.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_08.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_09.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_10.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_11.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/q_full_page_12.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_01.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_02.png",
+            "./exam_database_output/學測/images/115學年度_學測_國文/rubric_full_page_03.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    }
+]

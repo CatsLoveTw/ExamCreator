@@ -1,0 +1,985 @@
+[
+    {
+        "academic_year": "114分科",
+        "exam_source": "114學年度分科測驗數學甲",
+        "sub_subject": "數學",
+        "question_number": "1",
+        "page_number": 2,
+        "question_text": "坐標平面上，函數 $y=\\sin x$ 的圖形對稱於 $x=\\frac{\\pi}{2}$。試選出在 $0 < \\theta \\le \\pi$ 的範圍中滿足 $\\sin \\theta = \\sin(\\theta + \\frac{\\pi}{5})$ 的 $\\theta$ 值。",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                240,
+                280,
+                420,
+                720
+            ]
+        ],
+        "options": [
+            {
+                "key": "1",
+                "value": "$\\frac{\\pi}{5}$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "$\\frac{2\\pi}{5}$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "$\\frac{3\\pi}{5}$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "$\\frac{4\\pi}{5}$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "$\\pi$",
+                "image_paths": []
+            }
+        ],
+        "answer": "2",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Q1_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114學年度分科測驗數學甲",
+        "sub_subject": "數學",
+        "question_number": "2",
+        "page_number": 2,
+        "question_text": "空間中一正立方體 $ABCD-EFGH$，其中頂點 $A$、$B$、$C$、$D$ 在同一個平面上，且 $\\overline{AE}$ 為其中一個邊。試選出與平面 $BGH$ 以及平面 $CFE$ 皆垂直的平面。",
+        "has_image": true,
+        "image_bboxes": [
+            [
+                530,
+                480,
+                730,
+                680
+            ]
+        ],
+        "options": [
+            {
+                "key": "1",
+                "value": "平面 $ADH$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "平面 $BCD$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "平面 $CDG$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "平面 $DFG$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "平面 $DFH$",
+                "image_paths": []
+            }
+        ],
+        "answer": "1",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Q2_1.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114學年度分科測驗數學甲",
+        "sub_subject": "數學",
+        "question_number": "3",
+        "page_number": 2,
+        "question_text": "《幾何原本》上說：「給定相異兩點可決定一條直線」。一般來說，相異三點可決定 $C_2^3=3$ 條直線；但若這三點共線，此時僅決定一條直線。坐標平面上，已知圓 $\\Gamma_1: x^2+y^2=4$ 與兩坐標軸交於 4 點、圓 $\\Gamma_2: x^2+y^2=2$ 與直線 $x-y=0$ 交於 2 點、圓 $\\Gamma_2$ 與直線 $x+y=0$ 交於 2 點。試問這 8 點共可決定幾條不同的直線？",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "12",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "16",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "20",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "24",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "28",
+                "image_paths": []
+            }
+        ],
+        "answer": "3",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114分科數學甲",
+        "sub_subject": "數學",
+        "question_number": "4",
+        "page_number": 3,
+        "question_text": "試從下列坐標平面上的二次曲線中，選出與所有的鉛直線都相交的選項。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "$\\frac{x^2}{9} + \\frac{y^2}{4} = 1$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "$\\frac{x^2}{9} - \\frac{y^2}{4} = 1$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "$-\\frac{x^2}{9} + \\frac{y^2}{4} = 1$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "$y = \\frac{4}{9}x^2$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "$x = \\frac{4}{9}y^2$",
+                "image_paths": []
+            }
+        ],
+        "answer": "3,4",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114分科數學甲",
+        "sub_subject": "數學",
+        "question_number": "5",
+        "page_number": 3,
+        "question_text": "有一實數數列 $\\langle a_n \\rangle$，其中 $a_n = \\cos(n\\pi - \\frac{\\pi}{6})$，$n$ 為正整數。試選出正確的選項。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "$a_1 = -\\frac{1}{2}$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "$a_2 = a_3$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "$a_4 = a_{24}$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "$\\langle a_n \\rangle$ 為收斂數列，且 $\\lim_{n \\to \\infty} a_n < 1$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "$\\sum_{n=1}^{\\infty} (a_n)^n = 3 - 2\\sqrt{3}$",
+                "image_paths": []
+            }
+        ],
+        "answer": "3,5",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114分科數學甲",
+        "sub_subject": "數學",
+        "question_number": "6",
+        "page_number": 4,
+        "question_text": "設指數函數 $f(x) = 1.2^x$。試選出正確的選項。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "$f(0) > 0$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "$f(10) > 10$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "坐標平面上，$y = 1.2^x$ 的圖形與直線 $y = x$ 相交",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "坐標平面上，$y = 1.2^x$ 與 $y = \\log_{1.2}(x)$ 的圖形對稱於直線 $y = x$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "對任意正實數 $b$，$\\log_{1.2} b \\neq 1.2^b$",
+                "image_paths": []
+            }
+        ],
+        "answer": "1,3",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114分科數學甲",
+        "sub_subject": "數學",
+        "question_number": "7",
+        "page_number": 4,
+        "question_text": "已知實係數多項式 $f(x)$ 的次數大於 5，且其最高次項係數為正。又 $f(x)$ 在 $x = 1, 2, 4$ 處有極小值，且在 $x = 3, 5$ 處有極大值。根據上述，試選出正確的選項。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "$f(1) < f(3)$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "存在實數 $a, b$ 滿足 $1 < a < b < 2$，使得 $f'(a) > 0$ 且 $f'(b) < 0$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "$f''(3) > 0$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "存在實數 $c > 5$，使得 $f'(c) > 0$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "$f(x)$ 的次數大於 7",
+                "image_paths": []
+            }
+        ],
+        "answer": "2,4,5",
+        "question_type": "多選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "8",
+        "page_number": 5,
+        "question_text": "設複數 $z$ 的虛部不為 $0$ 且 $|z|=2$。已知在複數平面上，$1$、$z$、$z^3$ 共線。試選出正確的選項。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "$z \\cdot \\bar{z} = 2$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "$\\frac{z^3 - z}{z - 1}$ 的虛部為 $0$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "$z$ 的實部為 $-\\frac{1}{2}$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "$z$ 滿足 $z^2 - z + 4 = 0$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "在複數平面上，$-2$、$z$、$z^2$ 共線",
+                "image_paths": []
+            }
+        ],
+        "answer": "2",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "9",
+        "page_number": 5,
+        "question_text": "令 $A$ 為以原點為中心逆時針旋轉 $\\theta$ 角的旋轉矩陣，且令 $B$ 為以 $x$ 軸為鏡射軸（對稱軸）的鏡射矩陣。令 $A = \\begin{bmatrix} a_1 & a_2 \\\\ a_3 & a_4 \\end{bmatrix}$，$BA = \\begin{bmatrix} c_1 & c_2 \\\\ c_3 & c_4 \\end{bmatrix}$。已知 $a_1 + a_2 + a_3 + a_4 = 2(c_1 + c_2 + c_3 + c_4)$，則 $\\tan \\theta = [ 9-1 ][ 9-2 ]/[ 9-3 ]$。（化為最簡分數）",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "-,1,2",
+        "question_type": "選填題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "10",
+        "page_number": 5,
+        "question_text": "坐標空間中一平面與平面 $x=0$、平面 $z=0$ 分別交於直線 $L_1$、$L_2$。已知 $L_1$、$L_2$ 互相平行，且 $L_1$ 通過點 $(0, 2, -11)$、$L_2$ 通過點 $(8, 21, 0)$，則 $L_1$、$L_2$ 的距離為 $\\sqrt{[ 10-1 ][ 10-2 ][ 10-3 ]}$。（化為最簡根式）",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "1,8,5",
+        "question_type": "選填題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "11",
+        "page_number": 6,
+        "question_text": "坐標平面上有一平行四邊形 $\\Gamma$，其中兩邊所在的直線與 $5x-y=0$ 平行、另兩邊所在的直線與 $3x-2y=0$ 垂直。令 $\\Gamma$ 的兩對角線交點為 $Q$。已知 $\\Gamma$ 有一頂點 $P$，滿足 $\\vec{PQ}=(10, -1)$，則 $\\Gamma$ 的面積為 $[ 11-1 ][ 11-2 ][ 11-3 ]$。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "2,0,4",
+        "question_type": "選填題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114年分科測驗數學甲",
+        "sub_subject": "數學",
+        "question_number": "11-2",
+        "page_number": 6,
+        "shared_context": "",
+        "question_text": "坐標平面上有一平行四邊形 $\\Gamma$，其中兩邊所在的直線與 $5x-y=0$ 平行、另兩邊所在的直線與 $3x-2y=0$ 垂直。令 $\\Gamma$ 的兩對角線交點為 $Q$。已知 $\\Gamma$ 有一頂點 $P$，滿足 $\\overrightarrow{PQ}=(10,-1)$，則 $\\Gamma$ 的面積為 [11-1][11-2][11-3]。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "0",
+        "image_paths": [],
+        "question_type": "選填題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "_length_mismatch": true,
+        "_expected_blank_count": 3,
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "12",
+        "page_number": 6,
+        "shared_context": "12-14 題為題組\n某商店以抽獎方式販售一熱門公仔，每次抽獎都互相獨立且抽中的機率為 $\\frac{2}{5}$。\n參加者可用以下兩種方式參加抽獎。\n方式一：先付 225 元得到兩次抽獎機會，只要抽中即停止抽獎且得到一個公仔；若這兩次皆未抽中，則必須再多付 75 元得到一個公仔。\n方式二：抽獎次數不限，每抽獎一次付 100 元。\n根據上述，試回答下列問題。",
+        "question_text": "若以方式一抽獎，則共需付 300 元才能得到一個公仔的機率為何？",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [
+            {
+                "key": "1",
+                "value": "$(\\frac{2}{5})^2$",
+                "image_paths": []
+            },
+            {
+                "key": "2",
+                "value": "$(\\frac{2}{5})^3$",
+                "image_paths": []
+            },
+            {
+                "key": "3",
+                "value": "$(\\frac{3}{5})^2$",
+                "image_paths": []
+            },
+            {
+                "key": "4",
+                "value": "$(\\frac{3}{5})^3$",
+                "image_paths": []
+            },
+            {
+                "key": "5",
+                "value": "$(\\frac{2}{5}) \\times (\\frac{3}{5})^2$",
+                "image_paths": []
+            }
+        ],
+        "answer": "3",
+        "question_type": "單選題",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "13",
+        "page_number": 6,
+        "shared_context": "12-14 題為題組\n某商店以抽獎方式販售一熱門公仔，每次抽獎都互相獨立且抽中的機率為 $\\frac{2}{5}$。\n參加者可用以下兩種方式參加抽獎。\n方式一：先付 225 元得到兩次抽獎機會，只要抽中即停止抽獎且得到一個公仔；若這兩次皆未抽中，則必須再多付 75 元得到一個公仔。\n方式二：抽獎次數不限，每抽獎一次付 100 元。\n根據上述，試回答下列問題。",
+        "question_text": "若以方式二抽獎直到抽中一個公仔為止，試依期望值定義，使用 $\\sum$ 符號表示所需抽獎次數的期望值，並求其值。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "5/2",
+        "question_type": "簡答題",
+        "scoring_criteria": "第 13 題 一、滿分參考答案：次數的期望值為 Σ_{k=1}^{∞} k * (3/5)^{k-1} * (2/5) (或 lim_{n→∞} Σ_{k=1}^{n} k * (3/5)^{k-1} * (2/5))。此為 p=2/5 的幾何分布，故次數的期望值為 1/p = 5/2。 二、評分原則：滿分：以下兩項均正確 1. 根據題意所給條件，得出次數的期望值為 Σ_{k=1}^{∞} k * (3/5)^{k-1} * (2/5)，且過程正確。 2. 根據題目所給條件，說明此為 p=2/5 的幾何分布，故得次數的期望值為 1/p = 5/2。",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "rubric_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Rubric_13_p0_0_1784319032454.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "14",
+        "page_number": 6,
+        "shared_context": "12-14 題為題組\n某商店以抽獎方式販售一熱門公仔，每次抽獎都互相獨立且抽中的機率為 $\\frac{2}{5}$。\n參加者可用以下兩種方式參加抽獎。\n方式一：先付 225 元得到兩次抽獎機會，只要抽中即停止抽獎且得到一個公仔；若這兩次皆未抽中，則必須再多付 75 元得到一個公仔。\n方式二：抽獎次數不限，每抽獎一次付 100 元。\n根據上述，試回答下列問題。",
+        "question_text": "假設花費金額不設限直到得到一個公仔為止，試分別求出這兩種抽獎方式得到一個公仔所需付金額的期望值，並說明這兩個期望值的大小關係。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "方式二較低",
+        "question_type": "簡答題",
+        "scoring_criteria": "第 14 題 一、滿分參考答案： 方式一：求出花費金額期望值為 300*(3/5)^2 + 225*(1-(3/5)^2) = 252 元 方式二：求出花費金額期望值為 100*5/2 = 250 元 推得方式二需花費金額的期望值較低。 二、評分原則： 滿分：以下三項均須正確 根據題目所給條件，且有計算過程得出方式一所花費金額期望值為 252 元； 根據題目所給條件，且有計算過程得出方式二所花費金額期望值為 250 元； 推得方式二需花費金額的期望值較低。 部分給分 1. 方式一、方式二金額期望值的解題過程正確，但未能正確回答兩個期望值的大小關係。 2. 方式一、方式二金額期望值的解題過程部分正確。 零分 未作答或未符合部分給分原則。",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "rubric_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Rubric_14_p1_0_1784319032558.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "15",
+        "page_number": 7,
+        "shared_context": "設實係數多項式函數 $f(x)=3ax^2+(1-a)$，其中 $-\\frac{1}{2} \\le a \\le 1$。在坐標平面上，令 $\\Gamma$ 為 $y=f(x)$ 與 $x$ 軸在 $-1 \\le x \\le 1$ 所圍的區域。根據上述，試回答下列問題。",
+        "question_text": "證明當 $-1 \\le x \\le 1$ 時，$f(x) \\ge 0$ 皆成立。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "證明題",
+        "question_type": "簡答題",
+        "scoring_criteria": "第 15 題 一、滿分參考答案： 法一： 若a=0，則f(x)=1≥0。 f'(x)=6ax，若a≠0，只有在x=0時，f(x)有極值。檢查f(0)=1-a≥0，以及兩端點 f(-1)=f(1)=1+2a≥0，故推得在-1≤x≤1，f(x)≥0均成立。 法二： 若a=0，則f(x)=1≥0。 若a≠0，則f(x)圖形為頂點在直線x=0上的拋物線。 當0<a≤1，拋物線開口朝上，f(x)在-1≤x≤1的最小值為f(0)=1-a≥0。 當-1/2≤a<0時，拋物線開口朝下，f(x)在-1≤x≤1的最小值為 f(-1)=f(1)=1+2a≥0，故推得在-1≤x≤1，f(x)≥0均成立。 法三： 當0≤a≤1，因為3ax^2≥0，所以3ax^2+(1-a)≥1-a≥0。 當-1/2≤a<0，因為3ax^2≥3a，所以3ax^2+(1-a)≥1+2a≥0。 故推得在-1≤x≤1，f(x)≥0均成立。 二、評分原則： 滿分：根據題意所給條件，證明當-1≤x≤1，f(x)≥0皆成立，且過程推論正確。 部分給分： 1. 利用法一、法二推論時，寫出f(0)=1-a≥0、f(1)=1+2a≥0、f(-1)=1+2a≥0，但未解釋為何僅需判斷這三個即可。 2. 分成0≤a≤1與-1/2≤a<0兩種情況討論，但僅證明其中一種情況。",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "rubric_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Rubric_15_p2_0_1784319032706.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "16",
+        "page_number": 7,
+        "shared_context": "設實係數多項式函數 $f(x)=3ax^2+(1-a)$，其中 $-\\frac{1}{2} \\le a \\le 1$。在坐標平面上，令 $\\Gamma$ 為 $y=f(x)$ 與 $x$ 軸在 $-1 \\le x \\le 1$ 所圍的區域。根據上述，試回答下列問題。",
+        "question_text": "證明對於所有 $a \\in [-\\frac{1}{2}, 1]$，$\\Gamma$ 的面積皆為 $2$。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "證明題",
+        "question_type": "簡答題",
+        "scoring_criteria": "第 16 題 一、滿分參考答案： ∫_{-1}^{1} (3ax^2 + 1 - a) dx = ax^3 + (1 - a)x |_{-1}^{1} = 2 。 二、評分原則： 滿分 根據題意所給條件，證明Γ的面積皆為 2，且解題過程正確。 零分 未作答或未達給分標準。",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "rubric_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Rubric_16_p3_0_1784319032873.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    },
+    {
+        "academic_year": "114分科",
+        "exam_source": "114數學甲",
+        "sub_subject": "數學",
+        "question_number": "17",
+        "page_number": 7,
+        "shared_context": "設實係數多項式函數 $f(x)=3ax^2+(1-a)$，其中 $-\\frac{1}{2} \\le a \\le 1$。在坐標平面上，令 $\\Gamma$ 為 $y=f(x)$ 與 $x$ 軸在 $-1 \\le x \\le 1$ 所圍的區域。根據上述，試回答下列問題。",
+        "question_text": "令 $V$ 為 $\\Gamma$ 繞 $x$ 軸旋轉所得旋轉體的體積。試問對所有 $a \\in [-\\frac{1}{2}, 1]$，$V$ 是否都相等？若相等，則求其值；若不相等，則當 $a$ 為多少時，$V$ 有最大值，並求此最大值。",
+        "has_image": false,
+        "image_bboxes": [],
+        "options": [],
+        "answer": "不相等，a=1時有最大值18/5π",
+        "question_type": "簡答題",
+        "scoring_criteria": "第 17 題 一、滿分參考答案： 旋轉體體積 V 為 ∫_{-1}^{1} π(3ax^2 + 1 - a)^2 dx = π(9a^2 x^5/5 + 2a(1 - a)x^3 + (1 - a)^2 x) |_{-1}^{1} = 8/5 πa^2 + 2π ，故 V 會隨 a 而改變，且在 a = 1 時有最大值 18/5 π 。 二、評分原則： 滿分 1. 正確列出旋轉體體積 V 為 ∫_{-1}^{1} π(3ax^2 + 1 - a)^2 dx 。 2. 正確求得旋轉體體積 V 為 8/5 πa^2 + 2π 。 3. 由 8/5 πa^2 + 2π 知 V 會隨 a 而改變，且在 a = 1 時有最大值 18/5 π 。",
+        "full_page_image_path": "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+        "question_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲試卷_題目.pdf",
+        "answer_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲選擇填題答案_解答.pdf",
+        "rubric_pdf_path": "ast_exam_papers_only/數學甲/114學年度分科測驗數學甲_01-114分科測驗數學甲考科非選擇題評分原則_解答.pdf",
+        "question_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_05.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_06.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_07.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/q_full_page_08.png"
+        ],
+        "answer_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/a_full_page_01.png"
+        ],
+        "rubric_page_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_01.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_02.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_03.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_04.png",
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/rubric_full_page_05.png"
+        ],
+        "image_paths": [],
+        "rubric_image_paths": [
+            "./exam_database_output/分科指考/images/114學年度_分科指考_數學甲/Rubric_17_p3_0_1784319032941.png"
+        ],
+        "detailed_solution": "\n\n> **⚠️ [系統提示]：此題在解析時引發系統內部執行緒崩潰。**\n\n錯誤訊息: Replacement index 0 out of range for positional args tuple"
+    }
+]
