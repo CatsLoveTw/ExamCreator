@@ -43,15 +43,18 @@ jobs:
 
       - name: Run parser script
         run: python catcher.py
+        
+
+      - name: Upload Key Status Dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemini-key-status
+          path: key_status.txt
+          retention-days: 14 
 
       - name: Commit and Push changes
-        # 產出新的 JSON 或圖片 / 自動提交並 push 回 Repo
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # 將產出的資料庫與更新後的 subject.json 加入暫存區
           git add exam_database_output/ subject.json key_errors_summary.txt || true
-          
-          # 檢查是否有實際變更，若有則進行 commit & push
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update exam database [skip ci]" && git push)
