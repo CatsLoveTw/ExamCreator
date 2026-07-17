@@ -1,0 +1,57 @@
+name: Run Exam Parser Catcher
+
+on:
+  schedule:
+    # 每天 07:00 與 19:00 各執行一次（15:00 / 03:00）
+    - cron: '0 7,19 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      # 當這些資料夾有新的 PDF 被 push 時，自動觸發解析
+      - 'ast_exam_papers_only/**'
+      - 'gsat_exam_papers_only/**'
+  workflow_dispatch: # 手動強制執行
+
+jobs:
+  run-parser:
+    runs-on: ubuntu-latest
+    # 給予 Actions 寫入 Repo 的權限，for push :)
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create key.txt from Secrets
+        run: |
+          echo "${{ secrets.GEMINI_API_KEYS }}" > key.txt
+
+      - name: Run parser script
+        run: python catcher.py
+
+      - name: Commit and Push changes
+        # 產出新的 JSON 或圖片 / 自動提交並 push 回 Repo
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # 將產出的資料庫與更新後的 subject.json 加入暫存區
+          git add exam_database_output/ subject.json key_errors_summary.txt || true
+          
+          # 檢查是否有實際變更，若有則進行 commit & push
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update exam database [skip ci]" && git push)
