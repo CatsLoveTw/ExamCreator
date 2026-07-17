@@ -1299,37 +1299,47 @@ class ExamParser:
         return rubric_data_map
 
     def execute_crop(self, page, bboxes, img_dir, prefix) -> List[str]:
-        """通用的高精度裁切工具，內建非對稱 Padding 與邊界裝飾垃圾安全過濾"""
         saved_paths = []
+        # 取得該頁面上所有實體文字的精確坐標 (x0, y0, x1, y1, "word", block_no, line_no, word_no)
+        try:
+            page_words = page.get_text("words")
+        except Exception:
+            page_words = []
+
         for i, bbox in enumerate(bboxes):
             if len(bbox) != 4: continue
             ymin, xmin, ymax, xmax = bbox
             
-            # 座標縮放
             x0_raw = (min(xmin, xmax) / 1000.0) * page.rect.width
             y0_raw = (min(ymin, ymax) / 1000.0) * page.rect.height
             x1_raw = (max(xmin, xmax) / 1000.0) * page.rect.width
             y1_raw = (max(ymin, ymax) / 1000.0) * page.rect.height
 
-            # 修正：改用動態邊界保護。只有當 Bounding Box 的高度非常小（小於 5% 且位於極頂/極底），才判定為頁眉頁尾垃圾並過濾。
-            # 若為大型圖表（高度大於 10%），則允許其貼近頁面邊緣（放寬至 2% 到 98%），避免長圖與高資訊密度表格被切邊。
-            is_large_image = abs(ymax - ymin) > 100
-            top_limit = page.rect.height * 0.02 if is_large_image else page.rect.height * 0.05
-            bot_limit = page.rect.height * 0.98 if is_large_image else page.rect.height * 0.95
-            
-            x0 = max(page.rect.width * 0.02, min(x0_raw, page.rect.width * 0.98))
-            x1 = max(page.rect.width * 0.02, min(x1_raw, page.rect.width * 0.98))
-            y0 = max(top_limit, min(y0_raw, bot_limit))
-            y1 = max(top_limit, min(y1_raw, bot_limit))
+            # 初始非對稱式 Padding 緩衝
+            pad_w = page.rect.width * 0.05
+            pad_h_top = page.rect.height * 0.04
+            pad_h_bot = page.rect.height * 0.02
 
-            # 💡 採用非對稱式寬幅安全 Padding，向上與左右多擴展，向下收緊
-            pad_w = page.rect.width * 0.12     # 左右各保留 12% 寬度安全區
-            pad_h_top = page.rect.height * 0.10 # 頂部向上多留 10% 高度安全區（防止切到公式與頂部標題）
-            pad_h_bot = page.rect.height * 0.04 # 底部僅向下留 4%
+            x0 = max(0.0, x0_raw - pad_w)
+            x1 = min(page.rect.width, x1_raw + pad_w)
+            y0 = max(0.0, y0_raw - pad_h_top)
+            y1 = min(page.rect.height, y1_raw + pad_h_bot)
 
-            rect = fitz.Rect(x0 - pad_w, y0 - pad_h_top, x1 + pad_w, y1 + pad_h_bot)
-            rect = rect.intersect(page.rect)   # 確保不超出紙張真實邊界
+            rect = fitz.Rect(x0, y0, x1, y1)
 
+            # 若有文字塊與目前的裁切框相交，則自動將裁切框向外延伸，完整包裹該文字塊
+            if page_words:
+                for w in page_words:
+                    w_rect = fitz.Rect(w[0], w[1], w[2], w[3])
+                    # 如果該單字被裁切框切到，但沒有被完整包裹
+                    if rect.intersects(w_rect) and not rect.contains(w_rect):
+                        # 動態向外微調，防範公式上標或分數線被切斷
+                        rect.x0 = min(rect.x0, w_rect.x0 - 2)
+                        rect.y0 = min(rect.y0, w_rect.y0 - 2)
+                        rect.x1 = max(rect.x1, w_rect.x1 + 2)
+                        rect.y1 = max(rect.y1, w_rect.y1 + 2)
+
+            rect = rect.intersect(page.rect)
             if rect.width < 10 or rect.height < 10: continue
 
             img_filename = f"{prefix}_{i}_{int(time.time()*1000)}.png"
@@ -1815,6 +1825,11 @@ class ExamParser:
                 【手寫題與非選擇題評分標準精準對齊】
                 本考卷包含非選擇題（如第22、24-31題等手寫題）。
                 請對照下方提供的【官方評分原則文字】，將手寫題對應的「列式給分、答案給分、扣分限制」等極重要規則，精確填入 `scoring_criteria` 欄位中！
+                
+                🚨【數位文字與影像視覺雙重比對規限（零誤差保證）】🚨
+                - 本系統提供了該頁面的『原始純文字對照（Text Layer）』。
+                - 當你從影像中識別數學變數（如 $x, y, z, a, b$）或物理單位時，如果因為字體過小或解析度問題產生疑義，請【強制比對純文字對照區】中的相對應字元。
+                - 英文大小寫、希臘字母（如 $\theta, \phi, \alpha$）必須完全以底層數位文字層的命名為最高準則，嚴禁因為視覺模糊而自行臆測或改寫變數名稱！
 
                 【一、剛性文字與公式規格化】
                 1. **題目文字完全對齊**：`question_text` 必須與圖片及底層純文字 100% 吻合。
@@ -3004,7 +3019,7 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = min(len(API_KEYS), 14) # 根據 Key 數量決定並發量
+        max_workers = min(len(API_KEYS), 8) # 根據 Key 數量決定並發量
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
