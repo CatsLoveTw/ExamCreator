@@ -1211,12 +1211,6 @@ class ExamParser:
 
         class RubricPage(BaseModel):
             items: List[RubricItem] = Field(description="本頁中所有非選擇題評分原則的條目列表。")
-        for page_num in range(len(doc)):
-            page = doc[page_num]
-            pix = page.get_pixmap(dpi=300)
-            img_path = f"temp_rubric_{task_id}_{page_num}.png"
-            pix.save(img_path)
-            temp_images.append((page_num, img_path))
 
         # 用於保存各頁面解析出來的 Bounding Boxes 與文字資料
         parsed_pages_results = [None] * len(temp_images)

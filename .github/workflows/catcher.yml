@@ -46,6 +46,7 @@ jobs:
         
 
       - name: Upload Key Status Dashboard
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gemini-key-status
