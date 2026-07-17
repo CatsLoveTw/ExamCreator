@@ -1139,7 +1139,7 @@ class ExamParser:
             return 2  # 社會文科，批次 2 題
     
     def pdf_to_images(self, pdf_path: Optional[str], prefix: str, target_dir: str, dpi: int = 150) -> List[str]:
-        """將指定 PDF 檔案的每一頁都轉換為高解析度圖片，並儲存在指定資料夾中"""
+        """將指定 PDF 檔案的每一頁都轉換為高解析度圖片，並儲存在指定資料夾中，內建記憶體級影像強化"""
         if not pdf_path or not os.path.exists(pdf_path):
             return []
         
@@ -1151,7 +1151,20 @@ class ExamParser:
                 pix = page.get_pixmap(dpi=dpi)
                 filename = f"{prefix}_page_{page_num+1:02d}.png"
                 filepath = os.path.join(target_dir, filename)
-                pix.save(filepath)
+                
+                # 全局影像強化：防止印刷淡字、微小分數線或細微符號遺漏
+                from PIL import Image, ImageEnhance
+                # 直接從 PyMuPDF 的記憶體資料（pix.samples）轉換為 PIL 影像物件，不經過二次讀寫，效率極高
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                
+                enhancer_contrast = ImageEnhance.Contrast(img)
+                img_enhanced = enhancer_contrast.enhance(1.4)  # 提升 40% 對比度
+                enhancer_sharp = ImageEnhance.Sharpness(img_enhanced)
+                img_enhanced = enhancer_sharp.enhance(1.4)      # 提升 40% 銳利度
+                
+                # 儲存強化後的影像
+                img_enhanced.save(filepath, "PNG")
+                
                 # 正規化路徑為網頁/JSON 標準的斜線 "/"
                 normalized_path = filepath.replace("\\", "/")
                 image_paths.append(normalized_path)
@@ -1204,7 +1217,6 @@ class ExamParser:
             img_path = f"temp_rubric_{task_id}_{page_num}.png"
             pix.save(img_path)
             temp_images.append((page_num, img_path))
-        doc.close() # 提前關閉主 PDF 手把
 
         # 用於保存各頁面解析出來的 Bounding Boxes 與文字資料
         parsed_pages_results = [None] * len(temp_images)
@@ -1364,14 +1376,39 @@ class ExamParser:
                 if not os.path.exists(img_path):
                     continue
             
+            # 【優化機制 1】提取該頁的 PDF 數位文字層（文字對照組）
+            page_text_layer = page.get_text("text").strip()
+            
+            # 【優化機制 3】正則自動提取「預期題號與格位清單」作為提示詞地圖
+            import re
+            raw_keys = re.findall(r'\b\d+(?:-\d+)?\b|[A-G]\b', page_text_layer)
+            hint_keys = sorted(list(set(raw_keys)), key=natural_sort_key)
+            
+            hint_str = ""
+            if hint_keys:
+                hint_str = f"\n\n💡【本頁偵測到的預期答案鍵值提示】：{hint_keys}\n請務必以此結構化對照表為地圖，將解析到的答案填入對應的鍵值中，嚴禁跳格或遺漏任何一格。"
+            
+            text_layer_str = ""
+            if page_text_layer:
+                text_layer_str = f"\n\n=== 該頁數位文字層對照 ===\n{page_text_layer}"
+                
+            # 縫合優化後的複合 Prompt
+            combined_prompt = self.ANSWERS_OCR_PROMPT + text_layer_str + hint_str + "\n\n請務必結合提供的圖片排版與上述數位文字提示，進行交叉校驗，確保公式與數值完全一致。"
+            
             try:
                 with Image.open(img_path) as pil_img:
+                    from PIL import ImageEnhance
+                    enhancer_contrast = ImageEnhance.Contrast(pil_img)
+                    pil_img_enhanced = enhancer_contrast.enhance(1.6)  # 提升 60% 對比度
+                    enhancer_sharp = ImageEnhance.Sharpness(pil_img_enhanced)
+                    pil_img_enhanced = enhancer_sharp.enhance(1.4)      # 提升 40% 銳利度
+                    
                     res_dict, err = self.ai_manager.generate_with_retry(
-                        contents=[self.ANSWERS_OCR_PROMPT, pil_img],
+                        contents=[combined_prompt, pil_img_enhanced],
                         response_schema=AnswerKey,
                         temperature=0.0,
                         preferred_model=model,
-                        enable_thinking=False
+                        enable_thinking=True
                     )
                     if res_dict and 'answers' in res_dict:
                         for item in res_dict['answers']:
@@ -1422,8 +1459,15 @@ class ExamParser:
 
         try:
             with Image.open(img_path) as pil_img:
+                # 提升對比度與銳利度
+                from PIL import ImageEnhance
+                enhancer_contrast = ImageEnhance.Contrast(pil_img)
+                pil_img_enhanced = enhancer_contrast.enhance(1.6)
+                enhancer_sharp = ImageEnhance.Sharpness(pil_img_enhanced)
+                pil_img_enhanced = enhancer_sharp.enhance(1.4)
+
                 res, err = self.ai_manager.generate_with_retry(
-                    contents=[prompt, pil_img],
+                    contents=[prompt, pil_img_enhanced],
                     response_schema=ArbitrationResult,
                     temperature=0.0,
                     preferred_model="gemini-3.5-flash", # 使用具備最強視覺細節與思考能力的核心模型進行仲裁
@@ -1476,8 +1520,11 @@ class ExamParser:
             return json.dumps(ans_dict_1, ensure_ascii=False)
             
         logging.warning(f"⚠️ [共識衝突] 偵測到以下題號在雙模型解析中不一致: {mismatched_keys}")
-        logging.warning(f"  -> Model 1 (3.5-flash): {{k: ans_dict_1.get(k) for k in mismatched_keys}}")
-        logging.warning(f"  -> Model 2 (3.1-lite): {{k: ans_dict_2.get(k) for k in mismatched_keys}}")
+        # 先在外面計算好子字典，再放入 f-string 輸出
+        ans_1_sub = {k: ans_dict_1.get(k) for k in mismatched_keys}
+        ans_2_sub = {k: ans_dict_2.get(k) for k in mismatched_keys}
+        logging.warning(f"  -> Model 1 (3.5-flash): {ans_1_sub}")
+        logging.warning(f"  -> Model 2 (3.1-lite): {ans_2_sub}")
         
         # 4. 啟動第三輪：終極仲裁
         resolved_dict = self._resolve_ocr_conflict(a_pdf, ans_dict_1, ans_dict_2, mismatched_keys)
@@ -3005,13 +3052,28 @@ class ExamParser:
         # =========================================================
         # 🚨 寫入 JSON 前，徹底清除所有非 JSON 序列化的暫存屬性 (如 PngImageFile 影像對象) 🚨
 
+        def normalize_latex_delimiters(text: str) -> str:
+            """自動將 Rogue LaTeX 符號 \[ \] 轉換為標準 $$ $$，將 \( \) 轉換為 $ $，防範前端排版渲染崩潰"""
+            if not isinstance(text, str):
+                return text
+            # 1. 轉換獨立行公式 \[ ... \] 為 $$ ... $$
+            text = re.sub(r'\\\[(.*?)\\\]', r'$$\1$$', text, flags=re.DOTALL)
+            # 2. 轉換行內公式 \( ... \) 為 $ ... $（處理有空格與無空格之情形）
+            text = re.sub(r'\\ \((.*?)\\\)', r'$\1$', text, flags=re.DOTALL)
+            text = re.sub(r'\\\((.*?)\\\)', r'$\1$', text, flags=re.DOTALL)
+            return text
+
         def clean_paths(obj):
             if isinstance(obj, list):
                 return [clean_paths(i) for i in obj]
             if isinstance(obj, dict):
                 return {k: clean_paths(v) for k, v in obj.items()}
-            if isinstance(obj, str) and ("./" in obj or "gsat_" in obj):
-                return obj.replace("\\", "/")
+            if isinstance(obj, str):
+                # 統一 Windows 與網頁斜線路徑格式
+                if "./" in obj or "gsat_" in obj or "ast_" in obj:
+                    obj = obj.replace("\\", "/")
+                # 執行全局 LaTeX 符號強制標準化
+                obj = normalize_latex_delimiters(obj)
             return obj
 
         all_final_questions = clean_paths(all_final_questions)
