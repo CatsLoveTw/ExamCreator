@@ -1,0 +1,4 @@
+pymupdf
+pillow
+google-genai
+pydantic
