@@ -343,6 +343,7 @@ PROMPT_STAGE_2_MAIN = """
         1. 在你輸出詳解之前，請務必在內部進行一次「解題沙盤推演」。
         2. 如果你的物理或數學公式推導出來的結果，與官方給定的標準答案【{q_answer}】不一致，這代表你的中間步驟或對題目的物理情境理解有誤！
            - 🚨【選填題格式提示】：若 `answer` 格式為逗號分隔（如 `-,4,3`），代表該選填題各畫卡格子（如 `[ 10-1 ]`, `[ 10-2 ]`, `[ 10-3 ]`）之答案分別為 `-`、`4`、`3`。請你在推導與結論中，確認求得的各個數值（如 $a = -4$, $b = 3$）與此逗號分隔的格子答案完全一致！
+           - 🚨【多選題格式提示】：若 `answer` 格式為多個數字或字母組成，且可能帶有逗號（如 `3,4` 或 `A,C,D`），這代表該題為多選題。在與你的推導比對時，我們在系統層面會自動忽略逗號，請你在 `options_analysis` 中針對這幾個正確選項進行對位標示（即在對應選項的 `explanation` 尾端明確指出其為『正確』）。
         3. **【絕對禁止無中生有與幻覺】**：你只能使用題目 `question_text` 與 `shared_context` 中明確給出的已知數值與條件。**絕對禁止憑空捏造、編造或引入任何未在題幹中出現的幾何座標、截距、特定交點或任何常數數值！** 所有代數與幾何推導都必須具備嚴格、紮實的題目已知條件基礎。
         3-2. **🚨【絕對禁止推導斷層與已知答案回推步驟（防硬湊剛性規定）】🚨**：
            - 在空間幾何、代數計算或微積分綜合題中，**你必須給出每一步推導的嚴謹代數或幾何理由，絕對不允許因為推理瓶頸就跳過關鍵證明，直接拋出「根據幾何結構，y_P 應為 7.5 才能得到答案 2」這種因果倒置、迎合答案的文字！**
@@ -2719,7 +2720,11 @@ class ExamParser:
                             derived_ans = "".join(sorted(derived_correct_keys))
                             official_ans = str(q_data.get('answer', '')).strip()
                             
-                            if derived_ans and official_ans and derived_ans != official_ans:
+                            # 雙向清理格式（去除所有逗號與空格），確保多選題 '3,4' 與 '34' 等價比對
+                            derived_clean = derived_ans.replace(",", "").replace(" ", "")
+                            official_clean = official_ans.replace(",", "").replace(" ", "")
+                            
+                            if derived_clean and official_clean and derived_clean != official_clean:
                                 # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
                                 valid_batch[idx]["_discrepancy_detected"] = True
                                 valid_batch[idx]["_derived_ans"] = derived_ans
@@ -2740,7 +2745,11 @@ class ExamParser:
                             derived_ans = "".join(sorted(derived_correct_keys))
                             official_ans = str(q_data.get('answer', '')).strip()
                             
-                            if derived_ans and official_ans and derived_ans != official_ans:
+                            # 雙向清理格式（去除所有逗號與空格），確保多選題 '3,4' 與 '34' 等價比對
+                            derived_clean = derived_ans.replace(",", "").replace(" ", "")
+                            official_clean = official_ans.replace(",", "").replace(" ", "")
+                            
+                            if derived_clean and official_clean and derived_clean != official_clean:
                                 # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
                                 valid_batch[idx]["_discrepancy_detected"] = True
                                 valid_batch[idx]["_derived_ans"] = derived_ans
