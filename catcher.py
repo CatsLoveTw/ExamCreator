@@ -162,10 +162,84 @@ def normalize_and_merge_subject_taxonomy(taxonomy: dict) -> dict:
         
     return new_taxonomy
 
+def fix_latex_text_macros(text: str) -> str:
+    """
+    偵測 text 中的 \\text{...} 結構（支援嵌套大括號 {}），
+    如果其內部包裹的內容：
+    1. 含有反斜線 `\\`（代表包含 LaTeX 數學指令，例如 \\frac, \\sqrt, \\vec, \\le 等）
+    2. 或是含有上標 `^` 或下標 `_`（這在 \\text 裡會造成編譯錯誤）
+    3. 或是含有 `>`, `<`, `=`, `+`, `-`, `*`, `/` 等數學運算符且長度較長
+    則將該 \\text{...} 剝除，只保留內部的內容。
+    """
+    if "\\text" not in text:
+        return text
+        
+    result = []
+    i = 0
+    n = len(text)
+    
+    while i < n:
+        # 尋找 \\text{
+        if text[i:i+6] == "\\text{":
+            # 開始匹配配對的大括號
+            start_content_idx = i + 6
+            bracket_count = 1
+            j = start_content_idx
+            while j < n and bracket_count > 0:
+                if text[j] == '{':
+                    bracket_count += 1
+                elif text[j] == '}':
+                    bracket_count -= 1
+                j += 1
+                
+            if bracket_count == 0:
+                # 成功找到完整的 \\text{content}
+                content = text[start_content_idx:j-1]
+                
+                # 檢查是否需要剝離 \\text
+                has_latex_cmd = "\\" in content
+                has_sub_super = "^" in content or "_" in content
+                has_math_ops = any(op in content for op in [">", "<", "=", "+", "*", "/"])
+                
+                if has_latex_cmd or has_sub_super or (has_math_ops and len(content) > 1):
+                    # 遞迴修復內部內容後，直接剝除 \\text
+                    fixed_content = fix_latex_text_macros(content)
+                    result.append(fixed_content)
+                else:
+                    # 合法的純文字或單純字母（如 \\text{kg}, \\text{甲}），保留 \\text{} 並遞迴修復內部
+                    fixed_content = fix_latex_text_macros(content)
+                    result.append(f"\\text{{{fixed_content}}}")
+                    
+                i = j
+            else:
+                # 未配對成功，當作一般字元處理
+                result.append(text[i])
+                i += 1
+        else:
+            result.append(text[i])
+            i += 1
+            
+    return "".join(result)
+
+def recursive_fix_latex(obj):
+    if isinstance(obj, dict):
+        return {k: recursive_fix_latex(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [recursive_fix_latex(x) for x in obj]
+    elif isinstance(obj, str):
+        return fix_latex_text_macros(obj)
+    return obj
+
 def pre_validate_format(q_data: dict, sol_data: dict):
     """
     [防禦性機制 - 提案二：選填題/非選題格式自動化預校驗器]
     """
+    # 0. 自動就地修正 LaTeX 中 \\text{} 包裹數學公式等瑕疵，避免觸發 validator 的審查退回
+    fixed_sol = recursive_fix_latex(sol_data)
+    if isinstance(fixed_sol, dict):
+        for k, v in fixed_sol.items():
+            sol_data[k] = v
+
     # 1. 修正：當目前題目並非「選擇與非選並存」的混合題，且為非選擇題型時，清空 options_analysis 避免格式混淆
     is_hybrid = len(q_data.get("options", [])) > 0 and len(q_data.get("scoring_criteria", "")) > 0
     if q_data.get("question_type") in ["選填題", "簡答題", "繪圖作圖題"] and not is_hybrid:
@@ -889,7 +963,7 @@ class GeminiFreeTierManager:
                 time.sleep(random.uniform(1.8, 6))
 
                 desc_str = f" {task_desc}" if task_desc else ""
-                print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API，思考: {thinking_config.thinking_level if thinking_config else '關閉'} / 溫度: {temperature} (第 {attempts + 1} 次嘗試)...")
+                print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API，思考: {thinking_config.thinking_level if thinking_config else '關閉'} / 溫度: {temperature} (第 {attempts + 1} 次嘗試)...", flush=True)
                 # 每次執行時顯示金鑰狀態
                 self.print_keys_status()
 
@@ -1481,8 +1555,13 @@ class ExamParser:
                 )
                 if res and 'resolutions' in res:
                     for item in res['resolutions']:
-                        merged_dict[item['question_number']] = item['standard_answer']
-                        logging.info(f"⚖️ [仲裁成功] 題號 {item['question_number']} 已被裁決為: {item['standard_answer']}")
+                        ans_val = item['standard_answer']
+                        if ans_val is None or str(ans_val).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
+                            ans_val = "／"
+                        else:
+                            ans_val = str(ans_val).strip()
+                        merged_dict[item['question_number']] = ans_val
+                        logging.info(f"⚖️ [仲裁成功] 題號 {item['question_number']} 已被裁決為: {ans_val}")
         except Exception as e:
             logging.error(f"執行解答仲裁失敗，將採用 Model 1 預設值: {e}")
         finally:
@@ -1514,10 +1593,27 @@ class ExamParser:
         if not ans_dict_1: return json.dumps(ans_dict_2, ensure_ascii=False)
         if not ans_dict_2: return json.dumps(ans_dict_1, ensure_ascii=False)
         
-        # 3. 在 Python 中進行精確的 Key-Value 比對
+        # 3. 在 Python 中進行精確的 Key-Value 比對，並在比對前統一空值、None、斜線與未作答標記為 "／"
+        all_keys = set(list(ans_dict_1.keys()) + list(ans_dict_2.keys()))
+        for k in all_keys:
+            val1 = ans_dict_1.get(k)
+            val2 = ans_dict_2.get(k)
+            
+            # 統一 val1
+            if val1 is None or str(val1).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
+                ans_dict_1[k] = "／"
+            else:
+                ans_dict_1[k] = str(val1).strip()
+                
+            # 統一 val2
+            if val2 is None or str(val2).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
+                ans_dict_2[k] = "／"
+            else:
+                ans_dict_2[k] = str(val2).strip()
+
         mismatched_keys = []
-        for k in set(list(ans_dict_1.keys()) + list(ans_dict_2.keys())):
-            if ans_dict_1.get(k) != ans_dict_2.get(k):
+        for k in all_keys:
+            if ans_dict_1[k] != ans_dict_2[k]:
                 mismatched_keys.append(k)
                 
         if not mismatched_keys:
