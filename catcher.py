@@ -1594,22 +1594,18 @@ class ExamParser:
         if not ans_dict_2: return json.dumps(ans_dict_1, ensure_ascii=False)
         
         # 3. 在 Python 中進行精確的 Key-Value 比對，並在比對前統一空值、None、斜線與未作答標記為 "／"
+        def sanitize_answer_value(val) -> str:
+            if val is None:
+                return "／"
+            val_str = str(val).strip()
+            if val_str in ["", "None", "null", "none", "Undefined", "undefined", "／", "/", "\\", "無", "無答案", "－", "[]", "{}"]:
+                return "／"
+            return val_str
+
         all_keys = set(list(ans_dict_1.keys()) + list(ans_dict_2.keys()))
         for k in all_keys:
-            val1 = ans_dict_1.get(k)
-            val2 = ans_dict_2.get(k)
-            
-            # 統一 val1
-            if val1 is None or str(val1).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
-                ans_dict_1[k] = "／"
-            else:
-                ans_dict_1[k] = str(val1).strip()
-                
-            # 統一 val2
-            if val2 is None or str(val2).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
-                ans_dict_2[k] = "／"
-            else:
-                ans_dict_2[k] = str(val2).strip()
+            ans_dict_1[k] = sanitize_answer_value(ans_dict_1.get(k))
+            ans_dict_2[k] = sanitize_answer_value(ans_dict_2.get(k))
 
         mismatched_keys = []
         for k in all_keys:
@@ -1763,7 +1759,22 @@ class ExamParser:
         else:
             spec_name = f"{safe_year}_{type_folder}_{safe_subject}"
             
-        # 3. 建立專屬的分類資料夾與 JSON 儲存路徑
+        # 3. 決定學年度與考卷名稱之 100% 剛性標準化變數，徹底根除跨頁面、跨模型生出不一致考卷名稱與年份之 Bug
+        year_digits = "".join(filter(str.isdigit, year))
+        if not year_digits:
+            year_digits = year
+            
+        if exam_type == "GSAT":
+            standard_academic_year = f"{year_digits}學測"
+            standard_exam_source = f"{year_digits}學年度學科能力測驗{subject}"
+        elif exam_type == "AST":
+            standard_academic_year = f"{year_digits}分科"
+            standard_exam_source = f"{year_digits}學年度分科測驗{subject}"
+        else:  # MOCK
+            standard_academic_year = f"{year_digits}模考"
+            standard_exam_source = f"{year_digits}學年度模擬考{mock_tag}_{subject}"
+
+        # 4. 建立專屬的分類資料夾與 JSON 儲存路徑
         os.makedirs(os.path.join(output_dir, type_folder), exist_ok=True)
         json_path = os.path.join(output_dir, type_folder, f"{spec_name}_database.json")
         
@@ -2332,8 +2343,59 @@ class ExamParser:
             if isinstance(ans_map, dict):
                 expected_q_nums = sorted(list(ans_map.keys()), key=natural_sort_key)
                 
-            extracted_q_nums = [q.get("question_number") for q in all_extracted_questions]
-            gaps = [num for num in expected_q_nums if num not in extracted_q_nums]
+            # 🚨 健全的子題/畫卡格號與範疇覆蓋檢查器，防止將 A-2, 9-2 等選填題畫卡格子誤判為獨立缺失題目
+            def get_base_q_num(q_num_str: str) -> str:
+                q_num_str = str(q_num_str).strip()
+                match = re.match(r'^(\d+)-(\d+)$', q_num_str)
+                if match:
+                    return match.group(1)
+                match_letter = re.match(r'^([A-Ga-g])-(\d+)$', q_num_str)
+                if match_letter:
+                    return match_letter.group(1)
+                return q_num_str
+
+            def is_question_covered(expected_base: str, extracted_questions: list) -> bool:
+                expected_base = str(expected_base).strip()
+                for q_item in extracted_questions:
+                    q_num = str(q_item.get("question_number", "")).strip()
+                    if q_num == expected_base:
+                        return True
+                    range_match = re.match(r'^(\d+)-(\d+)$', q_num)
+                    if range_match:
+                        try:
+                            start = int(range_match.group(1))
+                            end = int(range_match.group(2))
+                            val = int(expected_base)
+                            if start <= val <= end:
+                                return True
+                        except ValueError:
+                            pass
+                    if q_num.startswith(expected_base) and len(q_num) > len(expected_base):
+                        next_char = q_num[len(expected_base)]
+                        if not next_char.isalnum():
+                            return True
+                return False
+
+            def get_official_answer_for_base(base_num: str, ans_dict: dict) -> str:
+                if base_num in ans_dict:
+                    return str(ans_dict[base_num])
+                sub_keys = []
+                for k in ans_dict.keys():
+                    if k.startswith(f"{base_num}-"):
+                        suffix = k[len(base_num)+1:]
+                        if suffix.isdigit():
+                            sub_keys.append((int(suffix), k))
+                if sub_keys:
+                    sub_keys.sort()
+                    return ",".join(str(ans_dict[k]) for _, k in sub_keys)
+                return ""
+
+            gaps = []
+            for num in expected_q_nums:
+                base_num = get_base_q_num(num)
+                if not is_question_covered(base_num, all_extracted_questions):
+                    if base_num not in gaps:
+                        gaps.append(base_num)
             
             if gaps:
                 logging.warning(f"⚠️ [補漏機制啟動] 偵測到有 {len(gaps)} 道題目在第一階段漏抓：{gaps}")
@@ -2352,9 +2414,14 @@ class ExamParser:
                     gap_page = doc[target_page_num]
                     gap_image_path = q_image_paths[target_page_num]
                     
+                    official_ans_val = get_official_answer_for_base(gap_num, ans_map)
+                    ans_prompt_part = ""
+                    if official_ans_val:
+                        ans_prompt_part = f"\n🚨【本題官方標準答案】：{official_ans_val}\n請直接將此答案填入 `answer` 欄位中，絕對不可變更或縮水。"
+
                     gap_prompt = f"""
                     我們在全卷掃描中漏掉了第 {gap_num} 題。請仔細閱讀以下試卷影像：
-                    1. 請精確找出第 {gap_num} 題的完整題幹、選項（若有）與其在官方答案卷中對應的答案。
+                    1. 請精確找出第 {gap_num} 題的完整題幹、選項（若有）。{ans_prompt_part}
                     2. 將該單題的資料結構化填入 Pydantic 結構。
                     3. 🚨 必須將 `page_number` 設為 {target_page_num+1}。
                     """
@@ -3192,6 +3259,9 @@ class ExamParser:
 
         all_final_questions = clean_paths(all_final_questions)
         for q in all_final_questions:
+            # 🚨 剛性規範：強制將學年度與試卷來源名稱標準化，徹底杜絕 AI 在不同批次中生出不一致之命名
+            q["academic_year"] = standard_academic_year
+            q["exam_source"] = standard_exam_source
             if '_cropped_pil_images' in q:
                 for img_obj in q['_cropped_pil_images']:
                     try:
