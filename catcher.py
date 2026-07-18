@@ -320,7 +320,7 @@ PROMPT_STAGE_2_MAIN = """
   - `\\begin{{matrix}}` 寫成 `__LTXS__begin{{matrix}}`。
   - 🚨【絕對禁止】在公式中輸出任何真正的單反斜線 `\\`，一律且強制使用 `__LTXS__`！
 - 嚴格遵守標準 LaTeX 語法。
-- 🚨【指數與冪次 LaTeX 規範】：當表示指數函數、高次冪或含有多個字元的上標（如 2 的 x+1 次方，或 e 的 -x 次方）時，**必須**將整個指數/上標部分用 LaTeX 的大括號 `{}` 完整包裹，例如寫成 `$2^{{x+1}}$`、`$e^{{-x}}$`，**絕對禁止**寫成 `$2^x+1$` 或 `$2^-x$`（這會被渲染/解讀為 $2^x + 1$ 或 $2^- \cdot x$，造成嚴重的學術邏輯與網頁渲染錯誤）。在非 LaTeX 純文字語境下，必須使用括號表示，如 `2^(x+1)`。
+- 🚨【指數與冪次 LaTeX 規範】：當表示指數函數、高次冪或含有多個字元的上標（如 2 的 x+1 次方，或 e 的 -x 次方）時，**必須**將整個指數/上標部分用 LaTeX 的大括號 `{{}}` 完整包裹，例如寫成 `$2^{{x+1}}$`、`$e^{{-x}}$`，**絕對禁止**寫成 `$2^x+1$` 或 `$2^-x$`（這會被渲染/解讀為 $2^x + 1$ 或 $2^- \cdot x$，造成嚴重的學術邏輯與網頁渲染錯誤）。在非 LaTeX 純文字語境下，必須使用括號表示，如 `2^(x+1)`。
 - 🚨【化學式專屬指令】：所有化學反應式必須使用 LaTeX 格式。
   - 務必使用下標語法，例如：$Mg_{{(s)}} + 2HCl_{{(aq)}} __LTXS__rightarrow MgCl_{{2(aq)}} + H_{{2(g)}}$。
   - 嚴禁使用 ->，必須使用 __LTXS__rightarrow 或 __LTXS__ce{{->}}。
@@ -3230,6 +3230,11 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
 if __name__ == "__main__":
     # 將你的 Gemini API Keys 放入此處
     API_KEYS = load_api_keys('key.txt')
+    if not API_KEYS:
+        env_key = os.environ.get("GEMINI_API_KEY")
+        if env_key:
+            API_KEYS = [env_key]
+            print("✅ 成功載入環境變數中的 GEMINI_API_KEY。")
     if API_KEYS:
         import random
         # 🚨 核心修改：在程式啟動時，將金鑰列表順序完全隨機洗牌打散
