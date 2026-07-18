@@ -626,8 +626,8 @@ class ExtractedQuestion(BaseModel):
     page_number: int = Field(description="本題在該試卷 PDF 中的真實頁碼（從 1 開始計數，例如：1, 2, 3...）")
     shared_context: str = Field(default="", description="若本題為題組題，請將【共同引言、閱讀測驗文章、實驗敘述】放在此處。若非題組題，請留空。")
     question_text: str = Field(description="單純針對這一個子題的題目文字。數學公式，請嚴格使用 LaTeX。")
-    has_image: bool = Field(description="題目是否包含幾何附圖、圖表或表格？")
-    image_bboxes: List[List[int]] = Field(default=[], description="若有附圖，請給出所有附圖的 Bounding Box 列表，格式如 [[ymin, xmin, ymax, xmax]]。注意：所有坐標必須規格化至 0 到 1000 的整數區間（以左上角為 (0,0)，右下角為 (1000,1000)）。若無則填空列表 []。")
+    has_image: bool = Field(description="題目是否明確印有幾何附圖、圖表或表格？絕對禁止因為題目提到『圖形』、『正方體』等文字就憑空將此設為 true！必須要有實體圖案。")
+    image_bboxes: List[List[int]] = Field(default=[], description="若有明確附圖，請給出所有附圖的 Bounding Box 列表，格式如 [[ymin, xmin, ymax, xmax]]。注意：所有坐標必須規格化至 0 到 1000 的整數區間。絕對禁止憑空虛構框線！若無實體圖案則必須為空列表 []。")
     options: List[OptionItem] = Field(description="選項物件列表，無則填 []。")
     answer: str = Field(description="本題的標準答案。如果是多選題，必須將所有正確選項字母按字母順序排列，中間不加任何逗號、空格或符號（例如：'ACD' 而非 'A, C, D'）。")
     image_paths: List[str] = Field(default=[], description="所有實體裁切圖片的路徑列表。若無則為空列表 []。")
@@ -837,6 +837,29 @@ class GeminiFreeTierManager:
             text = text.replace(char, replacement)
         return text
 
+    def repair_hallucinated_latex(self, text: str) -> str:
+        if not isinstance(text, str):
+            return text
+        replacements = {
+            r"\ belongge ": r"\ge ",
+            r"\ belongge": r"\ge",
+            r"\belongge": r"\ge",
+            r"\ belongle ": r"\le ",
+            r"\ belongle": r"\le",
+            r"\belongle": r"\le",
+            r"\ belong ": r"\in ",
+            r"\ belong": r"\in",
+            r"\belong": r"\in",
+            r"\ pi ": r"\pi ",
+            r"\ pi": r"\pi",
+            r"\text{end{bmatrix}": r"\end{bmatrix}",
+            r"\text{end{bmatrix}}": r"\end{bmatrix}",
+            r"\ text": r"\text",
+        }
+        for bad, good in replacements.items():
+            text = text.replace(bad, good)
+        return text
+
     def repair_dict_latex(self, obj):
         """遞迴遍歷整個 JSON 字典，自動修復所有被損毀的 LaTeX 字串"""
         if isinstance(obj, dict):
@@ -844,7 +867,7 @@ class GeminiFreeTierManager:
         elif isinstance(obj, list):
             return [self.repair_dict_latex(i) for i in obj]
         elif isinstance(obj, str):
-            return self.repair_latex_control_chars(obj)
+            return self.repair_hallucinated_latex(self.repair_latex_control_chars(obj))
         return obj
 
     def estimate_tokens(self, contents) -> int:
@@ -1982,6 +2005,7 @@ class ExamParser:
                 - 如果題目選項 (A)~(E) 或 1~5 是圖形（如幾何圖、生物分類樹、化學結構）：
                 - **【嚴禁】** 將 A, B, C, D, E 分開裁切成五張圖。
                 - **【必須】** 直接框選一個覆蓋 A 到 E 所有選項的大型 Bounding Box，並放入該題 `image_bboxes` 中。
+                3. **🚨嚴禁憑空捏造 Bounding Box🚨**：如果考卷影像中沒有明確的圖表、幾何圖形或附圖，絕對不可以因為題目敘述出現「圖形」、「正方體」、「橢圓」等字眼就憑空捏造 Bounding Box 座標！此時必須將 has_image 設為 false 且 image_bboxes 設為空列表 []。
                 - 此時，個別選項的 `has_image` 設為 false，其文字內容填寫「【請參見題幹附圖中的選項內容】」。
                 3. **表格與圖表標籤**：必須包含「圖15」或「表7」等標籤。
                 4. **表格邊界**：框選表格時請多留 50 個單位的空白邊緣，嚴禁切到表格的框線或標題。
@@ -2680,9 +2704,10 @@ class ExamParser:
         elif normalized_subject in ["數學", "數A", "數B", "數甲", "數乙", "數學A", "數學B", "數學甲", "數學乙"]:
             subject_specific_instruction = """
             【五、數學科專屬多解與解題思路規範】：
-            1. **【極致推崇「一題多解」與「多元解題思維」】**：
+             1. **【極致推崇「一題多解」與「多元解題思維」】**：
                - 在 `detailed_solution` 欄位中，除了提供符合大課綱的 `### 【標準解法】` 之外，**【強制要求】寫出至少 3 到 4 種（含）以上完全不同維度的解題思維與切入點**（如：`### 【標準解法】`、`### 【另解一】`、`### 【另解二】`、`### 【另解三 / 秒殺速解】`）。
-               - 針對不同題型，你必須大膽展現以下多元學術維度的切入點：
+               ，**但請保持精簡，避免過度冗長導致 JSON 截斷**。
+               - 針對不同題型，你可以展現以下多元學術維度的切入點：
                  - **幾何直覺法（平面/空間幾何、向量）**：運用圓冪定理、托勒密定理、弦切角、對稱性或重心等幾何定理解題。
                  - **向量與座標化解（直角座標系）**：建立最適座標系（讓原點與軸線對齊最多零座標），將幾何問題代數化。
                  - **三角函數與三角比解**：利用正弦、餘弦、和差角、倍半角公式等，以角度與邊長關係突破。
@@ -2690,7 +2715,7 @@ class ExamParser:
                  - **代數降階與對稱多項式解（多項式、方程）**：利用韋達定理、對稱多項式化簡、拉格朗日插值法等，避免暴力展開。
                  - **函數圖形與幾何交點法**：畫出函數圖形，透過觀察對稱中心、凹凸性、切線逼近或遞增遞減特性求解。
                  - **特殊值法與極端值逼近法**：代入極端邊界值、對稱特殊點或特殊格子點，作為驚艷的快速驗算或秒殺解法。
-               - 請確保這 3~4 種解法各有千秋，邏輯鏈嚴密、過程完整且 LaTeX 格式精緻，帶給學生全方位的思維激盪！
+               - 請確保這 2~4 種解法各有千秋，邏輯鏈嚴密、過程完整且 LaTeX 格式精緻，帶給學生全方位的思維激盪！
                - 對於**代數方程式、多項式 or 函數極值題**，嘗試提供：
                  - **「代數邏輯推演法」**。
                  - **「函數圖形與幾何交點法」**：畫出函數圖形，觀察對稱軸、對稱中心、凹凸性或線性逼近來求得視覺化的幾何解。
