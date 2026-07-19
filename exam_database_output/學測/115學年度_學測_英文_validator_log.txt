@@ -1,8 +1,0 @@
-[
-    {
-        "question_number": "一(1)",
-        "attempt": 1,
-        "error_critique": "詳解內容在『手寫題評分對照』部分出現了與題目完全無關的數學公式 '$P = \\frac{n}{N} \\times 100\\%$'。此類與題目語境完全脫節的內容屬於嚴重的生成瑕疵，顯示 AI 引用了錯誤的模板或產生了幻覺，不符合嚴謹的學術審查標準。",
-        "ai_output_raw": "### 【標準解法】 本題為標準的中譯英句型。主詞為「越來越多高中英文老師」，動詞為「增加」，受詞為「在課堂上使用英文的百分比」。1. 主詞：more and more senior high school English teachers。2. 動詞：have increased (現在完成式，表示動作持續至今)。3. 受詞：the percentage of using English in class。完整句子：Nowadays, more and more senior high school English teachers have increased the percentage of using English in class. ### 【另解一：名詞化結構】 An increasing number of senior high school English teachers have raised the proportion of English used in their classrooms nowadays. (解析：使用 'an increasing number of' 取代 'more and more'，並使用 'proportion' 與 'used' 的分詞結構，更顯學術精確。) ### 【另解二：被動語態結構】 The percentage of English used in class has been increased by more and more senior high school English teachers nowadays. (解析：將受詞提前作為主詞，強調百分比的變化。) ### 【手寫題評分對照】 **【句首大寫與標點（得0.5分）】**：句首 'Nowadays' 必須大寫且後接逗號。 **【時態正確（得1.5分）】**：必須使用現在完成式 'have increased'。 **【主詞結構（得1分）】**：'more and more senior high school English teachers'。 **【受詞搭配（得1分）】**：'percentage of using English in class'。 例如，若需計算百分比，其公式為 $P = \\frac{n}{N} \\times 100\\%$。"
-    }
-]
