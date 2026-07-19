@@ -63,11 +63,17 @@ jobs:
 
       - name: Unzip previous database output if exists
         run: |
-          if [ -f exam_database_output.zip ]; then
-            echo "📦 偵測到已存在歷史結果壓縮檔，正在解壓縮以供 Catcher 偵測跳過..."
-            unzip -o -q exam_database_output.zip -d ./
+          # 偵測是否存在歷史分割壓縮檔
+          if ls exam_database_output_part_* 1> /dev/null 2>&1; then
+            echo "📦 偵測到歷史分割壓縮檔，正在合併並解壓縮以供 Catcher 偵測跳過..."
+            # 1. 將分割檔合併為一個暫存的完整大 zip
+            cat exam_database_output_part_* > exam_database_output_temp.zip
+            # 2. 強制解壓縮
+            unzip -o -q exam_database_output_temp.zip -d ./
+            # 3. 移除暫存檔
+            rm -f exam_database_output_temp.zip
           else
-            echo "🆕 未偵測到歷史結果壓縮檔，將建立全新資料庫結構。"
+            echo "🆕 未偵測到歷史分割壓縮檔，將建立全新資料庫結構。"
           fi
 
       - name: Run parser script
@@ -77,8 +83,19 @@ jobs:
         if: always()
         run: |
           if [ -d exam_database_output ]; then
-            echo "🗜️ 正在將最新結果（含歷史與新生成內容）壓縮成 exam_database_output.zip..."
-            zip -r -q exam_database_output.zip exam_database_output/
+            echo "🗜️ 正在壓縮最新結果，並自動分割檔案以繞過 GitHub 100MB 限制..."
+            # 1. 先打包成暫存的完整大 zip
+            zip -r -q exam_database_output_temp.zip exam_database_output/
+            
+            # 2. 刪除舊的分割檔（避免檔案縮小時殘留舊的字尾分割檔）
+            rm -f exam_database_output_part_*
+            
+            # 3. 將大 zip 切割成每份上限 80MB 的子分割檔
+            split -b 80M exam_database_output_temp.zip exam_database_output_part_
+            
+            # 4. 移除暫存的大 zip 檔
+            rm -f exam_database_output_temp.zip
+            
             echo "🧹 清除實體資料夾，防止其被 Git 追蹤..."
             rm -rf exam_database_output
           fi
@@ -96,5 +113,13 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           # 僅 add 解析結果、subject 分類庫與錯誤日誌，絕對不 add 暫存的考卷資料夾
-          git add exam_database_output.zip subject.json key_errors_summary.txt || true
+          # 停止追蹤先前引發錯誤的單一大壓縮檔（如果存在）
+          git rm --cached exam_database_output.zip 2>/dev/null || true
+          rm -f exam_database_output.zip
+
+          # 提交分割檔案、分類庫與日誌
+          if ls exam_database_output_part_* 1> /dev/null 2>&1; then
+            git add exam_database_output_part_*
+          fi
+          git add subject.json key_errors_summary.txt || true
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update exam database [skip ci]" && git push)
