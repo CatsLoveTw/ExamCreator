@@ -8,15 +8,14 @@ on:
     branches:
       - main
     paths:
-      # 當這些資料夾有新的 PDF 被 push 時，自動觸發解析
-      - 'ast_exam_papers_only/**'
-      - 'gsat_exam_papers_only/**'
+      # 當 parser 程式本身或工作流更新時觸發
+      - 'catcher.py'
+      - '.github/workflows/**'
   workflow_dispatch: # 手動強制執行
 
 jobs:
   run-parser:
     runs-on: ubuntu-latest
-    # 給予 Actions 寫入 Repo 的權限，for push :)
     permissions:
       contents: write
 
@@ -36,14 +35,53 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # 安裝專門下載 Google Drive 大檔案的 gdown 工具
+          pip install gdown
+
+      # 💡 [新增步驟] 從雲端硬碟下載並解壓原始 PDF 試卷
+      - name: Download and Unzip Exam Papers
+        run: |
+          echo "⬇️ 正在從雲端下載考卷壓縮檔..."
+          
+          # 請將下方 URL 中的 FILE_ID 替換為您分享連結中 file/d/ 之後的那串字元
+          gdown --id "10MeFHvfK-bAZQ3FZ0lMko_ba0RYtfwsT" -O exams_temp.zip
+          
+          echo "📂 正在解壓縮檔案..."
+          # 解壓縮至工作區目錄
+          unzip -q exams_temp.zip -d ./
+          
+          # 安全清理下載的 zip 暫存檔，確保不佔用額外硬碟空間
+          rm -f exams_temp.zip
+          
+          # 檢查確認解壓後的路徑是否存在（供除錯使用）
+          echo "🔍 檢查目前目錄結構："
+          ls -ld ast_exam_papers_only gsat_exam_papers_only || echo "⚠️ 警告：解壓路徑與預期不符，請確認 zip 內的目錄結構是否正確。"
 
       - name: Create key.txt from Secrets
         run: |
           echo "${{ secrets.GEMINI_API_KEYS }}" > key.txt
 
+      - name: Unzip previous database output if exists
+        run: |
+          if [ -f exam_database_output.zip ]; then
+            echo "📦 偵測到已存在歷史結果壓縮檔，正在解壓縮以供 Catcher 偵測跳過..."
+            unzip -o -q exam_database_output.zip -d ./
+          else
+            echo "🆕 未偵測到歷史結果壓縮檔，將建立全新資料庫結構。"
+          fi
+
       - name: Run parser script
         run: python catcher.py
-        
+
+      - name: Zip database output and clean up folder
+        if: always()
+        run: |
+          if [ -d exam_database_output ]; then
+            echo "🗜️ 正在將最新結果（含歷史與新生成內容）壓縮成 exam_database_output.zip..."
+            zip -r -q exam_database_output.zip exam_database_output/
+            echo "🧹 清除實體資料夾，防止其被 Git 追蹤..."
+            rm -rf exam_database_output
+          fi
 
       - name: Upload Key Status Dashboard
         if: always()
@@ -57,5 +95,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add exam_database_output/ subject.json key_errors_summary.txt || true
+          # 僅 add 解析結果、subject 分類庫與錯誤日誌，絕對不 add 暫存的考卷資料夾
+          git add exam_database_output.zip subject.json key_errors_summary.txt || true
           git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update exam database [skip ci]" && git push)
