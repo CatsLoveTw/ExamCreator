@@ -44,7 +44,7 @@ jobs:
           echo "⬇️ 正在從雲端下載考卷壓縮檔..."
           
           # 請將下方 URL 中的 FILE_ID 替換為您分享連結中 file/d/ 之後的那串字元
-          gdown --id "10MeFHvfK-bAZQ3FZ0lMko_ba0RYtfwsT" -O exams_temp.zip
+          gdown "10MeFHvfK-bAZQ3FZ0lMko_ba0RYtfwsT" -O exams_temp.zip
           
           echo "📂 正在解壓縮檔案..."
           # 解壓縮至工作區目錄
