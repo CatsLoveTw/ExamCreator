@@ -48,7 +48,7 @@ jobs:
           
           echo "📂 正在解壓縮檔案..."
           # 解壓縮至工作區目錄
-          unzip -q exams_temp.zip -d ./
+          unzip -o -q exams_temp.zip -d ./
           
           # 安全清理下載的 zip 暫存檔，確保不佔用額外硬碟空間
           rm -f exams_temp.zip
