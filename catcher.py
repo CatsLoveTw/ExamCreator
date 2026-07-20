@@ -2575,7 +2575,7 @@ class ExamParser:
 
         # 題目擷取完成後，進行對位補件
         # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
-         for q_data in all_extracted_questions:
+        for q_data in all_extracted_questions:
             q_num = q_data['question_number']
             q_type = q_data.get('question_type', '')
             has_options = len(q_data.get("options", [])) > 0
