@@ -1231,10 +1231,15 @@ class ExamParser:
     在大考數學科的答案卷中，**『題號』與『答案』常常都是純數字**（例如：第 1 題答案是 3，第 2 題答案是 1，第 3 題答案是 2）。
     - **【嚴禁行列錯位與自我歸因】**：AI 極易因為兩者皆為數字，而把「題號/列號本身」當作該題的「答案」讀出（例如：錯誤地將『題號 1』讀作第 1 題的答案『1』、將『題號 2』讀作第 2 題的答案『2』）！
     - **【行列交叉定位法】**：
-      * 讀取任何一個答案數字前，請先「水平畫一條無形線」與「垂直畫一條無形線」，確認該答案格的「正上方」或「正左方」對應的「列號/題號」到底是多少。
+      * 讀取 any 答案數字前，請先「水平畫一條無形線」與「垂直畫一條無形線」，確認該答案格的「正上方」或「正左方」對應的「列號/題號」到底是多少。
       * **【連續性交叉檢查】**：大考答案卷的列號（如 1, 2, 3... 8, 9, 10, 11...）在整張考卷中是**嚴格單調遞增且不重複**的！如果你發現某個選填題（如選填 B）你讀出的列號是 9，但前一題已經用了 9，這代表你發生了「橫向錯位」！請立即重新對位。
       * **【對應核對】**：請反覆在心裡默唸：『第 X 題的答案，永遠是位於第 X 題右邊（或下邊）對應答案格內部的數字，絕對不是 X 本身！』
-      * 例如 114 數乙的第一列為 `1 3`，代表第 1 題答案為 `3`，絕對不要把答案誤讀為 `1`！第二列為 `2 1`，代表第 2 題答案為 `1`，絕對不要誤讀為 `2`！
+      * 例如 114 數乙的第一列為 `1 3`，代表第 1 題答案為 `3`，絕對不要把答案誤讀為 `1`！第二列為 `2 1`，代表第 2 2 題答案為 `1`，絕對不要誤讀為 `2`！
+
+    🚨【多直欄選擇題：單雙位數題號與邊界防錯位限制】🚨：
+    在多直欄並排的選擇題答案表中（例如左邊是 1~20 題，右邊是 21~40 題）：
+    - **【尾數防混淆對位】**：題號 `1`、`11`、`21`、`31`、`41` 的尾數皆為 `1`。當讀取題號（如 `31` 或 `40`）的答案時，請**強制水平對齊該題號**，確認讀取的是緊鄰該題號右側的答案（如 `31. C` 或 `40. A`），絕對禁止因為單雙位數視覺模糊而跨欄讀取到相鄰欄位（如第 1 題或第 39 題）的答案！
+    - **【直欄隔離原則】**：每一欄之間有明顯的物理分隔。讀取的答案與題號必須屬於【同一個直欄內部緊密相連的單一配對】，嚴禁跨越直欄分界線去抓取相鄰直欄的答案字元！
 
     【表格邊界雜訊過濾（防跨科感染）】：
     - 有些解答卷的頁尾或邊角會印有其他科目的備註（例如：某某科第18題不計分/送分）。請你【只關注並讀取結構化答案表格內部的數字】，**絕對禁止**將表格外的「不計分」或「送分」等字眼錯誤掛載到正常的數學選填題上！
@@ -1763,6 +1768,13 @@ class ExamParser:
                 if q.get("options"):
                     logging.warning(f"🧹 [自動清洗] 偵測到非選擇題型 {q_num} ({q_type}) 含有不合規的 options，已自動強制清除！")
                 q["options"] = []
+                
+            # 🚨 [防禦性機制 - 提案三：選擇題「評分標準」反向去污染清洗器]
+            # 若為選擇題，硬性將第一階段可能因 AI 讀取大篇幅 Rubric 產生的幻覺與錯位 scoring_criteria 清空，
+            # 確保資料庫中僅有非選擇題/手寫題包含評分標準，徹底消除選擇題（如 Q31, Q53）被寫入評分說明之 Bug。
+            if q_type in ["單選題", "多選題"]:
+                q["scoring_criteria"] = ""
+                
                 
             # 2. 【方案 1：選填題「挖空結構與答案長度」自動比對器】
             if q_type == "選填題":
@@ -2386,8 +2398,37 @@ class ExamParser:
         # 🚨 [核心修復] 第一階段擷取完成，立即執行自動清洗與選填題長度驗證
         all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
         # 🚨 [跨批次去重] 強制在進入解題前執行去重，過濾交界處重複讀取的題目
-        # 🚨 [跨批次去重] 強制在進入解題前執行去重，過濾交界處重複讀取的題目
         all_extracted_questions = deduplicate_questions(all_extracted_questions)
+
+        # 🚨 [防禦性機制 - 提案四：科目範疇與子學科安全邊界對齊器]
+        # 避免大考綜合考科（如社會、自然）因題幹涉及交叉學科詞彙，導致 Stage 1 模型產生跨科分類污染
+        # （例如：在社會科中將包含「生物多樣性」的地理題錯誤分類為「生物」）
+        for q_data in all_extracted_questions:
+            q_sub = q_data.get("sub_subject")
+            
+            if normalized_subject == "社會":
+                if q_sub not in ["歷史", "地理", "公民與社會"]:
+                    q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
+                    if any(k in q_text for k in ["憲法", "法律", "政府", "權利", "經濟", "市場", "社會", "勞工", "法規", "法治"]):
+                        q_data["sub_subject"] = "公民與社會"
+                    elif any(k in q_text for k in ["地圖", "氣候", "地形", "空間", "地理", "貿易", "生活圈", "自然環境", "沙丘", "生活圈", "位置"]):
+                        q_data["sub_subject"] = "地理"
+                    else:
+                        q_data["sub_subject"] = "歷史"
+            elif normalized_subject == "自然":
+                if q_sub not in ["物理", "化學", "生物", "地球科學"]:
+                    q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
+                    if any(k in q_text for k in ["力", "速度", "電", "磁", "能量", "波", "加速度", "力學"]):
+                        q_data["sub_subject"] = "物理"
+                    elif any(k in q_text for k in ["化學", "反應", "分子", "溶液", "元素", "原子", "化合物"]):
+                        q_data["sub_subject"] = "化學"
+                    elif any(k in q_text for k in ["細胞", "基因", "生態", "植物", "動物", "生物", "染色體", "群落"]):
+                        q_data["sub_subject"] = "生物"
+                    else:
+                        q_data["sub_subject"] = "地球科學"
+            else:
+                # 單一學科考卷，強行對位，不允許任何分叉
+                q_data["sub_subject"] = normalized_subject
 
         # 🚨 [防禦性機制 - 提案一：全卷題號覆蓋率主動對齊與精準補漏機制]
         try:
@@ -2534,7 +2575,7 @@ class ExamParser:
 
         # 題目擷取完成後，進行對位補件
         # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
-        for q_data in all_extracted_questions:
+         for q_data in all_extracted_questions:
             q_num = q_data['question_number']
             q_type = q_data.get('question_type', '')
             has_options = len(q_data.get("options", [])) > 0
@@ -2582,7 +2623,7 @@ class ExamParser:
                             stitch_prompt = f"""
                             這是一份大考混合題的官方評分標準。
                             請你仔細閱讀這張圖片，找出該混合題中「選擇題/單選/多選/勾選」部分的標準答案。
-                            我們只需要選擇題部分的答案字元（如 'C' 或 '4'），不要有任何其他說明。
+                            我們距離選擇題部分的答案字元（如 'C' 或 '4'），不要有任何其他說明。
                             """
                             
                             try:
@@ -2602,6 +2643,59 @@ class ExamParser:
                                             logging.info(f"🎯 [縫合成功] 題號 {q_num} (混合題) 選擇答案已修正為: {q_data['answer']}")
                             except Exception as e:
                                 logging.error(f"混合題答案跨模態縫合失敗: {e}") 
+
+                # 4. 🚨 [防禦性機制 - 提案三：混合題「勾選與選填選項」跨模態反向重建器]
+                # 針對新課綱中常見的「勾選+簡答」混合題，其選項（如 ☑ 臺灣省戒嚴令）只印在答題卷上，
+                # 導致從題目卷中擷取的 options 為空。我們在此主動利用已掛載的 評分標準文字/圖片 進行反向提取重建。
+                sc_text = q_data.get('scoring_criteria', '')
+                has_checkbox_clue = "勾選" in q_data.get('question_text', '') or any(sym in sc_text for sym in ["☑", "□", "■", "✔"])
+                
+                if has_checkbox_clue and not q_data.get('options'):
+                    logging.info(f"⚖️ [選項重建] 偵測到題號 {q_num} 為「勾選混合題」且缺少選項，啟動跨模態選項提取...")
+                    
+                    class ExtractedCheckboxes(BaseModel):
+                        options: List[OptionItem] = Field(description="從評分標準或答題卷中提取的所有勾選選項列表。按順序為 A, B, C, D...。")
+                        correct_key: str = Field(description="被勾選（☑ 或 ■）的正確選項代號（如 'A', 'B' 等）。")
+
+                    stitch_prompt = f"""
+                    這是一份大考非選擇題的官方評分標準。
+                    請你仔細閱讀以下評分文字與圖片，找出該題在答題卷上供學生「勾選」的所有選項內容（通常在『滿分參考答案』中以 ☑ 或 □ 標示）。
+                    
+                    任務：
+                    1. 提取所有選項的文字，依序編號為 A, B, C, D...。
+                    2. 找出被勾選（☑ 或帶有打勾、黑塊標記）的那個正確選項，將其 key（如 'A'）填入 `correct_key`。
+                    
+                    【評分標準文字對照】：
+                    {sc_text}
+                    """
+                    
+                    rubric_paths = q_data.get('rubric_image_paths', [])
+                    stitch_contents = [stitch_prompt]
+                    if rubric_paths and os.path.exists(rubric_paths[0]):
+                        stitch_contents.append(Image.open(rubric_paths[0]))
+                        
+                    try:
+                        res_opts, _ = self.ai_manager.generate_with_retry(
+                            contents=stitch_contents,
+                            response_schema=ExtractedCheckboxes,
+                            temperature=0.0,
+                            preferred_model="gemini-3.5-flash",
+                            enable_thinking=True,
+                            task_desc=f"{paper_tag} [混合題選項重建 Q{q_num}]"
+                        )
+                        if res_opts and res_opts.get('options'):
+                            # 將重建的選項寫回題目的 options 欄位中
+                            q_data['options'] = res_opts['options']
+                            q_data['question_type'] = "混合題"
+                            
+                            # 如果原本答案為空、斜線或指示詞，則將 correct_key 作為答案
+                            current_ans = str(q_data.get('answer', '')).strip()
+                            if current_ans in ["", "／", "/", "\\", "無"]:
+                                q_data['answer'] = res_opts.get('correct_key', '')
+                                
+                            logging.info(f"🎯 [重建成功] 題號 {q_num} 已成功恢復 {len(q_data['options'])} 個勾選選項，並更新答案為: {q_data['answer']}")
+                    except Exception as e:
+                        logging.error(f"混合題勾選選項重建失敗: {e}")
 
          # 🚨 新增：題組題圖片與資源自動傳播共享機制
         # 只要兩題以上的 shared_context 相同且不為空，即判定為同一題組。
@@ -2644,12 +2738,15 @@ class ExamParser:
                 
             matched_sc = None
             for existing_sc in group_pools.keys():
-                # 容忍 92% 以上的字元相似度，確保微小差異仍能正確歸類
-                if get_context_similarity(sc, existing_sc) >= 0.92:
-                    prev_questions = group_pools[existing_sc]["questions"]
-                    if i - prev_questions[-1]["index"] <= 6:
-                        matched_sc = existing_sc
-                        break
+                prev_questions = group_pools[existing_sc]["questions"]
+                is_nearby = (i - prev_questions[-1]["index"] <= 4)
+                similarity = get_context_similarity(sc, existing_sc)
+                
+                # 🚨 跨頁題組相容性判定：若字元相似度 >= 0.92，或是題號鄰近且雙方皆含有較長（>100字）的實質背景描述，
+                # 則視為同一個因跨頁而產生文本斷裂的題組，進行歸併與後續的文本縫合
+                if similarity >= 0.92 or (is_nearby and len(sc) > 100 and len(existing_sc) > 100):
+                    matched_sc = existing_sc
+                    break
                         
             if matched_sc:
                 group_pools[matched_sc]["questions"].append({"index": i, "data": q})
@@ -2661,10 +2758,21 @@ class ExamParser:
                     "_cropped_pil_images": []
                 }
 
-        # 僅針對真正含有 2 題或以上的題組進行資源共享，並對位去重
+        # 僅針對真正含有 2 題或以上的題組進行資源共享，並對位去重與文本拼接
         for sc, pool in group_pools.items():
             if len(pool["questions"]) < 2:
                 continue
+            
+            # 🚨 解決「跨頁文本斷裂 (Context-Splitting)」：提取並拼合題組中所有相異的 shared_context 文本片段
+            combined_context_parts = []
+            for item in pool["questions"]:
+                part_sc = item["data"].get("shared_context", "").strip()
+                if part_sc and part_sc not in combined_context_parts:
+                    # 避免部分重合的子字串產生重複冗餘，僅加入相異部分
+                    if not any(part_sc in existing or existing in part_sc for existing in combined_context_parts):
+                        combined_context_parts.append(part_sc)
+            
+            merged_shared_context = "\n\n".join(combined_context_parts)
                 
             for item in pool["questions"]:
                 q = item["data"]
@@ -2689,11 +2797,12 @@ class ExamParser:
                     
             for item in pool["questions"]:
                 q = item["data"]
+                q['shared_context'] = merged_shared_context # 🚨 核心修正：將縫合後最完整的題組背景同步寫回每一題，杜絕跨頁資訊遺漏！
                 q['image_paths'] = unique_paths
                 q['image_bboxes'] = unique_bboxes
                 q['_cropped_pil_images'] = unique_pil_imgs
                 q['has_image'] = len(unique_paths) > 0
-                logging.info(f"  -> 🔗 [題組共享] 題號 {q['question_number']} 已自動共享並連結題組圖片共 {len(unique_paths)} 張。")
+                logging.info(f"  -> 🔗 [題組共享] 題號 {q['question_number']} 已自動共享並連結題組圖片與完整拼合上下文。")
                 
         math_scope_instruction = ""
         if math_type:
@@ -2826,7 +2935,12 @@ class ExamParser:
                     q_rubric = SUBJECT_DIFFICULTY_RUBRICS.get(q_sub, GENERAL_DIFFICULTY_RUBRIC)
                     q_allowed = SUBJECT_TAXONOMY.get(q_sub, {"topics": [], "techniques": []})
                     
-                    item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_data['question_text']}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：【{q_data['answer']}】\n"
+                    # 🚨 核心修正：針對篇章結構、克漏字等題幹僅有底線 "______" 的題型，動態注入定位標記，防止批次生成時產生跨題號交叉混淆（如 31 題寫了 32 題的分析）
+                    q_text_prompt = q_data['question_text']
+                    if q_text_prompt.strip() in ["", "______", "___"]:
+                        q_text_prompt = f"【定位引導】：請針對 `shared_context` 中編號為 [{q_data['question_number']}] 的空格進行前後文邏輯與語意銜接分析，求出最適合填入第 [{q_data['question_number']}] 空格的正確選項。"
+                    
+                    item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：【{q_data['answer']}】\n"
                     
                     # 🚨 核心優化：如果是題組題（含有共同背景），放寬「題號一致性」審查警告，防止 AI 誤判因共用圖表而產生的標籤不一致，避免陷入重試死循環
                     if q_data.get('shared_context', '').strip():
@@ -2933,7 +3047,17 @@ class ExamParser:
                         # 3. 🚨 [防禦性機制 - 提案一：雙重不一致「學術裁決與防硬凹」仲裁機制 (第一階段：偵測)]
                         # 針對選擇題，提取 AI 真正判定為「正確」的選項
                         if q_data.get("question_type") in ["單選題", "多選題"] and isinstance(sol.get("options_analysis"), list):
-                            derived_correct_keys = [opt.get("key", "").strip() for opt in sol.get("options_analysis", []) if "正確" in opt.get("explanation", "")]
+                            derived_correct_keys = []
+                            for opt in sol.get("options_analysis", []):
+                                exp = str(opt.get("explanation", "")).strip()
+                                # 🚨 繁簡雙向關鍵字容錯：支持多種肯定與否定語境的精確判定，防範 fallback 字典漏字造成的漏判
+                                is_correct = any(w in exp for w in ["正確", "正确", "對", "对", "應選", "应选", "合適", "合适", "最適", "最适", "選", "选"])
+                                is_incorrect = any(w in exp for w in ["錯誤", "错误", "不正確", "不正确", "不符", "不合"])
+                                if is_correct and not is_incorrect:
+                                    derived_correct_keys.append(opt.get("key", "").strip())
+                                elif "正確" in exp and "錯誤" not in exp:
+                                    derived_correct_keys.append(opt.get("key", "").strip())
+                                    
                             derived_ans = "".join(sorted(derived_correct_keys))
                             official_ans = str(q_data.get('answer', '')).strip()
                             
@@ -2941,12 +3065,21 @@ class ExamParser:
                             derived_clean = derived_ans.replace(",", "").replace(" ", "")
                             official_clean = official_ans.replace(",", "").replace(" ", "")
                             
-                            if derived_clean and official_clean and derived_clean != official_clean:
+                            # 🚨 [大防禦機制修補]：
+                            # 1. 正常情況下，若推導答案與官方答案不符，觸發衝突。
+                            # 2. 空值/無解防禦：若該題為單選題，但 AI 的選項分析中竟然「沒有推導出任何一個正確選項」（derived_clean 為空），這在邏輯上本身就是嚴重漏洞，必須直接強制攔截並重試/仲裁！
+                            has_conflict = False
+                            if q_data.get("question_type") == "單選題" and (not derived_clean or len(derived_clean) != 1):
+                                has_conflict = True
+                            elif derived_clean != official_clean:
+                                has_conflict = True
+                                
+                            if has_conflict and official_clean:
                                 # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
                                 valid_batch[idx]["_discrepancy_detected"] = True
-                                valid_batch[idx]["_derived_ans"] = derived_ans
+                                valid_batch[idx]["_derived_ans"] = derived_ans if derived_ans else "（未順利推導出唯一正確選項）"
                                 logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
-
+                                
                     # 4. 執行原有的 Markdown 格式化轉換
                     # 🚨 [防禦性機制 - 提案二：選填題/非選題格式自動化預校驗器]
                     for idx, sol in enumerate(salvaged_solutions):
