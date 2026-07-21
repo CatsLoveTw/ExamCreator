@@ -2697,14 +2697,6 @@ class ExamParser:
                     except Exception as e:
                         logging.error(f"混合題勾選選項重建失敗: {e}")
 
-         # 🚨 新增：題組題圖片與資源自動傳播共享機制
-        # 只要兩題以上的 shared_context 相同且不為空，即判定為同一題組。
-        # 我們將它們的所有裁剪圖片、Bounding Boxes 進行合併，使題組內的每一題（如第7題）都能共享並看見題組原圖（如第6題的結構圖）！
-        # 🚨 [題組圖片資源共享防污染機制] 嚴格驗證題號鄰近性與非通用說明的題組共享
-        def is_generic_instruction(text):
-            generic_keywords = ["注意事項", "答案卡", "畫記", "作答說明", "答題說明", "本部分", "單選題", "多選題", "選填題"]
-            matches = sum(1 for kw in generic_keywords if kw in text)
-            return matches >= 2 or len(text.strip()) < 20
 
         # 🚨 [題組圖片資源共享防污染機制] 嚴格驗證題號鄰近性與非通用說明的題組共享
         # 🚨 新增：題組題圖片與資源自動傳播共享機制
@@ -3241,9 +3233,13 @@ class ExamParser:
                                     recheck_contents_with_labels = [recheck_prompt]
                                     
                                     # 1. 優先放入已裁剪的原始題目附圖（若有）
-                                    if q_data.get('_cropped_pil_images'):
+                                    if q_data.get('image_paths'):
                                         recheck_contents_with_labels.append("=== 原始裁剪出的題目附圖 ===")
-                                        recheck_contents_with_labels.extend(q_data['_cropped_pil_images'])
+                                        for p in q_data['image_paths']:
+                                            if os.path.exists(p):
+                                                img_obj = Image.open(p)
+                                                ans_pil_imgs.append(img_obj)
+                                                recheck_contents_with_labels.append(img_obj)
                                     
                                     # 2. 優先放入題目原卷的整頁影像，並顯式標註
                                     target_page_idx = q_data.get('page_number', 1) - 1
