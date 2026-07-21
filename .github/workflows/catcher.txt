@@ -36,7 +36,6 @@ jobs:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
           # 引入個人帳號的 OAuth 授權 Token
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           printf "%s" "$GEMINI_API_KEYS_ENV" > key.txt
           

@@ -9,11 +9,15 @@ import logging
 import threading
 import fitz  # PyMuPDF
 from PIL import Image
+
 from typing import List, Optional, Dict, Literal
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
+from groq import Groq
+from groq import RateLimitError
+
 import queue
 import uuid
 import datetime
@@ -515,8 +519,9 @@ PROMPT_STAGE_3_VALIDATOR = """
 1. **無中生有**：AI 沒有去解題目的「共同資訊」或方程式，自己憑空捏造數字。
 2. **邏輯斷層硬湊**：AI 算到一半算不出結果，突然神來一筆。
 3. **知識性錯誤與計算失誤**：AI 的代數推導、英文文法、化學結構有明顯硬傷。
-4. **放寬結論句限制**：若 AI 的『過程分析』已經 100% 正確，僅僅是最後沒有總結字眼，請判定為 is_valid = true。
-🚨 5. **持續重掃描判定（連續報警）**：若你發現雖然上一輪重掃描更新了數據，但詳解中依然存在嚴重的化學式/數學結構矛盾（這代表上一次重掃描依然沒有看清楚、或者重掃描也看錯了），你【必須繼續將 suspects_ocr_error 設為 true】！引導系統進行更精確的二次或三次重掃描比對，絕對不要輕易放棄！
+4. **自動圖解邏輯核對（若有）**：若詳解末端附帶了自動生成的幾何圖解（Markdown 圖片連結），請檢視其推導文字與座標邏輯是否符合前述的代數運算，若產生嚴重矛盾，請指出並退回。
+5. **放寬結論句限制**：若 AI 的『過程分析』已經 100% 正確，僅僅是最後沒有總結字眼，請判定為 is_valid = true。
+🚨 6. **持續重掃描判定（連續報警）**：若你發現雖然上一輪重掃描更新了數據，但詳解中依然存在嚴重的化學式/數學結構矛盾（這代表上一次重掃描依然沒有看清楚、或者重掃描也看錯了），你【必須繼續將 suspects_ocr_error 設為 true】！引導系統進行更精確的二次或三次重掃描比對，絕對不要輕易放棄！
 """
 
 
@@ -788,7 +793,10 @@ class GeminiFreeTierManager:
         self.model_idx = 0
         self.lock = threading.Lock()
         self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型
-        
+        self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        self.groq_client = Groq(api_key=self.groq_api_key) if self.groq_api_key else None
+
+
     def log_key_error(self, key_str, error_code, error_message):
         """將失效/被拒金鑰記錄到本地 key_errors_summary.txt 檔案中"""
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -974,7 +982,12 @@ class GeminiFreeTierManager:
                 # 突發型 429 則加入冷卻隊伍
                 key.request_times.extend([time.time()] * 3)
 
-    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=5, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = ""):
+    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=5, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
+        # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
+        if provider == "groq":
+            return self._generate_with_groq(contents, response_schema, temperature, max_attempts, preferred_model, task_desc)
+
+        # === 以下為原本的 Google Gemini 處理邏輯 ===
         estimated_tokens = self.estimate_tokens(contents)
         attempts = 0
         while attempts < max_attempts:
@@ -1167,6 +1180,103 @@ class GeminiFreeTierManager:
                 time.sleep(2)
         return None, "請求失敗"
 
+    def _generate_with_groq(self, contents, response_schema, temperature, max_attempts, preferred_model, task_desc):
+        """專門處理 Groq 端點 (DeepSeek-R1 / Qwen / Llama3.3) 的呼叫邏輯與 JSON 剝離"""
+        if not self.groq_client:
+            logging.error("🚨 尚未設定 GROQ_API_KEY，無法使用 Groq (DeepSeek/Qwen) 服務！將回傳失敗。")
+            return None, "groq_key_missing"
+
+        # 1. 影像清洗：Groq 上的 DeepSeek-R1 與多數開源模型為純文字模型，必須濾除 PIL.Image
+        text_prompts = [str(c) for c in contents if isinstance(c, str)]
+        combined_prompt = "\n\n".join(text_prompts)
+        
+        # 2. 構建嚴格的 JSON 系統提示 (System Prompt)
+        schema_json = response_schema.model_json_schema()
+        system_msg = (
+            "You are a highly logical math and science expert. "
+            f"You MUST output exactly matching this JSON schema: {json.dumps(schema_json)}. "
+            "Do NOT wrap the JSON in markdown code blocks like ```json. Output ONLY the raw JSON object after your thinking process."
+        )
+        
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": combined_prompt}
+        ]
+        
+        model_name = preferred_model if preferred_model else "deepseek-r1-distill-llama-70b"
+        attempts = 0
+        
+        while attempts < max_attempts:
+            try:
+                import random
+                # 🚨 突破 TPM 限制的核心：加入隨機抖動 (Jitter)，錯開多執行緒的併發請求
+                time.sleep(random.uniform(2.5, 6.0))
+                
+                desc_str = f" {task_desc}" if task_desc else ""
+                print(f"🧠{desc_str} 嘗試使用 Groq 模型 {model_name} 進行深度推導 (第 {attempts + 1} 次嘗試)...", flush=True)
+                
+                response = self.groq_client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=temperature,
+                    max_completion_tokens=8000, # 開放最大輸出長度以容納詳解與思考鏈
+                )
+                
+                raw_text = response.choices[0].message.content
+                
+                # === 🚨 核心邏輯：剝除 DeepSeek-R1 的 <think> 標籤 ===
+                if "<think>" in raw_text and "</think>" in raw_text:
+                    # R1 會把思考過程放在 <think> 標籤內，我們只需要標籤後的 JSON 結果
+                    raw_text = raw_text.split("</think>")[-1]
+                elif "</think>" in raw_text:
+                    raw_text = raw_text.split("</think>")[-1]
+                
+                raw_text = raw_text.strip()
+                
+                # 預防模型加上了 Markdown 的 ```json 標籤
+                if raw_text.startswith("```json"):
+                    raw_text = raw_text[7:]
+                if raw_text.startswith("```"):
+                    raw_text = raw_text[3:]
+                if raw_text.endswith("```"):
+                    raw_text = raw_text[:-3]
+                    
+                raw_text = raw_text.strip()
+
+                # === 後續 JSON 清洗與容錯邏輯（繼承你原本完美的清洗器） ===
+                raw_text = re.sub(r'\\"(?=\s*[,}\]])', r'\\\\"', raw_text)
+                raw_text = self.escape_latex_backslashes(raw_text)
+                def escape_literal_newlines(match):
+                    return match.group(0).replace("\n", "\\n").replace("\r", "\\r")
+                raw_text = re.sub(r'"(?:[^"\\]|\\.)*"', escape_literal_newlines, raw_text, flags=re.DOTALL)
+                
+                # 記憶體層級繁簡轉換
+                raw_text = s2t(raw_text)
+                term_replacements = {
+                    "概率": "機率", "矢量": "向量", "標量": "純量", 
+                    "宏觀": "巨觀", "微觀": "微觀", "屏幕": "螢幕",
+                    "分辨率": "解析度", "內存": "記憶體", "算法": "演算法"
+                }
+                for simp_term, tw_term in term_replacements.items():
+                    raw_text = raw_text.replace(simp_term, tw_term)
+
+                parsed_json = json.loads(raw_text)
+                parsed_json = self.repair_dict_latex(parsed_json)
+                return parsed_json, None
+
+            except RateLimitError as e:
+                attempts += 1
+                # Groq 的免費版在分鐘級 TPM 滿了時會擋，需要冷卻
+                wait_time = random.uniform(10.0, 15.0)
+                logging.warning(f"⚠️ [Groq 限速] 觸發 TPM/RPM 限制，冷卻 {wait_time:.1f} 秒... (第 {attempts} 次嘗試)")
+                time.sleep(wait_time)
+            except Exception as e:
+                attempts += 1
+                logging.warning(f"⚠️ [Groq API 錯誤] {e} (第 {attempts} 次嘗試)")
+                time.sleep(3)
+                
+        return None, "groq_api_error"
+    
 # ==========================================
 # 3. 核心處理類別 (PDF 裁切、AI 呼叫)
 # ==========================================
@@ -2959,8 +3069,17 @@ class ExamParser:
                             batch_pil_images.append(img_obj)
                             batch_contents.append(img_obj)
 
+                # === 2026 架構：注入 DeepSeek-R1 專屬的思考鏈 (CoT) 引導指令 ===
+                r1_cot_instruction = """
+                🚨【DeepSeek-R1 深度思考指令】🚨：
+                你具備極其強大的邏輯推理能力。在輸出最終的 JSON 結果之前，請你務必在後台的 <think> 標籤內進行「沙盤推演」。
+                - 如果是數學或物理題：請在思考過程中窮盡所有代數運算、幾何座標化的可能性，並代入極端值進行驗算。
+                - 如果是文科題：請在思考過程中仔細拆解每個選項的語意，並與題幹進行嚴謹的邏輯對應。
+                - 確保推導完全自洽、無硬湊邏輯後，再將結果輸出至 JSON 格式中。
+                """
+
                 # 修復原 Prompt 中的全域變數引用 (避免 q_data 被覆蓋)
-                batch_prompt = batch_intro + PROMPT_STAGE_2_MAIN.format(
+                batch_prompt = batch_intro + r1_cot_instruction + PROMPT_STAGE_2_MAIN.format(
                     subject_rubric=q_rubric,
                     q_answer="各題上方所給定的官方答案", # 直接傳字串變數
                     topics=q_allowed.get('topics', []),
@@ -2971,11 +3090,14 @@ class ExamParser:
                 batch_contents.insert(0, batch_prompt)
 
                 try:
-                    # 呼叫 Stage 2 API (加入標籤)
+                    # === 2026 架構：將 Stage 2 引擎切換至 Groq 上的 DeepSeek-R1 ===
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
-                        contents=batch_contents, response_schema=QuestionSolutionBatch,
-                        temperature=0.1 if is_stem else 0.5, preferred_model=stage_2_model, enable_thinking=True,
-                        task_desc=paper_tag
+                        contents=batch_contents, 
+                        response_schema=QuestionSolutionBatch,
+                        temperature=0.6, # R1 適合較高的溫度以利展開深度發散思考 (0.5~0.7)
+                        preferred_model="deepseek-r1-distill-llama-70b", 
+                        provider="groq", # 👈 關鍵路由：將請求發送給 Groq
+                        task_desc=f"{paper_tag} [R1 深度解題]"
                     )
                     
                     # 🚨 核心優化：將 Stage 2 生成的所有詳解結果遞迴且全面地轉為繁體中文，阻斷簡體字存入資料庫
@@ -3097,6 +3219,74 @@ class ExamParser:
                                 valid_batch[idx]["_derived_ans"] = derived_ans
                                 logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
 
+                    # === 2026 架構：步驟四 - 自動幾何/函數圖解生成 (Qwen-2.5-Coder) ===
+                    for idx, sol in enumerate(salvaged_solutions):
+                        q_data = valid_batch[idx]["q_data"]
+                        q_sub = q_data.get("sub_subject", "")
+                        
+                        # 僅針對數學、物理等理科啟動圖解生成，節省 API 呼叫
+                        if any(s in q_sub for s in ["數學", "物理", "化學", "自然"]):
+                            safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
+                            diagram_filename = f"diagram_Q{safe_q_num}_{int(time.time())}.png"
+                            diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
+                            
+                            qwen_prompt = f"""
+                            你是一位頂尖的 Python 數學繪圖專家。以下是一道高中理科題目的題幹與 DeepSeek-R1 產出的詳細解答：
+                            
+                            【題幹】：{q_data.get('question_text', '')}
+                            【解答】：{sol.get('detailed_solution', '')}
+                            
+                            請評估這題是否需要「幾何圖形」、「函數波形」、「物理受力分析」或「化學相圖」來輔助學生理解。
+                            如果需要，請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 來繪製該圖形，並將圖片嚴格儲存至以下絕對路徑：
+                            `{diagram_filepath}`
+                            
+                            【繪圖剛性要求】：
+                            1. 圖片標示請「全面使用英文或數學代號」（如 Point A, f(x), Force F），絕對禁止使用中文字元，防範伺服器無中文字體導致方塊亂碼！
+                            2. 根據解答中的幾何座標、方程式，精確繪製點、線、圓或函數曲線。記得使用 plt.axis('equal') 保持幾何比例。
+                            3. **只輸出 Python 程式碼**，必須使用 ```python ... ``` 包裹，絕對不要輸出任何自然語言解釋！
+                            4. 如果本題完全不需要圖解（如純代數、文字邏輯題），請直接輸出純文字「NO_DIAGRAM」。
+                            """
+                            
+                            try:
+                                # 呼叫 Groq 上的 qwen-2.5-coder-32b
+                                qwen_response = self.ai_manager.groq_client.chat.completions.create(
+                                    model="qwen-2.5-coder-32b",
+                                    messages=[{"role": "user", "content": qwen_prompt}],
+                                    temperature=0.1,
+                                    max_completion_tokens=4000
+                                )
+                                qwen_text = qwen_response.choices[0].message.content.strip()
+                                
+                                if "NO_DIAGRAM" not in qwen_text:
+                                    # 提取 Python 程式碼
+                                    import subprocess
+                                    code_match = re.search(r'```python(.*?)```', qwen_text, re.DOTALL)
+                                    if code_match:
+                                        py_code = code_match.group(1).strip()
+                                        
+                                        # 建立暫存 Python 檔案
+                                        script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}.py")
+                                        with open(script_path, "w", encoding="utf-8") as f:
+                                            f.write(py_code)
+                                            
+                                        # 執行繪圖腳本 (設定超時 15 秒，避免無限迴圈)
+                                        logging.info(f"🎨 正在背景執行 Qwen 繪圖腳本 (題號 {safe_q_num})...")
+                                        result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=15)
+                                        
+                                        if result.returncode == 0 and os.path.exists(diagram_filepath):
+                                            # 將相對路徑注入到詳解的最下方（以利前端顯示）
+                                            rel_path = f"images/{os.path.basename(img_dir)}/{diagram_filename}"
+                                            sol['detailed_solution'] += f"\n\n### 【AI 幾何解析圖】\n![自動生成幾何圖解]({rel_path})"
+                                            logging.info(f"✅ 題號 {safe_q_num} 自動圖解生成成功！")
+                                        else:
+                                            logging.warning(f"⚠️ 題號 {safe_q_num} 圖解腳本執行失敗: {result.stderr}")
+                                            
+                                        # 清理暫存腳本
+                                        if os.path.exists(script_path):
+                                            os.remove(script_path)
+                            except Exception as e:
+                                logging.error(f"自動幾何圖解模組發生錯誤 (題號 {safe_q_num}): {e}")
+
                     # 執行原有的 Markdown 格式化轉換
                     for sol in salvaged_solutions:
                         if isinstance(sol.get("options_analysis"), list):
@@ -3125,36 +3315,51 @@ class ExamParser:
                             q_options_str = "無（非選擇題/選填題）"
                             
                         # 🚨 核心優化：在待審查提示詞中精確注入「共同背景（shared_context）」，徹底阻斷審查教授對題組題目的「無中生有」誤判！
-                        validator_batch_intro += f"""=== 待審查第 {idx+1} 題 ===
-    題號：{q_data['question_number']}
-    共同背景：{q_data.get('shared_context', '無')}
-    題目：{q_data['question_text']}
-    原始給定選項：
-    {q_options_str}
-    官方答案：【{q_data['answer']}】
+                        validator_batch_intro += f"""
+                        === 待審查第 {idx+1} 題 ===
+                        題號：{q_data['question_number']}
+                        共同背景：{q_data.get('shared_context', '無')}
+                        題目：{q_data['question_text']}
+                        原始給定選項：
+                        {q_options_str}
+                        官方答案：【{q_data['answer']}】
 
-    [生成的各詳解欄位內容]
-    【題意分析】：
-    {sol.get('question_analysis', '')}
+                        [生成的各詳解欄位內容]
+                        【題意分析】：
+                        {sol.get('question_analysis', '')}
 
-    【解題思路】：
-    {sol.get('solving_strategy', '')}
+                        【解題思路】：
+                        {sol.get('solving_strategy', '')}
 
-    【完整解法與另解】：
-    {sol.get('detailed_solution', '')}
+                        【完整解法與另解】：
+                        {sol.get('detailed_solution', '')}
 
-    【選項深入剖析】：
-    {sol.get('options_analysis', '')}
+                        【選項深入剖析】：
+                        {sol.get('options_analysis', '')}
 
-    【易錯陷阱】：
-    {sol.get('traps_and_warnings', '')}
-    \n"""
+                        【易錯陷阱】：
+                        {sol.get('traps_and_warnings', '')}
+                        \n"""
 
-                    validator_batch_prompt = PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
+                    llama_cot_instruction = """
+                    🚨【審查思維引導】：
+                    請嚴格按照以下步驟進行審查：
+                    1. 先在 `error_critique` 欄位中，一步一步 (step-by-step) 寫下你核對該詳解代數計算與邏輯的推演過程。
+                    2. 若推演發現無誤，`error_critique` 請在結尾寫上「推演無誤」。
+                    3. 只有在完成上述推演後，才給出 `is_valid` 的布林值。
+                    """
+                    
+                    validator_batch_prompt = llama_cot_instruction + PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
+                    
+                    # === 2026 架構：將 Stage 3 審查引擎切換至 Groq 上的 Llama-3.3-70b ===
                     val_dict, val_err = self.ai_manager.generate_with_retry(
-                        contents=[validator_batch_prompt], response_schema=SolutionValidatorBatch,
-                        temperature=0.0, preferred_model=validator_model, enable_thinking=True,
-                        task_desc=f"{paper_tag} [審查]"
+                        contents=[validator_batch_prompt], 
+                        response_schema=SolutionValidatorBatch,
+                        temperature=0.0, # 審查必須極度嚴謹、無隨機性
+                        preferred_model="llama-3.3-70b-versatile", 
+                        provider="groq", 
+                        enable_thinking=False,
+                        task_desc=f"{paper_tag} [Llama 審查]"
                     )
 
                     # 處理審查結果 (包含重掃描 OCR)
