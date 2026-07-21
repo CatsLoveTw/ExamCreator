@@ -4,7 +4,7 @@ on:
   schedule:
     # 每天 07:00 與 19:00 各執行一次（台灣時間下午3點與凌晨3點）
     - cron: '0 7,19 * * *'
-  workflow_dispatch: # 手動強制執行 (當您在上傳新的 exams.zip 到雲端硬碟後，可以在 GitHub 點這個按鈕手動觸發)
+  workflow_dispatch: # 手動強制執行
 
 jobs:
   run-parser:
@@ -25,8 +25,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Setup rclone (雲端硬碟同步工具)
-        uses: sudo-bot/action-setup-rclone@v1
+      - name: Install rclone (官方原生安裝)
+        run: |
+          # 更新系統並直接執行 Rclone 官方快速安裝腳本
+          sudo apt-get update && sudo apt-get install -y curl unzip
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          rclone version
 
       - name: Configure rclone
         run: |
@@ -57,7 +61,7 @@ jobs:
             echo "⚠️ 警告：未在 Google Drive 找到 exams.zip"
           fi
 
-          # 將雲端的歷史解析結果複製過來，讓 catcher.py 能進行重複判定！
+          # 將雲端的歷史解析結果複製過來，讓 catcher.py 能進行重複判定
           mkdir -p exam_database_output
           if [ -d "./gdrive_workspace/exam_database_output" ]; then
             cp -r ./gdrive_workspace/exam_database_output/* ./exam_database_output/ || true
