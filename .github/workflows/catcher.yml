@@ -27,18 +27,21 @@ jobs:
 
       - name: Install rclone (官方原生安裝)
         run: |
-          # 更新系統並直接執行 Rclone 官方快速安裝腳本
           sudo apt-get update && sudo apt-get install -y curl unzip
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
 
       - name: Configure rclone
+        env:
+          # 將敏感金鑰安全地掛載為環境變數，防止被 Shell 解析或篡改
+          GCP_SA_KEY_ENV: ${{ secrets.GCP_SA_KEY }}
+          GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
         run: |
-          # 寫入 Gemini API 金鑰
-          echo "${{ secrets.GEMINI_API_KEYS }}" > key.txt
+          # 使用 printf "%s" 安全地寫入金鑰，完美保留換行與所有雙引號
+          printf "%s" "$GEMINI_API_KEYS_ENV" > key.txt
+          printf "%s" "$GCP_SA_KEY_ENV" > sa.json
           
-          # 寫入 Google 服務帳號金鑰並設定 rclone
-          echo "${{ secrets.GCP_SA_KEY }}" > sa.json
+          # 設定 rclone 配置文件
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
