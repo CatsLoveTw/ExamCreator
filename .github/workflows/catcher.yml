@@ -33,20 +33,18 @@ jobs:
 
       - name: Configure rclone
         env:
-          # 將敏感金鑰安全地掛載為環境變數，防止被 Shell 解析或篡改
-          GCP_SA_KEY_ENV: ${{ secrets.GCP_SA_KEY }}
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
+          # 引入個人帳號的 OAuth 授權 Token
+          GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
         run: |
-          # 使用 printf "%s" 安全地寫入金鑰，完美保留換行與所有雙引號
           printf "%s" "$GEMINI_API_KEYS_ENV" > key.txt
-          printf "%s" "$GCP_SA_KEY_ENV" > sa.json
           
-          # 設定 rclone 配置文件
+          # 直接使用個人 Token 建立 rclone.conf (免用服務帳號 JSON)
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
           scope = drive
-          service_account_file = $(pwd)/sa.json
+          token = $GDRIVE_OAUTH_TOKEN_ENV
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
 
@@ -94,4 +92,4 @@ jobs:
           fi
           
           # 清除敏感金鑰與暫存
-          rm sa.json rclone.conf key.txt
+          rm rclone.conf key.txt
