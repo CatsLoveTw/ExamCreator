@@ -1203,7 +1203,7 @@ class GeminiFreeTierManager:
             {"role": "user", "content": combined_prompt}
         ]
         
-        model_name = preferred_model if preferred_model else "deepseek-r1-distill-llama-70b"
+        model_name = preferred_model if preferred_model else "llama-3.3-70b-versatile"
         attempts = 0
         
         while attempts < max_attempts:
@@ -3090,14 +3090,14 @@ class ExamParser:
                 batch_contents.insert(0, batch_prompt)
 
                 try:
-                    # === 2026 架構：將 Stage 2 引擎切換至 Groq 上的 DeepSeek-R1 ===
+                    # === 2026 架構：將 Stage 2 引擎切換至 Groq 上的 Llama-3.3-70b ===
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
                         contents=batch_contents, 
                         response_schema=QuestionSolutionBatch,
-                        temperature=0.6, # R1 適合較高的溫度以利展開深度發散思考 (0.5~0.7)
-                        preferred_model="deepseek-r1-distill-llama-70b", 
+                        temperature=0.3, # Llama 3.3 建議溫度調低一點以保持數學嚴謹度
+                        preferred_model="llama-3.3-70b-versatile", 
                         provider="groq", # 👈 關鍵路由：將請求發送給 Groq
-                        task_desc=f"{paper_tag} [R1 深度解題]"
+                        task_desc=f"{paper_tag} [Llama3.3 深度解題]"
                     )
                     
                     # 🚨 核心優化：將 Stage 2 生成的所有詳解結果遞迴且全面地轉為繁體中文，阻斷簡體字存入資料庫
