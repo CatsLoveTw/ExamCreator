@@ -24,6 +24,10 @@ import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+class RPDExhaustedException(Exception):
+    """自定義異常：當所有可用 API 金鑰的每日限制 (RPD) 皆耗盡時觸發"""
+    pass
+
 # ==========================================
 # 繁簡轉換輔助器 (Traditional-Simplified Chinese Converter)
 # ==========================================
@@ -366,8 +370,13 @@ PROMPT_STAGE_2_INTRO = "請為以下 {batch_size} 道題目撰寫極致詳細的
 PROMPT_STAGE_2_MAIN = """
 你是一位在台灣大考講義編撰領域享有崇高聲譽、解題思路極具啟發性的高中學科補教名師。請針對上述每一道題目，為我們撰寫極致詳細、邏輯縝密且充滿引導性的詳解。
 
+🚨【模擬考/指考官方詳解本融入與昇華規範（極度重要）】🚨：
+- **【強迫參考與解構】**：在下方的待解題目中，系統為您提供了 `📢【官方解析本提供的本題解析文字與出處背景】`。**你絕對不可忽略官方詳解的思路！**
+- **【降維解說與教學昇華】**：官方原卷詳解通常寫得非常簡略、跳步、或者直接給出繁複的代數結果（這會讓學生感到挫折）。你的任務是「仔細研讀官方提供的推導、反應式、受力分析或文章翻譯，並將其思維骨架還原、拆解、重新鋪墊，演繹成具有溫度與引導性的名師互動式解說」。
+- **【指正印刷錯誤】**：官方詳解本有時會因為排版而發生數字印刷錯誤或跳步 Bug，如果發現官方推導與最嚴謹的學理有出入，請勇敢且優雅地在詳解中替學生點出並指正。
+
 🚨【語言字體與兩岸名詞絕對剛性規定（致命紅線）】🚨：
-1. 全篇必須 100% 使用繁體中文（zh-TW）撰寫，絕對禁止夾雜任何簡體字！
+1. 全篇必須 100% 使用繁體中文（zh-TW）撰寫，絕對禁止夾雜 any 簡體字！
 2. 絕對禁止使用大陸學術名詞或用語。例如：必須寫「機率」而非「概率」、寫「向量」而非「矢量」、寫「純量」而非「標量」、寫「解析度」而非「分辨率」、寫「伏特計/安培計」而非「電壓表/電流表」。若違反將遭到系統嚴厲退件！
 
 【一、詳解結構化與寫作規限（極度重要）】
@@ -375,8 +384,21 @@ PROMPT_STAGE_2_MAIN = """
     - 精確剖析題目的核心考點與已知條件。
     - **必須**使用 Markdown 的 `**雙星號粗體**` 標示出題幹中最核心的關鍵概念與限制條件（如：**同溫同壓**、**飽和溶液**等）。
 2. **solving_strategy (解題思路)**：
-    - 詳細引導學生如何從題目已知條件聯想到解題突破點，建立嚴謹的因果推理鏈。
+    - 💡 **【元認知大師級思維引導（核心重點）】**（不要直接給出繁複推導）：
+      * 請模擬一位高三頂尖學生的「思考心流」。著重解答學生：**『為什麼我們一看到這道題，就會聯想到要用這個定理或幾何輔助線？』**。
+      * 帶領學生發掘題幹中隐藏的**關鍵字眼與破局訊息**：
+        * 例如：看見「共點且等距離」，腦中要立即聯想到「**三角形的外接圓**」；
+        * 看見「二階導數在兩側變號」，要立刻反應「**圖形凹凸性改變與反曲點**」；
+        * 看見「同溫同壓下的分子量比」，要迅速思索「**亞佛加厥定律與密度、體積的內在關聯**」。
+      * 建立從【已知蛛絲馬跡】$\rightarrow$【核心定理與圖表聯想】$\rightarrow$【規劃解題步驟】的認知因果推理鏈，徹底啟發學生的數理學科直覺。
 3. **detailed_solution (完整解法與另解)**：
+    - 💡 **【互動式補教名師講授風格（剛性要求）】**：
+      * **字裡行間必須極具互動性、啟發性與對話感！** 想像你正在全台灣最大大考衝刺班的黑板前，眼神熱切地為台下的高三學子指點迷津。
+      * 鼓勵多使用例如『同學們，我們仔細觀察這裡！』、『這時候我們不妨做一個大膽的輔助線...』『有沒有發現這個關鍵訊息？它其實在暗示我們...』等溫暖、親切且生動活潑的口吻。
+    - 💡 **【圖文完美咬合（多圖嵌入）】**：
+      * **當你在詳解文字中嵌入圖片（如 `![圖 1](...)`、`![圖 2](...)`）時，絕對不允許只是孤零零、冷冰冰地貼上一個圖片 Markdown 連結！**
+      * 你**必須**在該圖片的「前後文段落」中，用熱情的語言深度引導學生如何去觀測、看懂這張圖背後的幾何意義。
+      * 例如：『...請看圖 1 ![圖 1](images/...)。當我們成功做出了這個外接圓之後，圓周角與弦切角的等量關係是不是就一目了然了？緊接著，我們就可以從...』，讓圖片與文字在學生的理解中產生完美的化學反應。
     - 請使用 Markdown 標題區分多種解法，以激發學生的思維創造力，我們強烈要求「一題多解」：
             - `### 【標準解法】`：必須按部就班、寫出最正規且符合課綱的求解過程。涉及計算必須呈現完整的 LaTeX 公式推導，嚴禁直接跳出答案。**【極重要硬性規定】**：`### 【標準解法】` 必須是一個**完整的、能獨立推導或判斷出所有選項（如選項 1 至 5，或 A 至 E）對錯的完整解題路徑**。絕對不允許在標準解法中只判斷選項 1, 2，而把其餘選項的判斷拆分到其他另解中！
             - `### 【另解一：[命名你的思維，例如：座標轉換/幾何投影法]】`：提供第二套完整且嚴謹的推導思維。**如果某個另解因為方法特質限制，只能用來判斷部分選項，你必須在該另解的標題或開頭極其明確地註明：『本解法專用於快速判斷選項 X, Y』。**
@@ -405,7 +427,7 @@ PROMPT_STAGE_2_MAIN = """
   - `\\begin{{matrix}}` 寫成 `__LTXS__begin{{matrix}}`。
   - 🚨【絕對禁止】在公式中輸出任何真正的單反斜線 `\\`，一律且強制使用 `__LTXS__`！
 - 嚴格遵守標準 LaTeX 語法。
-- 🚨【指數與冪次 LaTeX 規範】：當表示指數函數、高次冪或含有多個字元的上標（如 2 的 x+1 次方，或 e 的 -x 次方）時，**必須**將整個指數/上標部分用 LaTeX 的大括號 `{{}}` 完整包裹，例如寫成 `$2^{{x+1}}$`、`$e^{{-x}}$`，**絕對禁止**寫成 `$2^x+1$` 或 `$2^-x$`（這會被渲染/解讀為 $2^x + 1$ 或 $2^- \cdot x$，造成嚴重的學術邏輯與網頁渲染錯誤）。在非 LaTeX 純文字語境下，必須使用括號表示，如 `2^(x+1)`。
+- 🚨【指數與冪次 LaTeX 規範】：當表示指數函數、高次冪或含有多個字元的上標（如 2 的 x+1 次方，或 e 的 -x 次方）時，**必須**將整個指數/上標部分用 LaTeX 的大括號 `{{}}` 完整包裹，例如寫成 `$2^{{x+1}}$`、`$e^{{-x}}$`，**絕對禁止**寫成 `$2^x+1$` 或 `$2^-x$`（這會被渲染/解讀為 $2^x + 1$ 或 $2^- \\cdot x$，造成嚴重的學術邏輯與網頁渲染錯誤）。在非 LaTeX 純文字語境下，必須使用括號表示，如 `2^(x+1)`。
 - 🚨【化學式專屬指令】：所有化學反應式必須使用 LaTeX 格式。
   - 務必使用下標語法，例如：$Mg_{{(s)}} + 2HCl_{{(aq)}} __LTXS__rightarrow MgCl_{{2(aq)}} + H_{{2(g)}}$。
   - 嚴禁使用 ->，必須使用 __LTXS__rightarrow 或 __LTXS__ce{{->}}。
@@ -949,11 +971,8 @@ class GeminiFreeTierManager:
 
                 # 狀況 A：如果所有未停用的 Key 的每日配額皆已用盡
                 if not active_keys:
-                    next_reset = get_next_rpd_reset_timestamp()
-                    sleep_time = max(10.0, next_reset - current_time)
-                    sleep_time = min(sleep_time, 300.0)  # 每次最多休眠 5 分鐘後重新檢查，以利輸出進度
-                    logging.warning(f"⚠️ [每日限額用盡] 偵測到所有 API 金鑰皆已達 RPD 上限。")
-                    logging.warning(f"⏳ 系統將自動進入深度休眠 {sleep_time:.1f} 秒，等待每日額度重置（預計重置：台北時間下午 3:00）...")
+                    logging.warning(f"⚠️ [每日限額用盡] 偵測到所有 API 金鑰皆已達 RPD 上限。將安全保存當前已完成詳解並結束程式。")
+                    raise RPDExhaustedException("所有可用的 Gemini API 金鑰已達每日限額（RPD 上限）。")
                 else:
                     # 狀況 B：檢查是否有符合當前 RPM/TPM 限額的可用 Key
                     for key in active_keys:
@@ -1015,6 +1034,10 @@ class GeminiFreeTierManager:
                 print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API，思考: {thinking_config.thinking_level if thinking_config else '關閉'} / 溫度: {temperature} (第 {attempts + 1} 次嘗試)...", flush=True)
                 # 每次執行時顯示金鑰狀態
                 self.print_keys_status()
+
+                # 💡 優先獲取金鑰，若已無額度則直接拋出 RPDExhaustedException 中斷
+                client, model, key_obj = self.get_current_resource(preferred_model=preferred_model, estimated_tokens=estimated_tokens)
+                self.last_model_used = model
 
                 response = client.models.generate_content(
                     model=model,
@@ -1138,6 +1161,8 @@ class GeminiFreeTierManager:
                     
                     return None, "json_decode_error"
                 
+            except RPDExhaustedException as ree:
+                raise ree
             except APIError as e:
                 err_str = str(e).lower()
                 if e.code == 503 or "unavailable" in err_str or e.code == 504 or "gateway timeout" in err_str:
@@ -1833,6 +1858,40 @@ class ExamParser:
         except Exception as e:
             logging.error(f"無法讀取 PDF {pdf_path}：{e}")
         return text
+
+    def parse_detailed_explanations(self, pdf_path: Optional[str]) -> Dict[str, str]:
+        """
+        [模擬考與指考詳解本專用高精分析器]
+        從解析本/詳解 PDF 中自動辨識並切分出每一題的官方詳解文字內容。
+        """
+        if not pdf_path or not os.path.exists(pdf_path):
+            return {}
+        
+        # 1. 讀取解析本全文並統一簡轉繁
+        raw_text = self.extract_text_from_pdf(pdf_path)
+        if not raw_text.strip():
+            return {}
+            
+        text = s2t(raw_text)
+        explanations = {}
+        
+        # 2. 匹配模式：行首有數字、字母或大寫中文題號，後接標點符號或空格
+        pattern = r'(?:^|\n)\s*(?P<q_num>\d+|[A-Ga-g]|一|二|三|四|五|六|七|八|九|十)\s*[\.．、\s)]\s*(?P<content>.*?)(?=(?:^|\n)\s*(?:\d+|[A-Ga-g]|一|二|三|四|五|六|七|八|九|十)\s*[\.．、\s)]|$)'
+        
+        matches = re.finditer(pattern, text, re.DOTALL)
+        for match in matches:
+            q_num = match.group('q_num').strip()
+            content = match.group('content').strip()
+            
+            # 清除常見的頁眉頁尾或多餘贅字
+            content = re.sub(r'－\s*\d+\s*－|化學考科詳解|物理考科詳解|數學乙考科詳解|生物考科詳解|化學考科參考答案暨詳解|學測.*詳解', '', content)
+            
+            if q_num not in explanations:
+                explanations[q_num] = content
+            else:
+                explanations[q_num] += "\n" + content
+                
+        return explanations
         
     def run_academic_arbitration(self, q_data: dict, sol_data: dict, error_critique: str) -> Optional[AcademicArbitration]:
         """
@@ -1939,10 +1998,26 @@ class ExamParser:
         safe_year = safe_filename(year)
         safe_subject = safe_filename(subject)
         paper_tag = f"[{year} {subject}]" # 🚨 新增：本份考卷的唯一日誌與 API 派發識別標籤
+
+        # 💡 將題號對位邏輯拉到最頂端，供後續所有解析對齊模組共用
+        def is_precise_match(q_data: dict, r_k: str) -> bool:
+            q_num = str(q_data.get('question_number', ''))
+            q_digits = re.findall(r'\d+', q_num)
+            r_digits = re.findall(r'\d+', r_k)
+            
+            cn_mapping = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+            q_cn = [cn_mapping[c] for c in q_num if c in cn_mapping]
+            r_cn = [cn_mapping[c] for c in r_k if c in cn_mapping]
+            
+            if q_cn and r_cn and q_cn != r_cn:
+                return False
+            if q_digits and r_digits:
+                return q_digits == r_digits
+            return q_num.strip() == r_k.strip()
         
         subjects_stem = ["數學", "數A", "數B", "數學乙", "數學甲", "數甲", "數乙", "物理", "化學", "生物", "地球科學", "自然"]
         is_stem = any(t in subject for t in subjects_stem)
-        
+
         # 規則：第一階段純掃描、文科詳解一律優先使用 Lite 節省額度；理科解題與審查無條件優先分配最強的 3.5-Flash
         stage_1_model = "gemini-3.1-flash-lite"
         stage_2_model = "gemini-3.1-flash-lite"
@@ -1977,6 +2052,7 @@ class ExamParser:
         # 4. 建立專屬的分類資料夾與 JSON 儲存路徑
         os.makedirs(os.path.join(output_dir, type_folder), exist_ok=True)
         json_path = os.path.join(output_dir, type_folder, f"{spec_name}_database.json")
+        partial_json_path = json_path.replace("_database.json", "_partial_database.json") # 🆕 暫存進度檔路徑
         
         if os.path.exists(json_path):
             # 🚨 核心優化：在跳過已存在的 Database 之前，先加載並檢查該檔案中是否含有簡體字，若有則自動轉為繁體並覆寫
@@ -2137,7 +2213,7 @@ class ExamParser:
                 🚨【數位文字與影像視覺雙重比對規限（零誤差保證）】🚨
                 - 本系統提供了該頁面的『原始純文字對照（Text Layer）』。
                 - 當你從影像中識別數學變數（如 $x, y, z, a, b$）或物理單位時，如果因為字體過小或解析度問題產生疑義，請【強制比對純文字對照區】中的相對應字元。
-                - 英文大小寫、希臘字母（如 $\theta, \phi, \alpha$）必須完全以底層數位文字層的命名為最高準則，嚴禁因為視覺模糊而自行臆測或改寫變數名稱！
+                - 英文大小寫、希臘字母（如 \\theta, \\phi, \\alpha）必須完全以底層數位文字層的命名為最高準則，嚴禁因為視覺模糊而自行臆測或改寫變數名稱！
 
                 【一、剛性文字與公式規格化】
                 1. **題目文字完全對齊**：`question_text` 必須與圖片及底層純文字 100% 吻合。
@@ -2693,7 +2769,26 @@ class ExamParser:
                 
                 # 重新排序與校驗
                 all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
+                # 最後排序題號以維持最終 JSON 整齊，防範字典序排序導致 10 排在 2 前面
                 all_extracted_questions.sort(key=lambda x: natural_sort_key(x.get('question_number', '0')))
+
+                # 🆕 提取詳解本中的所有題目官方解析，並綁定至各題 question 結構中
+                official_explanations = {}
+                if a_pdf:
+                    official_explanations.update(self.parse_detailed_explanations(a_pdf))
+                if rubric_pdf:
+                    official_explanations.update(self.parse_detailed_explanations(rubric_pdf))
+                    
+                for q_data in all_extracted_questions:
+                    matched_exp = None
+                    for key_num, exp_text in official_explanations.items():
+                        if is_precise_match(q_data, key_num):
+                            matched_exp = exp_text
+                            break
+                    q_data['official_explanation'] = matched_exp if matched_exp else ""
+
+                # 題目擷取完成後，進行對位補件
+                # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
         except Exception as e:
             logging.error(f"❌ [補漏引擎異常] 執行補漏時發生未預期錯誤: {e}")
 
@@ -2711,27 +2806,15 @@ class ExamParser:
 
         # 題目擷取完成後，進行對位補件
         # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
+        # 🚨【自動幾何圖解與多圖精確嵌入規範】🚨
+            # 題目擷取完成後，進行對位補件
+        # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
         for q_data in all_extracted_questions:
             q_num = q_data['question_number']
             q_type = q_data.get('question_type', '')
             has_options = len(q_data.get("options", [])) > 0
             
-            # 1. 精確對位手寫評分圖文標準
-            def is_precise_match(q_data: dict, r_k: str) -> bool:
-                q_num = str(q_data.get('question_number', ''))
-                q_digits = re.findall(r'\d+', q_num)
-                r_digits = re.findall(r'\d+', r_k)
-                
-                cn_mapping = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
-                q_cn = [cn_mapping[c] for c in q_num if c in cn_mapping]
-                r_cn = [cn_mapping[c] for c in r_k if c in cn_mapping]
-                
-                if q_cn and r_cn and q_cn != r_cn:
-                    return False
-                if q_digits and r_digits:
-                    return q_digits == r_digits
-                return q_num.strip() == r_k.strip()
-
+            # 1. 直接調用上層已定義的精確對位邏輯
             matched_key = next((k for k in rubric_visual_map if is_precise_match(q_data, k)), None)
             
             if matched_key:
@@ -3027,18 +3110,39 @@ class ExamParser:
         subject_rubric = SUBJECT_DIFFICULTY_RUBRICS.get(subject, GENERAL_DIFFICULTY_RUBRIC)
 
         # =========================================================
-        # 【第二、三階段】：滑動窗口批次詳解、審查與「指正題+新題湊10題」重試機制
+        # 【第二、三階段】：滑動窗口批次詳解、審查與中斷點續傳
         # =========================================================
-        active_batch_size = 1 # 強制每次只送 1 題，避免 Input Token 撐爆 Groq 的 12K 限制
+        active_batch_size = 1 
         max_single_attempts = 8
         max_rechecks = 8
 
-        task_queue = []
-        for q in all_extracted_questions:
-            task_queue.append({"q_data": q, "critique": "", "retry_count": 0, "recheck_count": 0})
-            
+        # 🆕 檢查並加載未完成的暫存進度檔
+        loaded_partial_questions = []
+        if os.path.exists(partial_json_path):
+            try:
+                with open(partial_json_path, "r", encoding="utf-8") as f:
+                    loaded_partial_questions = json.load(f)
+                logging.info(f"📂 [中斷點續傳] 偵測到 [{year} {subject}] 未完成的暫存進度檔：{partial_json_path}")
+                logging.info(f"  -> 已成功載入 {len(loaded_partial_questions)} 題已完成的詳解，本次將跳過重複生成。")
+            except Exception as e:
+                logging.error(f"讀取暫存進度檔失敗: {e}")
+
         all_final_questions = []
         queue_lock = threading.Lock() # 保護寫入共用陣列的鎖
+
+        # 💡 將已加載的詳解建立成對位索引表
+        partial_map = {q.get("question_number"): q for q in loaded_partial_questions if q.get("detailed_solution")}
+
+        task_queue = []
+        for q in all_extracted_questions:
+            q_num = q.get("question_number")
+            if q_num in partial_map:
+                # 已經有詳解了！直接重用，不重複調用 API 耗費額度
+                logging.info(f"⏭️  題號 {q_num} 已存在暫存詳解，自動加載成果。")
+                q.update(partial_map[q_num])
+                all_final_questions.append(q)
+            else:
+                task_queue.append({"q_data": q, "critique": "", "retry_count": 0, "recheck_count": 0})
 
         def process_question_chunk(current_batch, batch_size):
             """處理單一批次題目的獨立執行緒函式"""
@@ -3069,6 +3173,18 @@ class ExamParser:
                     
                     item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：【{q_data['answer']}】\n"
                     
+                    # 🚨【自動幾何圖解與多圖精確嵌入規範】🚨
+                    safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
+                    item_desc += f"""
+                    如果你認為本題的某些解法（如標準解法、另解一等）需要圖解輔助說明，**請直接在對應的說明文字旁邊緊鄰地嵌入 Markdown 圖片語法**。
+                    - **【格式限制】**：請在你的 Markdown 內文中，依照需要嵌入以下精確路徑：
+                      * 第一張圖請嵌入：`![圖 1](images/{spec_name}/diagram_Q{safe_q_num}_1.png)`
+                      * 第二張圖請嵌入：`![圖 2](images/{spec_name}/diagram_Q{safe_q_num}_2.png)`
+                      * 第三張圖請嵌入：`![圖 3](images/{spec_name}/diagram_Q{safe_q_num}_3.png)`
+                    - **【多圖對齊】**：一題可以有多個不同的解法，您可以針對每個解法或步驟分別嵌入「圖 1」、「圖 2」等。請在文字中配合描述，例如：「...如圖 1 所示 ![圖 1](images/{spec_name}/diagram_Q{safe_q_num}_1.png)，可以做出三角外接圓來解此題...」。
+                    - 請完全照抄上述圖片 Markdown 語法，我們系統會在後續自動讀取這些圖片路徑，並呼叫 Python 繪圖腳本將對應的實體圖片繪製並儲存至該路徑！
+                    """
+
                     # 🚨 核心優化：如果是題組題（含有共同背景），放寬「題號一致性」審查警告，防止 AI 誤判因共用圖表而產生的標籤不一致，避免陷入重試死循環
                     if q_data.get('shared_context', '').strip():
                         item_desc += "🚨【題組圖片共用提示】：本題屬於題組題的一部分，可能與同組其他子題共用圖表、插圖或背景。若圖片中印有鄰近子題的題號（例如第 15 題的圖片上印著 14 標籤），這是題組共用圖表的正常現象！在此情況下，【絕對不要】將其判定為 suspects_image_mismatch，請直接以此共用圖片進行正常解題與分析，不要拋出『[圖片對位錯誤]』警告！\n"
@@ -3245,73 +3361,154 @@ class ExamParser:
                                 valid_batch[idx]["_derived_ans"] = derived_ans
                                 logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
 
-                    # === 2026 架構：步驟四 - 自動幾何/函數圖解生成 (Qwen-2.5-Coder) ===
+                    # === 2026 架構：步驟四 - 自動幾何/函數圖解生成 (多圖內文掃描與自適應繪製) ===
+                    class DiagramResponse(BaseModel):
+                        need_diagram: bool = Field(description="是否需要幾何圖形、函數波形、物理受力分析或化學相圖來輔助學生理解本題。")
+                        python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
+
                     for idx, sol in enumerate(salvaged_solutions):
                         q_data = valid_batch[idx]["q_data"]
                         q_sub = q_data.get("sub_subject", "")
                         
-                        # 僅針對數學、物理等理科啟動圖解生成，節省 API 呼叫
+                        # 僅針對數學、物理等理科啟動圖解生成
                         if any(s in q_sub for s in ["數學", "物理", "化學", "自然"]):
                             safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
-                            diagram_filename = f"diagram_Q{safe_q_num}_{int(time.time())}.png"
-                            diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
+                            detailed_sol_text = sol.get('detailed_solution', '')
                             
-                            qwen_prompt = f"""
-                            你是一位頂尖的 Python 數學繪圖專家。以下是一道高中理科題目的題幹與 DeepSeek-R1 產出的詳細解答：
+                            # 1. 透過正規表達式掃描詳解內文中，AI 主動嵌入的所有自訂圖片編號 (例如 1, 2, 3)
+                            pattern = rf"images/{re.escape(spec_name)}/diagram_Q{re.escape(safe_q_num)}_(\d+)\.png"
+                            matches = re.findall(pattern, detailed_sol_text)
                             
-                            【題幹】：{q_data.get('question_text', '')}
-                            【解答】：{sol.get('detailed_solution', '')}
-                            
-                            請評估這題是否需要「幾何圖形」、「函數波形」、「物理受力分析」或「化學相圖」來輔助學生理解。
-                            如果需要，請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 來繪製該圖形，並將圖片嚴格儲存至以下絕對路徑：
-                            `{diagram_filepath}`
-                            
-                            【繪圖剛性要求】：
-                            1. 圖片標示請「全面使用英文或數學代號」（如 Point A, f(x), Force F），絕對禁止使用中文字元，防範伺服器無中文字體導致方塊亂碼！
-                            2. 根據解答中的幾何座標、方程式，精確繪製點、線、圓或函數曲線。記得使用 plt.axis('equal') 保持幾何比例。
-                            3. **只輸出 Python 程式碼**，必須使用 ```python ... ``` 包裹，絕對不要輸出任何自然語言解釋！
-                            4. 如果本題完全不需要圖解（如純代數、文字邏輯題），請直接輸出純文字「NO_DIAGRAM」。
-                            """
-                            
-                            try:
-                                # 呼叫 Groq 上的 qwen-2.5-coder-32b
-                                qwen_response = self.ai_manager.groq_client.chat.completions.create(
-                                    model="qwen-2.5-coder-32b",
-                                    messages=[{"role": "user", "content": qwen_prompt}],
-                                    temperature=0.1,
-                                    max_completion_tokens=4000
-                                )
-                                qwen_text = qwen_response.choices[0].message.content.strip()
-                                
-                                if "NO_DIAGRAM" not in qwen_text:
-                                    # 提取 Python 程式碼
-                                    import subprocess
-                                    code_match = re.search(r'```python(.*?)```', qwen_text, re.DOTALL)
-                                    if code_match:
-                                        py_code = code_match.group(1).strip()
+                            # 狀況 A：如果 AI 在詳解內文中，主動嵌入了圖片
+                            if matches:
+                                logging.info(f"🔍 偵測到題號 {safe_q_num} 的詳解內文主動嵌入了 {len(matches)} 張自定義圖表：{matches}")
+                                for img_num in matches:
+                                    diagram_filename = f"diagram_Q{safe_q_num}_{img_num}.png"
+                                    diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
+                                    
+                                    qwen_prompt = f"""
+                                    你是一位頂尖的 Python 數學繪圖專家。以下是一道高中理科題目的題幹與詳細解答：
+                                    
+                                    【題幹】：{q_data.get('question_text', '')}
+                                    【詳細解答】：{detailed_sol_text}
+                                    
+                                    請針對解答中提到的「圖 {img_num}」（圖片儲存路徑為 `{diagram_filepath}`），撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 來繪製該圖表，並儲存至該路徑。
+                                    
+                                    【繪圖剛性要求】：
+                                    1. 本次任務【只負責繪製與表現「圖 {img_num}」】！請仔細閱讀詳細解答中對「圖 {img_num}」的文字描述，精確表現其對應的點、線、圓、幾何交點或受力向量。
+                                    2. 圖片標示「允許且鼓勵使用繁體中文說明」（如：點 A, 外接圓, 受力 F）。
+                                    3. 必須在程式碼開頭加入以下繁體中文與負號支援設定：
+                                       ```python
+                                       import matplotlib.pyplot as plt
+                                       plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'Noto Sans CJK TC', 'sans-serif']
+                                       plt.rcParams['axes.unicode_minus'] = False  # 避免負號顯示為方塊亂碼
+                                       ```
+                                    4. 使用 plt.axis('equal') 保持幾何比例。
+                                    5. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
+                                    """
+                                    
+                                    script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_{img_num}.py")
+                                    try:
+                                        res, err = self.ai_manager.generate_with_retry(
+                                            contents=[qwen_prompt],
+                                            response_schema=DiagramResponse,
+                                            temperature=0.1,
+                                            preferred_model="gemini-3.1-flash-lite",
+                                            enable_thinking=False,
+                                            task_desc=f"{paper_tag} [繪製 圖{img_num}]"
+                                        )
                                         
-                                        # 建立暫存 Python 檔案
-                                        script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}.py")
+                                        if res and res.get('need_diagram') and res.get('python_code'):
+                                            py_code = res['python_code'].strip()
+                                            
+                                            with open(script_path, "w", encoding="utf-8") as f:
+                                                f.write(py_code)
+                                                
+                                            logging.info(f"🎨 正在背景執行 Gemini 繪圖腳本 (題號 {safe_q_num} 的圖 {img_num})...")
+                                            import subprocess
+                                            result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=15)
+                                            
+                                            if result.returncode == 0 and os.path.exists(diagram_filepath):
+                                                logging.info(f"✅ 題號 {safe_q_num} 的圖 {img_num} 自動圖解生成並儲存成功！")
+                                            else:
+                                                logging.warning(f"⚠️ 題號 {safe_q_num} 的圖 {img_num} 腳本執行失敗: {result.stderr}")
+                                    except Exception as e:
+                                        logging.error(f"自動幾何圖解模組發生錯誤 (題號 {safe_q_num} 圖 {img_num}): {e}")
+                                    finally:
+                                        # 💡 不論執行成功、發生異常、或超時中斷，100% 執行清理
+                                        if os.path.exists(script_path):
+                                            try:
+                                                os.remove(script_path)
+                                            except Exception as cleanup_err:
+                                                logging.warning(f"⚠️ 無法刪除暫存檔 {script_path}: {cleanup_err}")
+                            
+                            # 狀況 B：保底機制（如果 AI 忘記在內文嵌入圖片標籤，我們自動在最下方補上一張預設的「圖 1」）
+                            else:
+                                diagram_filename = f"diagram_Q{safe_q_num}_1.png"
+                                diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
+                                
+                                qwen_prompt = f"""
+                                你是一位頂尖的 Python 數學繪圖專家。以下是一道高中理科題目的題幹與詳細解答：
+                                
+                                【題幹】：{q_data.get('question_text', '')}
+                                【詳細解答】：{detailed_sol_text}
+                                
+                                請評估這題是否需要「幾何圖形」、「函數波形」、「物理受力分析」或「化學相圖」來輔助學生理解。
+                                如果需要，請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 來繪製該圖形，並將圖片儲存至以下絕對路徑：
+                                `{diagram_filepath}`
+                                
+                                【繪圖剛性要求】：
+                                1. 圖片標示「允許且鼓勵使用繁體中文說明」。
+                                2. 必須在程式碼開會加入以下繁體中文與負號支援設定：
+                                   ```python
+                                   import matplotlib.pyplot as plt
+                                   plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'Noto Sans CJK TC', 'sans-serif']
+                                   plt.rcParams['axes.unicode_minus'] = False
+                                   ```
+                                3. 使用 plt.axis('equal') 保持幾何比例。
+                                4. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
+                                """
+                                
+                                try:
+                                    res, err = self.ai_manager.generate_with_retry(
+                                        contents=[qwen_prompt],
+                                        response_schema=DiagramResponse,
+                                        temperature=0.1,
+                                        preferred_model="gemini-3.1-flash-lite",
+                                        enable_thinking=False,
+                                        task_desc=f"{paper_tag} [保底繪圖]"
+                                    )
+                                    
+                                    if res and res.get('need_diagram') and res.get('python_code'):
+                                        py_code = res['python_code'].strip()
+                                        
+                                        script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_1.py")
                                         with open(script_path, "w", encoding="utf-8") as f:
                                             f.write(py_code)
                                             
-                                        # 執行繪圖腳本 (設定超時 15 秒，避免無限迴圈)
-                                        logging.info(f"🎨 正在背景執行 Qwen 繪圖腳本 (題號 {safe_q_num})...")
+                                        logging.info(f"🎨 正在背景執行 Gemini 保底繪圖腳本 (題號 {safe_q_num})...")
+                                        import subprocess
                                         result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=15)
                                         
                                         if result.returncode == 0 and os.path.exists(diagram_filepath):
-                                            # 將相對路徑注入到詳解的最下方（以利前端顯示）
+                                            # 自動將圖片標記附加至詳解的最下方
                                             rel_path = f"images/{os.path.basename(img_dir)}/{diagram_filename}"
-                                            sol['detailed_solution'] += f"\n\n### 【AI 幾何解析圖】\n![自動生成幾何圖解]({rel_path})"
-                                            logging.info(f"✅ 題號 {safe_q_num} 自動圖解生成成功！")
+                                            sol['detailed_solution'] += f"\n\n### 【AI 幾何解析圖】\n![圖 1]({rel_path})"
+                                            logging.info(f"✅ 題號 {safe_q_num} 保底圖解生成與附加成功！")
                                         else:
-                                            logging.warning(f"⚠️ 題號 {safe_q_num} 圖解腳本執行失敗: {result.stderr}")
+                                            logging.warning(f"⚠️ 題號 {safe_q_num} 保底腳本執行失敗: {result.stderr}")
                                             
-                                        # 清理暫存腳本
                                         if os.path.exists(script_path):
                                             os.remove(script_path)
-                            except Exception as e:
-                                logging.error(f"自動幾何圖解模組發生錯誤 (題號 {safe_q_num}): {e}")
+                                except Exception as e:
+                                    logging.error(f"自動幾何圖解保底模組發生錯誤 (題號 {safe_q_num}): {e}")
+                                finally:
+                                    # 💡 確保不論執行結果如何，皆落實暫存檔回收
+                                    if os.path.exists(script_path):
+                                        try:
+                                            os.remove(script_path)
+                                        except Exception as cleanup_err:
+                                            logging.warning(f"⚠️ 無法刪除暫存檔 {script_path}: {cleanup_err}")
 
                     # 執行原有的 Markdown 格式化轉換
                     for sol in salvaged_solutions:
@@ -3579,9 +3776,12 @@ class ExamParser:
                                 with queue_lock: all_final_questions.append(q_data)
                     
                     return retry_items, new_batch_size
+                except RPDExhaustedException as ree:
+                    raise ree
                 except Exception as inner_e:
-                    # 🚨 修正：安全地閉合內層 try 區塊並向上拋出異常，避免引發 SyntaxError
                     raise inner_e
+            except RPDExhaustedException as ree:
+                raise ree
             except Exception as e:
                 logging.exception(f"❌ [執行緒崩潰安全自癒] 處理批次時發生未預期異常: {e}")
                 # 🚨 修正：僅救回本批次中「尚未成功寫入」的題目，防範因併發異常導致成功題目重複寫入或重複重試！
@@ -3623,6 +3823,7 @@ class ExamParser:
                 # 等待任意一個 Batch 完成
                 done, futures = concurrent.futures.wait(futures, return_when=concurrent.futures.FIRST_COMPLETED)
                 
+                rpd_hit = False
                 for fut in done:
                     try:
                         retry_items, new_batch_size = fut.result()
@@ -3631,8 +3832,17 @@ class ExamParser:
                                 active_batch_size = new_batch_size
                             # 將重試題目插回佇列最前方
                             task_queue = retry_items + task_queue
+                    except RPDExhaustedException as ree:
+                        logging.warning(f"🛑 [偵測到額度耗盡] 執行緒回報每日配額已用盡。準備安全中斷目前考卷任務...")
+                        rpd_hit = True
                     except Exception as e:
                         logging.error(f"批次處理執行緒發生例外: {e}")
+                
+                if rpd_hit:
+                    # 立即取消所有未完成的任務
+                    for f in futures:
+                        f.cancel()
+                    break
 
         # 最後排序題號以維持最終 JSON 整齊，防範字典序排序導致 10 排在 2 前面
         all_final_questions.sort(key=lambda x: natural_sort_key(x.get('question_number', '0')))
@@ -3648,7 +3858,7 @@ class ExamParser:
         # 🚨 寫入 JSON 前，徹底清除所有非 JSON 序列化的暫存屬性 (如 PngImageFile 影像對象) 🚨
 
         def normalize_latex_delimiters(text: str) -> str:
-            """自動將 Rogue LaTeX 符號 \[ \] 轉換為標準 $$ $$，將 \( \) 轉換為 $ $，防範前端排版渲染崩潰"""
+            r"""自動將 Rogue LaTeX 符號 \[ \] 轉換為標準 $$ $$，將 \( \) 轉換為 $ $，防範前端排版渲染崩潰"""
             if not isinstance(text, str):
                 return text
             # 1. 轉換獨立行公式 \[ ... \] 為 $$ ... $$
@@ -3671,20 +3881,39 @@ class ExamParser:
                 obj = normalize_latex_delimiters(obj)
             return obj
 
+        # 💡 [安全保存與暫存判定]
+        # 若已完成的題數小於原卷解構出的所有題目數，代表因 RPD 耗盡而中斷
+        is_partial = len(all_final_questions) < len(all_extracted_questions)
+
         all_final_questions = clean_paths(all_final_questions)
         for q in all_final_questions:
-            # 🚨 剛性規範：強制將學年度與試卷來源名稱標準化，徹底杜絕 AI 在不同批次中生出不一致之命名
             q["academic_year"] = standard_academic_year
             q["exam_source"] = standard_exam_source
             if '_cropped_pil_images' in q:
                 for img_obj in q['_cropped_pil_images']:
-                    try:
-                        img_obj.close()
-                    except Exception:
-                        pass
+                    try: img_obj.close()
+                    except Exception: pass
                 del q['_cropped_pil_images']
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(all_final_questions, f, ensure_ascii=False, indent=4)
+
+        if is_partial:
+            # 寫入未完成的暫存檔
+            with open(partial_json_path, "w", encoding="utf-8") as f:
+                json.dump(all_final_questions, f, ensure_ascii=False, indent=4)
+            logging.warning(f"💾 [中斷點保存] [{year} {subject}] 解析未完整。已成功將當前完成的 {len(all_final_questions)} 題詳解寫入暫存檔：{partial_json_path}")
+            raise RPDExhaustedException("因 RPD 每日限額耗盡，任務被安全中斷並保存。")
+        else:
+            # 完整解析成功，寫入正式資料庫
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(all_final_questions, f, ensure_ascii=False, indent=4)
+            logging.info(f"🎉 [{year} {subject}] 完整解析成功並儲存：{json_path}")
+            
+            # 正式完成後，自動將先前的暫存檔清除，避免殘留
+            if os.path.exists(partial_json_path):
+                try:
+                    os.remove(partial_json_path)
+                    logging.info(f"🧹 [暫存清理] 已自動清除暫存進度檔：{partial_json_path}")
+                except Exception:
+                    pass
         
         
         # 🚨 新增：若有審查未通過的歷史紀錄，自動儲存至專屬的詳細 JSON 日誌中
@@ -3871,8 +4100,17 @@ if __name__ == "__main__":
             ))
             
         # 等待所有考卷處理完畢
+        rpd_shutdown = False
         for future in as_completed(futures):
             try:
                 future.result()
+            except RPDExhaustedException as ree:
+                logging.critical(f"🛑 [全域安全退出] 偵測到所有金鑰已達 RPD 限制！已安全保存所有考卷的中斷點進度。程式即將退出...")
+                rpd_shutdown = True
             except Exception as e:
                 logging.error(f"❌ 處理考卷時發生嚴重錯誤: {e}")
+                
+        if rpd_shutdown:
+            logging.critical("🛑 [中斷點退出] 安全終止所有背景考卷任務，系統退出。")
+            import os
+            os._exit(0) # 快速且安全地結束整個處理程序，確保 GitHub Actions 正常關閉
