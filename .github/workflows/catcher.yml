@@ -74,6 +74,8 @@ jobs:
           cp ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
 
       - name: Run parser script
+        env:
+            GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python catcher.py
 
       - name: Push Results to Google Drive
