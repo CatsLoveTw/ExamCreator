@@ -3115,14 +3115,15 @@ class ExamParser:
                 batch_contents.insert(0, batch_prompt)
 
                 try:
-                    # === 2026 架構：將 Stage 2 引擎切換至 Groq 上的 Llama-3.3-70b ===
+                    # === 將 Stage 2 引擎切回 Google Gemini 以容納超長知識庫 Token ===
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
                         contents=batch_contents, 
                         response_schema=QuestionSolutionBatch,
-                        temperature=0.3, # Llama 3.3 建議溫度調低一點以保持數學嚴謹度
-                        preferred_model="llama-3.3-70b-versatile", 
-                        provider="groq", # 👈 關鍵路由：將請求發送給 Groq
-                        task_desc=f"{paper_tag} [Llama3.3 深度解題]"
+                        temperature=0.3,
+                        preferred_model="gemini-3.5-flash", 
+                        provider="google",
+                        enable_thinking=True,
+                        task_desc=f"{paper_tag} [Gemini 深度解題]"
                     )
                     
                     # 🚨 核心優化：將 Stage 2 生成的所有詳解結果遞迴且全面地轉為繁體中文，阻斷簡體字存入資料庫
@@ -3376,15 +3377,15 @@ class ExamParser:
                     
                     validator_batch_prompt = llama_cot_instruction + PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
                     
-                    # === 2026 架構：將 Stage 3 審查引擎切換至 Groq 上的 Llama-3.3-70b ===
+                    # === 將 Stage 3 審查引擎切回 Google Gemini ===
                     val_dict, val_err = self.ai_manager.generate_with_retry(
                         contents=[validator_batch_prompt], 
                         response_schema=SolutionValidatorBatch,
-                        temperature=0.0, # 審查必須極度嚴謹、無隨機性
-                        preferred_model="llama-3.3-70b-versatile", 
-                        provider="groq", 
-                        enable_thinking=False,
-                        task_desc=f"{paper_tag} [Llama 審查]"
+                        temperature=0.0, 
+                        preferred_model="gemini-3.5-flash", 
+                        provider="google", 
+                        enable_thinking=True,
+                        task_desc=f"{paper_tag} [Gemini 審查]"
                     )
 
                     # 處理審查結果 (包含重掃描 OCR)
