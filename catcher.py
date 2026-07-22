@@ -792,9 +792,11 @@ class GeminiFreeTierManager:
         self.models = models
         self.model_idx = 0
         self.lock = threading.Lock()
-        self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型
-        self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
-        self.groq_client = Groq(api_key=self.groq_api_key) if self.groq_api_key else None
+        self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型groq_keys_env = os.environ.get("GROQ_API_KEY", "")
+        groq_keys_env = os.environ.get("GROQ_API_KEY", "")
+        self.groq_keys = [k.strip() for k in groq_keys_env.split(",") if k.strip()]
+        self.groq_key_idx = 0
+        self.groq_lock = threading.Lock() # 保護多執行緒切換金鑰的安全
 
 
     def log_key_error(self, key_str, error_code, error_message):
@@ -1181,10 +1183,33 @@ class GeminiFreeTierManager:
         return None, "請求失敗"
 
     def _generate_with_groq(self, contents, response_schema, temperature, max_attempts, preferred_model, task_desc):
-        """專門處理 Groq 端點 (DeepSeek-R1 / Qwen / Llama3.3) 的呼叫邏輯與 JSON 剝離"""
-        if not self.groq_client:
-            logging.error("🚨 尚未設定 GROQ_API_KEY，無法使用 Groq (DeepSeek/Qwen) 服務！將回傳失敗。")
+        """專門處理 Groq 端點 (DeepSeek-R1 / Qwen / Llama3.3) 的多金鑰輪詢邏輯"""
+        if not hasattr(self, 'groq_keys') or not self.groq_keys:
+            logging.error("🚨 尚未設定 GROQ_API_KEY，無法使用 Groq！將回傳失敗。")
             return None, "groq_key_missing"
+
+        # 1. 安全地取出下一把金鑰
+        with self.groq_lock:
+            current_groq_key = self.groq_keys[self.groq_key_idx]
+            self.groq_key_idx = (self.groq_key_idx + 1) % len(self.groq_keys)
+        
+        # 每次都用輪到的這把金鑰建立一個新的臨時客戶端
+        temp_groq_client = Groq(api_key=current_groq_key)
+        key_masked = f"{current_groq_key[:8]}..."
+
+        text_prompts = [str(c) for c in contents if isinstance(c, str)]
+        combined_prompt = "\n\n".join(text_prompts)
+        
+        schema_json = response_schema.model_json_schema()
+        system_msg = (
+            "You are a highly logical math and science expert. "
+            f"You MUST output exactly matching this JSON schema: {json.dumps(schema_json)}. "
+            "Do NOT wrap the JSON in markdown code blocks like ```json. Output ONLY the raw JSON object."
+        )
+        messages = [{"role": "system", "content": system_msg}, {"role": "user", "content": combined_prompt}]
+        
+        model_name = preferred_model if preferred_model else "llama-3.3-70b-versatile"
+        attempts = 0
 
         # 1. 影像清洗：Groq 上的 DeepSeek-R1 與多數開源模型為純文字模型，必須濾除 PIL.Image
         text_prompts = [str(c) for c in contents if isinstance(c, str)]
@@ -1213,9 +1238,10 @@ class GeminiFreeTierManager:
                 time.sleep(random.uniform(2.5, 6.0))
                 
                 desc_str = f" {task_desc}" if task_desc else ""
-                print(f"🧠{desc_str} 嘗試使用 Groq 模型 {model_name} 進行深度推導 (第 {attempts + 1} 次嘗試)...", flush=True)
                 
-                response = self.groq_client.chat.completions.create(
+                print(f"🧠{desc_str} 嘗試使用 Groq 模型 {model_name} (使用金鑰 {key_masked}) (第 {attempts + 1} 次嘗試)...", flush=True)
+                
+                response = temp_groq_client.chat.completions.create(
                     model=model_name,
                     messages=messages,
                     temperature=temperature,
@@ -3003,8 +3029,7 @@ class ExamParser:
         # =========================================================
         # 【第二、三階段】：滑動窗口批次詳解、審查與「指正題+新題湊10題」重試機制
         # =========================================================
-        # 依照學科決定預設批次 (數學=2, 自然=3, 其他=4)
-        active_batch_size = self.get_initial_batch_size(subject)
+        active_batch_size = 1 # 強制每次只送 1 題，避免 Input Token 撐爆 Groq 的 12K 限制
         max_single_attempts = 8
         max_rechecks = 8
 
