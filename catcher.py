@@ -833,7 +833,7 @@ class GeminiFreeTierManager:
             except Exception as e:
                 logging.error(f"無法寫入金鑰錯誤日誌 key_errors_summary.txt: {e}")
     
-   def escape_latex_backslashes(self, raw_text: str) -> str:
+    def escape_latex_backslashes(self, raw_text: str) -> str:
         """
         精確且安全地將 JSON 字串內所有代表 LaTeX 指令的單反斜線轉義為雙反斜線。
         防範 \frac, \text, \beta, \right, \nu 等指令被誤判為 JSON 控制字元 (\f, \t, \b, \r, \n)。
@@ -871,8 +871,8 @@ class GeminiFreeTierManager:
             # 其他所有反斜線指令 (如 \alpha, \theta, \le, \ge, \pi 等) 強制轉義
             return "\\\\" + char
 
-        # 優先匹配 \\uXXXX，其次匹配單個 \\(.)
-        raw_text = re.sub(r'(\\u[0-9a-fA-F]{4})|\\(.)', replace_backslash, replace_backslash_logic if 'replace_backslash_logic' in locals() else replace_backslash)
+        # 優先匹配 \\uXXXX，其次匹配單個 \\(.)，目標字串為 raw_text
+        raw_text = re.sub(r'(\\u[0-9a-fA-F]{4})|\\(.)', replace_backslash, raw_text)
         
         # 3. 還原保護的雙反斜線
         raw_text = raw_text.replace("__DBL_SLASH__", "\\\\")
