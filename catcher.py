@@ -395,10 +395,10 @@ PROMPT_STAGE_2_MAIN = """
     - 💡 **【互動式補教名師講授風格（剛性要求）】**：
       * **字裡行間必須極具互動性、啟發性與對話感！** 想像你正在全台灣最大大考衝刺班的黑板前，眼神熱切地為台下的高三學子指點迷津。
       * 鼓勵多使用例如『同學們，我們仔細觀察這裡！』、『這時候我們不妨做一個大膽的輔助線...』『有沒有發現這個關鍵訊息？它其實在暗示我們...』等溫暖、親切且生動活潑的口吻。
-    - 💡 **【圖文完美咬合（多圖嵌入）】**：
-      * **當你在詳解文字中嵌入圖片（如 `![圖 1](...)`、`![圖 2](...)`）時，絕對不允許只是孤零零、冷冰冰地貼上一個圖片 Markdown 連結！**
-      * 你**必須**在該圖片的「前後文段落」中，用熱情的語言深度引導學生如何去觀測、看懂這張圖背後的幾何意義。
-      * 例如：『...請看圖 1 ![圖 1](images/...)。當我們成功做出了這個外接圓之後，圓周角與弦切角的等量關係是不是就一目了然了？緊接著，我們就可以從...』，讓圖片與文字在學生的理解中產生完美的化學反應。
+    - 💡 **【圖文完美咬合與自然視覺化（多圖啟發）】**：
+      * **【按需自然多圖】**：理科（數學/物理/化學/地科）教學的核心在於「將抽象概念具象化」。若題目涉及幾何輔助線、函數圖形交點、物理受力分析 (Free-body Diagram)、光路圖、波形圖或反應過程，**強烈鼓勵您為不同的解法或關鍵步驟，自然地繪製專屬圖解**（例如：`圖 1` 呈現標準解法的幾何構造，`圖 2` 呈現另解的座標化點位，`圖 3` 呈現極值觀察）。
+      * **【適度原則（拒絕強湊）】**：若本題屬於純代數計算、純文字概念辨析或文意理解，則無需硬湊圖片。圖解應「精準服務於原理理解，質量重於數量」。
+      * **【圖文互動】**：當您嵌入圖片時，**絕對不允許只是孤零零貼上連結**！必須在前後文用熱情的語言引導學生觀察圖中細節，例如：『...同學們請看圖 1 ![圖 1](images/...)。做出這條外接圓輔助線後，圓周角與弦切角是不是就一目了然了？...』，讓圖文咬合發揮最大教學價值。
     - 請使用 Markdown 標題區分多種解法，以激發學生的思維創造力，我們強烈要求「一題多解」：
             - `### 【標準解法】`：必須按部就班、寫出最正規且符合課綱的求解過程。涉及計算必須呈現完整的 LaTeX 公式推導，嚴禁直接跳出答案。**【極重要硬性規定】**：`### 【標準解法】` 必須是一個**完整的、能獨立推導或判斷出所有選項（如選項 1 至 5，或 A 至 E）對錯的完整解題路徑**。絕對不允許在標準解法中只判斷選項 1, 2，而把其餘選項的判斷拆分到其他另解中！
             - `### 【另解一：[命名你的思維，例如：座標轉換/幾何投影法]】`：提供第二套完整且嚴謹的推導思維。**如果某個另解因為方法特質限制，只能用來判斷部分選項，你必須在該另解的標題或開頭極其明確地註明：『本解法專用於快速判斷選項 X, Y』。**
@@ -921,10 +921,10 @@ class GeminiFreeTierManager:
                 if isinstance(item, str):
                     tokens += len(item) // 2
                 elif isinstance(item, Image.Image):
-                    tokens += 258  # 預留一張圖所需的 Token (Gemini 讀圖基本消秏)
+                    tokens += 1500  # 預留一張圖所需的 Token (Gemini 讀圖基本消秏)
         elif isinstance(contents, str):
             tokens += len(contents) // 2
-        return max(100, tokens)
+        return max(500, tokens)
 
     def print_keys_status(self):
         """將所有金鑰統計與額度狀態輸出至本機檔案 key_status.txt，完全不在終端機列出，保持畫面乾淨"""
@@ -996,28 +996,46 @@ class GeminiFreeTierManager:
     def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
         with self.lock:
             msg = error_msg.lower()
-            if "perday" in msg or "quota" in msg or "daily" in msg or "free_tier_requests" in msg:
+            # 🚨 精確區分每分鐘頻率限制 (RPM) 與每日上限 (RPD)
+            is_rpm = any(k in msg for k in ["per minute", "perminute", "requests per minute", "rpm"])
+            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "free_tier_requests", "rpd"])
+            
+            # 只有在「明確包含每日限制」且「不是每分鐘限制」時，才判定為 RPD 耗盡
+            if is_rpd and not is_rpm:
                 key.mark_rpd_exhausted()
-                logging.warning(f"[額度報銷] 金鑰 {key.api_key[:8]}... 已達每日上限，已轉移至背景冷卻。")
+                logging.warning(f"[每日額度報銷] 金鑰 {key.api_key[:8]}... 已達每日上限 (RPD)，已轉移至背景冷卻。")
             else:
-                # 突發型 429 則加入冷卻隊伍
+                # 突發型 429 或每分鐘頻率限制 (RPM)，僅增加 60 秒冷卻懲罰，切勿誤殺金鑰！
                 key.request_times.extend([time.time()] * 3)
+                logging.info(f"⏳ [RPM 冷卻] 金鑰 {key.api_key[:8]}... 觸發每分鐘頻率限制 (429)，短暫進入背景冷卻。")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=5, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
         if provider == "groq":
             return self._generate_with_groq(contents, response_schema, temperature, max_attempts, preferred_model, task_desc)
 
-        # === 以下為原本的 Google Gemini 處理邏輯 ===
+        # === 🚨 建立動態模型降級梯隊 (Model Fallback Cascade) ===
+        # 首選 preferred_model，若失敗則按順序自動降級試用其餘模型
+        candidate_models = []
+        if preferred_model and preferred_model in self.models:
+            candidate_models.append(preferred_model)
+            candidate_models.extend([m for m in self.models if m != preferred_model])
+        else:
+            candidate_models = list(self.models)
+
         estimated_tokens = self.estimate_tokens(contents)
         attempts = 0
         while attempts < max_attempts:
-            # 取得可用資源（內建調度等待，保證不會回傳 None）
-            client, model, key_obj = self.get_current_resource(preferred_model=preferred_model, estimated_tokens=estimated_tokens)
+            # 每次重試若失敗，自動輪替切換至下一位備用模型！
+            target_model = candidate_models[attempts % len(candidate_models)]
+
+            # 取得可用資源與目前目標模型
+            client, model, key_obj = self.get_current_resource(preferred_model=target_model, estimated_tokens=estimated_tokens)
             self.last_model_used = model
             
             thinking_config = None
-            if any(m in model for m in ["gemini-3.5", "gemini-2.5", "gemini-3"]):
+            # 支援 3.6, 3.5, 3.0, 2.5 系列模型啟用 Thinking 深度思考
+            if any(m in model for m in ["gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
                 if enable_thinking:
                     thinking_config = types.ThinkingConfig(thinking_level='HIGH')
                 else:
@@ -1025,8 +1043,6 @@ class GeminiFreeTierManager:
                 
             try:
                 # 🚨 核心修改：引入隨機平滑抖動（Jitter）
-                # 在每個線程發送請求前，隨機微調等待 0.2 到 0.7 秒。
-                # 這能有效打破多線程高度同步的發送特徵（不會同時射出幾十個 API 請求），避開 Google 安全防護的自動化指紋偵測
                 import random
                 time.sleep(random.uniform(1.8, 6))
 
@@ -1034,10 +1050,6 @@ class GeminiFreeTierManager:
                 print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API，思考: {thinking_config.thinking_level if thinking_config else '關閉'} / 溫度: {temperature} (第 {attempts + 1} 次嘗試)...", flush=True)
                 # 每次執行時顯示金鑰狀態
                 self.print_keys_status()
-
-                # 💡 優先獲取金鑰，若已無額度則直接拋出 RPDExhaustedException 中斷
-                client, model, key_obj = self.get_current_resource(preferred_model=preferred_model, estimated_tokens=estimated_tokens)
-                self.last_model_used = model
 
                 response = client.models.generate_content(
                     model=model,
@@ -1192,7 +1204,13 @@ class GeminiFreeTierManager:
                 
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
+                    # 指數退避：隨次數增加等待時間 5s, 10s, 20s, 40s... 並加上 random 抖動
+                    backoff_time = (2 ** attempts) * 5 + random.uniform(1, 5)
+                    logging.warning(f"⚠️ [觸發 429 限流] 等待 {backoff_time:.1f} 秒後進行第 {attempts + 1} 次指數退避重試...")
+                    time.sleep(backoff_time)
                     self.handle_rate_limit_error(key_obj, err_str)
+                    attempts += 1
+                    continue
                 else:
                     time.sleep(2)
             except Exception as e:
@@ -1767,7 +1785,7 @@ class ExamParser:
                     contents=[prompt, pil_img_enhanced],
                     response_schema=ArbitrationResult,
                     temperature=0.0,
-                    preferred_model="gemini-3.5-flash", # 使用具備最強視覺細節與思考能力的核心模型進行仲裁
+                    preferred_model="gemini-3.6-flash", # 使用 2026 最強模型進行終極仲裁
                     enable_thinking=True,
                     task_desc="[解答仲裁]"
                 )
@@ -2018,10 +2036,10 @@ class ExamParser:
         subjects_stem = ["數學", "數A", "數B", "數學乙", "數學甲", "數甲", "數乙", "物理", "化學", "生物", "地球科學", "自然"]
         is_stem = any(t in subject for t in subjects_stem)
 
-        # 規則：第一階段純掃描、文科詳解一律優先使用 Lite 節省額度；理科解題與審查無條件優先分配最強的 3.5-Flash
-        stage_1_model = "gemini-3.1-flash-lite"
-        stage_2_model = "gemini-3.1-flash-lite"
-        validator_model = "gemini-3.1-flash-lite"
+        # Stage 1 用 Flash-Lite 極速掃描；Stage 2/3 用 3.6-Flash 深度推理
+        stage_1_model = "gemini-3.5-flash-lite"   # 第一階段：巨量頁面快速 OCR 與圖框標記
+        stage_2_model = "gemini-3.6-flash"        # 第二階段：名師級深度解題 (開啟 Thinking 思考鏈)
+        validator_model = "gemini-3.6-flash"      # 第三階段：嚴謹閱卷審查與代數驗算
         # stage_2_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         # validator_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         
@@ -2053,6 +2071,7 @@ class ExamParser:
         os.makedirs(os.path.join(output_dir, type_folder), exist_ok=True)
         json_path = os.path.join(output_dir, type_folder, f"{spec_name}_database.json")
         partial_json_path = json_path.replace("_database.json", "_partial_database.json") # 🆕 暫存進度檔路徑
+        raw_extracted_json_path = json_path.replace("_database.json", "_raw_extracted.json") # 🆕 第一階段題目快取檔路徑
         
         if os.path.exists(json_path):
             # 🚨 核心優化：在跳過已存在的 Database 之前，先加載並檢查該檔案中是否含有簡體字，若有則自動轉為繁體並覆寫
@@ -2074,18 +2093,7 @@ class ExamParser:
         img_dir = os.path.join(output_dir, type_folder, "images", spec_name)
         os.makedirs(img_dir, exist_ok=True)
 
-        # 5. 一次性將原卷、解答、評分原則 PDF 轉換成高解析度整頁圖片
-        logging.info("📸 正在將原卷、解答、評分原則 PDF 轉換成黃金 300 DPI 整頁圖片...")
-        # 🚨 [核心優化] 全局提升為 300 DPI，確保微小的對數底數、上標、負號與緊湊解答表格不發生像素模糊，杜絕 OCR 誤讀
-        q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
-        a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300) 
-        rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
-
-        # 6. 抓取全卷答案與手寫評分標準
-        ans_text = self.extract_clean_answers(a_pdf)
-        rubric_text = self.extract_text_from_pdf(rubric_pdf)
-
-        # ----------------- 【學科與數學類別標準化映射】 -----------------
+        # ----------------- 【學科與數學類別標準化映射】 (放置於快取檢查外，全域皆可調用) -----------------
         normalized_subject = subject
         math_type = None  # 用於在 Prompt 中引導數學 A/B 的範圍
         
@@ -2113,428 +2121,314 @@ class ExamParser:
                     current_allowed["techniques"].extend(SUBJECT_TAXONOMY[sub].get("techniques", []))
         
         subject_rubric = SUBJECT_DIFFICULTY_RUBRICS.get(normalized_subject, GENERAL_DIFFICULTY_RUBRIC)
-        # ------------------------------------------------------------------
+        # --------------------------------------------------------------------------------------------------
 
-        doc = fitz.open(q_pdf)
-        cat = doc.pdf_catalog()
-        doc.xref_set_key(cat, "StructTreeRoot", "null")
         all_extracted_questions = []
 
-        failed_questions = []  # 用來記錄這份試卷中「所有被跳過題目」的日誌列表
-        
-        # 🚨 新增：定義審查退件專屬的文字日誌路徑，每次執行前先初始化清空
-        validation_records = []  
-        val_log_lock = threading.Lock() # 新增鎖
-        validation_log_path = json_path.replace("_database.json", "_validator_log.txt")
-        if os.path.exists(validation_log_path):
+        # 🆕 1. 優先檢查是否有第一階段題目快取檔
+        if os.path.exists(raw_extracted_json_path):
+            logging.info(f"⚡ [Stage 1 快取命中] 找到已擷取的題目快取：{raw_extracted_json_path}")
+            logging.info("  -> 直接載入題目結構與圖片路徑，【完全跳過】PDF 轉圖與第一階段全部 OCR 掃描！")
             try:
-                os.remove(validation_log_path)
-            except Exception:
-                pass
+                with open(raw_extracted_json_path, "r", encoding="utf-8") as f:
+                    all_extracted_questions = json.load(f)
+            except Exception as e:
+                logging.error(f"讀取 Stage 1 快取失敗 ({e})，將重新進行第一階段掃描...")
+                all_extracted_questions = []
 
-        rubric_visual_map = self.extract_rubric_visual(rubric_pdf, img_dir)
+        # 🆕 2. 只有在無快取時，才進入龐大的第一階段 PDF 轉圖與全套 OCR 掃描
+        if not all_extracted_questions:
+            # 5. 一次性將原卷、解答、評分原則 PDF 轉換成高解析度整頁圖片
+            logging.info("📸 正在將原卷、解答、評分原則 PDF 轉換成黃金 300 DPI 整頁圖片...")
+            q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
+            a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300) 
+            rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
 
-        # =========================================================
-        # 【第一階段】：分頁批次掃描與附圖裁切 (4~8頁為一個 Batch)
-        # =========================================================
-        pages = []
-        for page_num in range(len(doc)):
-            # 若手動啟用 skip_cover，無條件跳過第一頁
-            if skip_cover and page_num == 0:
-                logging.info("  -> ⏭️ [封面跳過] 依據 skip_cover 參數，直接跳過第 1 頁分析。")
-                continue
-                
-            page = doc[page_num]
-            raw_page_text = page.get_text("text")
-            
-            # 🚨 新增：封面關鍵字過濾器（徹底解決第一、二題重複掃描、錯位裁切的問題）
-            # 🚨 修正：封面與注意事項頁過濾器（擴大至前兩頁，並增加更多匹配詞彙與無題目結構校驗）
-            # 🚨 修正：封面與注意事項頁過濾器（擴大至前兩頁，並增加更多匹配詞彙與無題目結構校驗，修正換行多行校驗）
-            if page_num <= 1:
-                cover_keywords = [
-                    "作答注意事項", "考試時間", "作答方式", "選擇題範例", 
-                    "答案卡", "畫卡樣式", "答題卷", "畫卡樣例", "注意事項", 
-                    "作答說明", "答題說明", "答題卡", "考生姓名", "准考證號"
-                ]
-                has_cover_keyword = any(k in raw_page_text for k in cover_keywords)
-                # 在保留原始分行 raw_page_text 上搜尋，確保換行起手式被精準識別 (防範跨頁空殼題目)
-                has_real_question = re.search(r'^\s*(?:1|一|\(一\))\s*[.．、\s)]', raw_page_text, re.MULTILINE) is not None
-                
-                if has_cover_keyword and not has_real_question:
-                    logging.info(f"  -> ⏭️ [封面/說明頁跳過] 偵測到第 {page_num + 1} 頁為封面或作答注意事項頁，自動跳過。")
+            # 6. 抓取全卷答案與手寫評分標準
+            ans_text = self.extract_clean_answers(a_pdf)
+            rubric_text = self.extract_text_from_pdf(rubric_pdf)
+
+            doc = fitz.open(q_pdf)
+            cat = doc.pdf_catalog()
+            doc.xref_set_key(cat, "StructTreeRoot", "null")
+
+            failed_questions = []
+            validation_records = []  
+            val_log_lock = threading.Lock()
+            validation_log_path = json_path.replace("_database.json", "_validator_log.txt")
+            if os.path.exists(validation_log_path):
+                try: os.remove(validation_log_path)
+                except Exception: pass
+
+            rubric_visual_map = self.extract_rubric_visual(rubric_pdf, img_dir)
+
+            # =========================================================
+            # 【第一階段】：分頁批次掃描與附圖裁切
+            # =========================================================
+            pages = []
+            for page_num in range(len(doc)):
+                if skip_cover and page_num == 0:
+                    logging.info("  -> ⏭️ [封面跳過] 依據 skip_cover 參數，直接跳過第 1 頁分析。")
                     continue
+                    
+                page = doc[page_num]
+                raw_page_text = page.get_text("text")
                 
-            pages.append(page_num)
-
-        # 🚨 [核心修復] 解決高資訊密度試卷（如數乙）嚴重漏題（漏掉 Q2~Q9）的 Bug
-        # 6 頁對輕量模型而言注意力負擔過重。改為理科每次掃描 2 頁，文科 3 頁，確保 100% 完整擷取
-        page_batch_size = 2 if is_stem else 3
-
-        for b_idx in range(0, len(pages), page_batch_size):
-            batch_pages = pages[b_idx : b_idx + page_batch_size]
-            logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
-
-            # 蒐集本批次所有頁面的圖片與純文字
-            batch_pil_imgs = []
-            batch_raw_texts = []
-            for p_num in batch_pages:
-                full_page_filepath = q_image_paths[p_num]
-                batch_pil_imgs.append(Image.open(full_page_filepath))
-                batch_raw_texts.append(f"--- 第 {p_num+1} 頁純文字 ---\n" + s2t(doc[p_num].get_text("text")))
-            
-            try:
-                batch_text_combined = "\n\n".join(batch_raw_texts)
-                prompt_stage_1 = f"""
-                🚨【範例過濾極度警告】🚨：
-                - 本 PDF 的第一頁（或前幾頁）通常包含「作答範例」或「作答注意事項」。
-                - **【嚴禁】** 擷取範例中的題目（如：範例第 1 題為單選題...）。
-                - 你的擷取任務必須從真正的考題開始（通常在說明的橫線之後，或從第 1 題真正出現的地方開始）。
-                - 確保 `question_number` 1 是考卷真正的第 1 題，而非範例題。
-
-                🚨【實體考題校驗規則】🚨：
-                1. 你的任務是擷取「正式試題」。
-                2. 封面頁（Page 1）的內容通常是「作答範例」（如：第1題為單選題...），**【絕對禁止】** 擷取。
-                3. 真正第一題通常出現在 Page 2 或 Page 1 的下半部（橫線之後）。
-                4. 每一題的 `page_number` 必須精確記錄其在 PDF 中的實體頁碼。
-
-                若題目是純文字（如選擇題），且沒有任何附圖或化學反應式圖像，請將 has_image 設為 false。只有當題目中出現獨立於文字行之外的複雜反應式、圖形或表格時，才設為 true 並圈選。
-                
-                你是一位專業的台灣高中閱卷與數位典藏專家。這是一組台灣高中考試的試卷連續影像。
-                學年度：{year}，科目：{subject}。
-                這組影像包含第 {batch_pages[0]+1} 頁到第 {batch_pages[-1]+1} 頁。
-
-                【任務目標】
-                請極其精準地擷取這幾頁中的所有考題，並將資料填入對應的 Pydantic 結構中。
-
-                【手寫題與非選擇題評分標準精準對齊】
-                本考卷包含非選擇題（如第22、24-31題等手寫題）。
-                請對照下方提供的【官方評分原則文字】，將手寫題對應的「列式給分、答案給分、扣分限制」等極重要規則，精確填入 `scoring_criteria` 欄位中！
-                
-                🚨【數位文字與影像視覺雙重比對規限（零誤差保證）】🚨
-                - 本系統提供了該頁面的『原始純文字對照（Text Layer）』。
-                - 當你從影像中識別數學變數（如 $x, y, z, a, b$）或物理單位時，如果因為字體過小或解析度問題產生疑義，請【強制比對純文字對照區】中的相對應字元。
-                - 英文大小寫、希臘字母（如 \\theta, \\phi, \\alpha）必須完全以底層數位文字層的命名為最高準則，嚴禁因為視覺模糊而自行臆測或改寫變數名稱！
-
-                【一、剛性文字與公式規格化】
-                1. **題目文字完全對齊**：`question_text` 必須與圖片及底層純文字 100% 吻合。
-                2. **LaTeX 規範**：所有數學公式、化學式、變數符號、數值等，**必須**使用標準 LaTeX 語法包裹，確保排版美觀。
-                3. **LaTeX 嚴格符號規範**：所有數學公式、化學式、變數符號，【行內公式】必須嚴格使用 `$...$` 包裹；【獨立行公式】必須嚴格使用 `$$...$$` 包裹。絕對禁止使用 `\\( \\)` 或 `\\[ \\]` 作為公式標籤！
-                4. **🚨【選項分離與題幹清洗硬性規定】**：對於選擇題（單選與多選），**必須且強制**將題幹文字（`question_text`）中所有包含選項描述的部分（例如：尾部的 `(A) xxx (B) yyy...` 或 `(1) xxx (2) yyy...` 或者是行內的選項敘述）**完全清除乾淨**！題幹 `question_text` 內只能保留最純粹的題目問句，絕對不能殘留任何選項的標籤與其文字內容！所有的選項標籤與文字必須且只能存在於 `options` 欄位中，嚴禁在題幹與選項列表間發生資料雙重冗餘與重複！
-                - 🚨【選填題無選項剛性鐵律】：**選填題（填空題，即題號為大寫字母 A, B, C... 或帶有 [ 9 ] 挖空者）絕對沒有選項！** 它的 `options` 屬性必須 100% 為空列表 `[]`。**絕對禁止**將解答卷或答案卡上的欄位索引與答案對照（如：`8. 1. 9. 3.`）當作選項寫入 `options`！
-                4-2. **表格強制轉換**：數據表格務必轉換為 Markdown Table 格式嵌入。
-                5. **內文嵌入選項**：若遇上古文或國文科「克漏字」等選項內嵌在文章段落中的狀況，請在題幹中保留如 (A)、(B) 等引導標記以維持文章完整，並將對應的代號與內容整理到 `options` 欄位中。
-                5. **【選填題挖空規則（極度重要）】**：大考選填題常使用圓圈數字（如 \u2468、\u2469 或 \u246c-\u2460）代表畫卡格。請將其轉換為 `[ 9 ]`、`[ 10 ]` 或 `[ 13-1 ]` 的格式。
-                \U0001f6a8**警告**：有時候圓圈數字旁邊**真的有根號或其他數學符號**（例如 $\\frac{{\\u2468\\sqrt{{\\u2469}}}}{{32}}$），請務必精準轉換為 `\\frac{{ [ 9 ] \\sqrt{{ [ 10 ] }} }}{{ 32 }}`！絕對不可以把真正的根號吃掉，也絕對禁止擅自把 \u2468 和 \u2469 強行合併成 `[ 9-10 ]`！請忠實反映圖片上的數學結構。
-                6. **表格強制轉換**：若題目中包含數據表格（如：表1、表2），請【務必】將表格內容完整轉換為 Markdown Table 格式，並嵌入到 `question_text` 中相應的位置。絕對不可省略表格內容！
-                7. **選填題答案與畫卡格子對應規範（極度重要）**：
-                   - 大考選填題的答案會對應至多個獨立的畫卡格子（例如：`[ 10-1 ]`、`[ 10-2 ]`、`[ 10-3 ]`）。
-                   - **【強制規定】**：在 `answer` 欄位中，**必須**將每一個格子所對應的答案字元（包含數字、正負號或特定根號代號）依序填入，並以半形逗號 `,` 隔開！
-                   - 例如：
-                     * 若題目為 $a=[ 10-1 ][ 10-2 ]$, $b=[ 10-3 ]$，其中 $a = -4$, $b = 3$，其對應畫卡格答案分別為 `-`、`4`、`3`，則 `answer` 欄位必須寫成 `-,4,3`，絕對不可直接相連寫成 `-43`。
-                     * 若選填題 A 答案為 $\frac{9}{10}$，畫卡格 9-10 為 9、1、0，則寫成 `9,1,0`，絕對不可寫成 `910`。
-                8. **克漏字與文意選填特例（極度重要）**：克漏字的選項通常集中在文章下方。請你【主動去文章段落 (shared_context) 中尋找對應的題號】，將「包含該題號空格的那一整個完整句子」提取出來作為 `question_text`，並將題號替換為 `______`。絕對禁止將 (A) (B) (C) (D) 等選項文字當作題幹！
-                9. **選填題挖空規則**：若遇到大考特有的圓圈畫卡題號（例如 ⑬-① ⑬-②），請統一轉換為標準挖空格式 `[ 13-1 ] [ 13-2 ]`，不要使用 LaTeX 的 \\bigcirc。這有利於系統自動生成填空輸入框。
-                9-2. **🚨【選填題畫卡格圓圈數字不視為圖片】🚨**：
-                   大考選填題中出現的帶圓圈數字（如 ⑧、⑨、⑩）是排版文字的一部分（請按規則 9 轉換為 `[ 8 ]`、`[ 9 ]`、`[ 10 ]`）。**【絕對禁止】**將這些圓圈數字、分數線或其相鄰的填空文字框選為 `image_bboxes`！只有當題目中出現真正的實體插圖、函數圖形、幾何圖形或大型數據表時，才將其框選為 `image_bboxes`。
-                10. **【極度精準的數學 OCR】**：數學公式與不等式的辨識必須一字不差！例如 `x-y` 絕對不能看錯成 `2x-y` 或 `x+y`，大於小於符號絕對不能反！請反覆核對圖片中的方程式。
-                10-2. **🚨【微細符號與循環小數極度預警】🚨**：
-                   在數學科中，常常出現**循環小數**（例如 $1.\\bar{{5}}$，即數字 5 的上方有一條橫線，代表 $1.5555...$）。
-                   - 這類微小的上標橫線極易被低解析度 OCR 遺漏並誤讀為普通小數（如 $1.5$）。
-                   - 請你**仔細盯住原卷圖片上的每一個小數點與數字上方**！若看到數字上方有任何橫線、波浪號或圓點，**必須且強制**將其識別為標準 LaTeX 的循環小數格式，例如 `$1.\\bar{{5}}$`、`$7.\\bar{{7}}$` 或 `$1.\\dot{{5}}$`。
-                   - 絕對禁止遺漏這些符號並將其簡化為普通小數，這會導致整道題目的數論邏輯與選項對照徹底崩潰！
-                11. **【防錯位與防遺漏警告】**：大考的題目偶爾會分欄排版。請務必遵循正常的閱讀順序（先左後右，先上後下）完整提取 `question_text`。若題目包含附表，請確保 Markdown Table 欄位數與原圖完全一致，絕不可漏掉任何一行數據！
-                12. **【防選項合併】**：請確保 `options` 欄位中，每個選項是獨立的物件，絕對不可以把選項 A 和選項 B 融合成一個選項輸出。
-                13. **頁碼追蹤（極度重要）**：你必須在 `page_number` 欄位中，填入該題目在原卷 PDF 中的真實頁碼（從 1 開始計數）。這對於裁切考題附圖與表格至關重要。
-                14. **【字母 y 與數字 3 的防混淆警告（化學與代數特防）】**：在化學分子式（例如 $CH_3(CH_2)_yCl$）中，**斜體的小寫字母 $y$ 極易被誤判為數字 $3$**！
-                    如果題目中同時出現了 $x, z$ 作為待求變數（如 $CH_3SH_x$ 與 $CH_3NH_z$），夾在中間的變數絕對是小寫字母 $y$（即 $CH_3(CH_2)_yCl$），請務必精準辨識為小寫字母 $y$，絕對不可以看成數字 $3$！
-                15. **【清洗圖形文字佔位符】**：大考 PDF 的純文字中常含有如 `[圖3 結構圖]`、`[圖形]`、`[圖片]` 或 `[圖 3]` 等無意義的純文字佔位符。請你在擷取 `question_text` 與 `shared_context` 時，**務必將這些無意義的圖形文字佔位符完全剔除**！因為我們後續會有實體的 `image_bboxes` 裁剪圖，不需要保留這些純文字垃圾。
-                16. **【極度寬裕的 Bounding Box 標記】**：當你框選 `image_bboxes` 或選項附圖的 Bounding Box 時，**請務必畫得極度寬裕 (Very Generous)**！寧可多框 15% 的空白邊緣，也絕對不可以切到任何化學鍵、原子符號、反應箭頭、坐標軸文字、或選項字母 A, B, C 的邊角！
-                17. **【題組判定極度嚴格警告】**：只有當試卷上明確印有『X-Y題為題組』時，才可將 X 到 Y 題歸為題組，並將共同引言寫入 `shared_context`。**絕對禁止**只因為多道題目印在同一頁、或者因為它們都是選擇題，就擅自編造『題組』將其歸類！非題組的題目，其 `shared_context` 必須為空！
-                18. **科目精細分類**：請將考卷的原有名稱填入 'exam_source'，而 'sub_subject' 必須且只能從以下清單中挑選一項填寫：'物理', '化學', '生物', '地球科學', '歷史', '地理', '公民與社會', '數學', '英文', '國文', '國寫'。對於跨科考題，請強制選擇佔比最重的一科，絕對不可自創類別。
-
-                【圖片裁切極致規範 - 解決切錯/漏切問題】
-                1. **題號包含原則**：Bounding Box 必須包裹住題號數字。
-                2. **🚨選項附圖合併規則 (極重要)🚨**：
-                - 如果題目選項 (A)~(E) 或 1~5 是圖形（如幾何圖、生物分類樹、化學結構）：
-                - **【嚴禁】** 將 A, B, C, D, E 分開裁切成五張圖。
-                - **【必須】** 直接框選一個覆蓋 A 到 E 所有選項的大型 Bounding Box，並放入該題 `image_bboxes` 中。
-                3. **🚨嚴禁憑空捏造 Bounding Box🚨**：如果考卷影像中沒有明確的圖表、幾何圖形或附圖，絕對不可以因為題目敘述出現「圖形」、「正方體」、「橢圓」等字眼就憑空捏造 Bounding Box 座標！此時必須將 has_image 設為 false 且 image_bboxes 設為空列表 []。
-                - 此時，個別選項的 `has_image` 設為 false，其文字內容填寫「【請參見題幹附圖中的選項內容】」。
-                3. **表格與圖表標籤**：必須包含「圖15」或「表7」等標籤。
-                4. **表格邊界**：框選表格時請多留 50 個單位的空白邊緣，嚴禁切到表格的框線或標題。
-                5. **題號對位**：確保 `question_number` 欄位與你框選的 `image_bboxes` 屬於同一個邏輯區塊。絕對禁止將第 15 題的文字配上第 16 題的圖。
-
-
-                【二、題組與附圖剛性規則】
-                1. **題組共同題幹處理**：若本頁有「X-Y 為題組」（如閱讀測驗文章、實驗情境敘述），請務必將「共同引言/文章/數據表」**只填入 `shared_context` 欄位中**。`question_text` 絕對保持乾淨，只保留該單一子題的問句！
-                2. **多圖定位 (image_bboxes)**：若該題含有多張分散的附圖、表格或化學結構式（例如同時包含圖 1 與圖 2，或包含表 1 與結構圖），請將**所有**附圖的 Bounding Box 分別精確框出，並以列表的列表（如 `[[ymin1, xmin1, ymax1, xmax1], [ymin2, xmin2, ymax2, xmax2]]`）填入 `image_bboxes`。寧可框大，也絕不漏掉任何一張圖。
-                🚨 3. **選項附圖合併規則（極度重要，解決裁切不精準的致命傷）**：
-                   若選擇題的選項本身是圖形（如：五個細胞分裂圖、五個系統分類樹、五個幾何圖形）：
-                   - **如果選項（A, B, C, D, E）在版面上是「橫向排成一列」、或者「排成整齊的網格區塊」，請【絕對不要】將它們分割成五個零碎的小圖！**
-                   - 請你【直接將這整排/整個區塊的選項圖（必須包含 A, B, C, D, E 的標記以及它們所有的圖形）合併框成一個唯一的、寬裕的大 Bounding Box，放入主標題（題幹）的 `image_bboxes` 中】（此時題幹 `has_image` 設為 `true`）。
-                   - 此時，個別選項的 `has_image` 請設為 `false`，其 `image_bboxes` 設為空列表 `[]`，選項的 `value` 欄位統一填入：`"【圖形選項，請參見題幹附圖】"`。
-                   - 只有當選項圖在版面上分布極度散亂、完全無法合併為一個方框時，才允許將各個選項的 `has_image` 設為 `true` 並單獨框選。
-                4. **附圖框選寬裕原則**：當你框選任何附圖或大表格時，**請務必框得極度寬裕（Generous）一些**。確保表格名稱、上方的標題文字、下方的選項標籤文字，都完整被包裹進 Bounding Box 中，避免在後續裁切時被切掉邊緣。
-
-                【三、大考答案與評分絕對對齊】
-                官方選擇題解答：
-                {ans_text}
-
-                官方非選題評分標準：
-                {rubric_text}
-
-                【四、標準輸出格式範例 (Few-Shot Example)】
-                {{
-                    "questions": [
-                        {{
-                            "academic_year": "114分科",
-                            "exam_source": "114學測自然",
-                            "sub_subject": "物理",
-                            "question_number": "1",
-                            "page_number": 2,
-                            "question_text": "2024 年聯合國大會宣布 2025 年為國際量子科學與科技年（IYQ）...下列有關量子力學發展的敘述何者正確？",
-                            "has_image": false,
-                            "image_bboxes": [],
-                            "options": [
-                                {{"key": "A", "value": "普朗克提出量子論成功解釋氫原子光譜的性質"}},
-                                {{"key": "B", "value": "德布羅意提出物質波說明波與粒子的二象性"}}
-                            ],
-                            "answer": "E",
-                            "question_type": "單選題",
-                            "scoring_criteria": "",
-                            "full_page_image_path": "",
-                            "shared_context": ""
-                        }},
-                        {{
-                            "academic_year": "114分科",
-                            "exam_source": "化學",
-                            "question_number": "22",
-                            "page_number": 8,
-                            "question_text": "根據此實驗結果，計算氫氧化鈣的溶解度（M）。",
-                            "has_image": false,
-                            "image_bboxes": [],
-                            "options": [],
-                            "answer": "0.0244(M)",
-                            "question_type": "簡答題",
-                            "scoring_criteria": "（一）列式正確得 1 分，答案正確再得 1 分。（二）列式正確，答案不正確只得 1 分。（三）只寫答案沒計算過程，則不給分。",
-                            "full_page_image_path": "",
-                            "shared_context": ""
-                        }},
-                        {{
-                            "academic_year": "115學測",
-                            "exam_source": "自然",
-                            "question_number": "28",
-                            "page_number": 6,
-                            "question_text": "觀察洋蔥根尖切片，下列哪一進程最早形成2 倍量的DNA？（請參見附圖 A-E）",
-                            "has_image": true,
-                            "image_bboxes": [[150, 100, 300, 950]],  // 🚨 框選一整橫排 A~E 的大 Box
-                            "options": [
-                                {{"key": "A", "value": "【圖形選項，請參見題幹附圖】", "has_image": false, "image_bboxes": []}},
-                                {{"key": "B", "value": "【圖形選項，請參見題幹附圖】", "has_image": false, "image_bboxes": []}}
-                            ],
-                            "answer": "A",
-                            "question_type": "單選題",
-                            "scoring_criteria": "",
-                            "full_page_image_path": "",
-                            "shared_context": ""
-                        }}
+                if page_num <= 1:
+                    cover_keywords = [
+                        "作答注意事項", "考試時間", "作答方式", "選擇題範例", 
+                        "答案卡", "畫卡樣式", "答題卷", "畫卡樣例", "注意事項", 
+                        "作答說明", "答題說明", "答題卡", "考生姓名", "准考證號"
                     ]
-                }}
-                「絕對禁止將 A、B、C、D 的選項附圖框線混入主題幹的 image_bboxes 中！」
-
-                【五、防呆機制】：
-                1. 絕對禁止將「純題組導言」當作一題輸出。
-                2. options 的 key 只能是 A, B, C, D, E 或 1, 2, 3, 4。
-                3. **【非選擇題拆分嚴格規定】**：若遇到非選擇題（例如大題為「一」，內含「(1)」、「(2)」兩小題），請將其拆分為兩個獨立 JSON 物件，`question_number` 分別命名為 `"一(1)"` 與 `"一(2)"`，並將大題幹的共同敘述放在 `shared_context` 中。**【絕對禁止】把大題幹本身（題號"一"）當成獨立的一題輸出，這會造成題目重複！**
-                4. **【測驗說明排除】**：若本頁為「作答注意事項」或「作答範例」（出現「例：若第1題為單選題...」），請直接忽略本頁所有內容，切勿將範例當作考題！
-
-                【本批次純文字參考（防漏字輔助，請與影像對比校驗）：】
-                {batch_text_combined}
-                """
-                
-                batch_text_combined = "\n\n".join(batch_raw_texts)
-                
-                # 🚨 核心修復：在多張圖片輸入內容中，為每一張圖片顯式標註其在 PDF 中的絕對頁碼 (1-based)
-                # 這能徹底解決 AI 混淆「批次相對頁碼」與「PDF 絕對頁碼」的錯位問題！
-                batch_contents_with_labels = [prompt_stage_1]
-                for idx, p_num in enumerate(batch_pages):
-                    batch_contents_with_labels.append(f"=== 原卷 PDF 第 {p_num+1} 頁影像 ===")
-                    batch_contents_with_labels.append(batch_pil_imgs[idx])
-                
-                # 加上純文字對照
-                batch_contents_with_labels.append("\n\n=== 原始純文字對照 ===")
-                batch_contents_with_labels.append(batch_text_combined)
-
-                result_dict_1, error_1 = self.ai_manager.generate_with_retry(
-                    contents=batch_contents_with_labels,
-                    response_schema=PageExtraction,
-                    temperature=0.0,
-                    preferred_model=stage_1_model,
-                    enable_thinking=False  # 🚨 關閉深度思考以節省額度與時間
-                )
-
-                # 🚨 核心優化：將 Stage 1 生成的所有結果遞迴且全面地轉為繁體中文，避免簡體字混入後續流程
-                if result_dict_1:
-                    result_dict_1 = s2t_recursive(result_dict_1)
-
-                if error_1 or not result_dict_1:
-                    logging.warning(f"Lite 模型掃描失敗，嘗試使用強力模型重試...")
-                    result_dict_1, error_1 = self.ai_manager.generate_with_retry(
-                        contents=[prompt_stage_1] + batch_pil_imgs + ["\n".join(batch_raw_texts)],
-                        response_schema=PageExtraction,
-                        preferred_model="gemini-3.5-flash" # 強力模型支援
-                    )
-                    if error_1:
-                        logging.error(f"該頁掃描徹底失敗: {error_1}")
+                    has_cover_keyword = any(k in raw_page_text for k in cover_keywords)
+                    has_real_question = re.search(r'^\s*(?:1|一|\(一\))\s*[.．、\s)]', raw_page_text, re.MULTILINE) is not None
+                    
+                    if has_cover_keyword and not has_real_question:
+                        logging.info(f"  -> ⏭️ [封面/說明頁跳過] 偵測到第 {page_num + 1} 頁為封面或作答注意事項頁，自動跳過。")
                         continue
-
-                # ---------------------------------------------------------
-                # 3. 處理圖片裁切（根據每題對應的 page_number 載入對應 page 物件）
-                # ---------------------------------------------------------
-                # 建立本批次的 Bounding Box 裁切快取，防止同頁、同題組的重疊圖重複裁切
-                batch_crops_cache = {} # Key: page_number, Value: list of {"bbox": bbox, "path": path}
-
-                # 快速計算兩個 Bounding Box 的重合比例 (IoU)
-                def get_bbox_overlap(box1, box2):
-                    ymin1, xmin1, ymax1, xmax1 = box1
-                    ymin2, xmin2, ymax2, xmax2 = box2
-                    yi_min, xi_min = max(ymin1, ymin2), max(xmin1, xmin2)
-                    yi_max, xi_max = min(ymax1, ymax2), min(xmax1, xmax2)
-                    if yi_min >= yi_max or xi_min >= xi_max:
-                        return 0.0
-                    inter_area = (yi_max - yi_min) * (xi_max - xi_min)
-                    area1 = (ymax1 - ymin1) * (xmax1 - xmin1)
-                    area2 = (ymax2 - ymin2) * (xmax2 - xmin2)
-                    union_area = area1 + area2 - inter_area
-                    return inter_area / union_area if union_area > 0 else 0.0
-
-                for q_data in result_dict_1.get('questions', []):
-                    # 🚨 修正：防止最後一頁或其他頁面因異常預設或解析錯誤，而錯誤抓成第 0 頁（封面說明頁）
-                    # 限制頁碼必須在當前批次處理的頁面列表 `batch_pages` 之中。
-                    try:
-                        parsed_page = int(q_data.get('page_number', 1))
-                        # 🚨 關鍵優化：解除批次頁碼邊界限制，允許跨批次精確對位 PDF 內任意真實頁面進行裁切，防範錯位
-                        target_page_idx = max(0, min(parsed_page - 1, len(doc) - 1))
-                        q_data['page_number'] = target_page_idx + 1
-                    except Exception:
-                        target_page_idx = batch_pages[0]
-                        q_data['page_number'] = target_page_idx + 1
-
-                    page = doc[target_page_idx]
-                    full_page_filepath = q_image_paths[target_page_idx]
-
-                    q_data['full_page_image_path'] = full_page_filepath.replace("\\", "/")
-                    q_data['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
-                    q_data['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
-                    q_data['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else ""
                     
-                    q_data['question_page_image_paths'] = q_image_paths
-                    q_data['answer_page_image_paths'] = a_image_paths
-                    q_data['rubric_page_image_paths'] = rubric_image_paths
+                pages.append(page_num)
 
-                    options = q_data.get('options', [])
-                    is_alpha = any(str(opt.get('key', '')).isalpha() for opt in options)
-                    expected_keys = ["A", "B", "C", "D", "E", "F", "G"] if is_alpha else ["1", "2", "3", "4", "5", "6", "7"]
+            page_batch_size = 2 if is_stem else 3
 
-                    for idx, opt in enumerate(options):
-                        current_key = str(opt.get('key', '')).strip()
-                        if len(current_key) != 1 or not current_key.isalnum() or current_key.lower() == 'key':
-                            if idx < len(expected_keys):
-                                opt['key'] = expected_keys[idx]
+            for b_idx in range(0, len(pages), page_batch_size):
+                batch_pages = pages[b_idx : b_idx + page_batch_size]
+                logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
 
-                    q_data['image_paths'] = []
-                    cropped_imgs = []
+                batch_pil_imgs = []
+                batch_raw_texts = []
+                for p_num in batch_pages:
+                    full_page_filepath = q_image_paths[p_num]
+                    batch_pil_imgs.append(Image.open(full_page_filepath))
+                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁純文字 ---\n" + s2t(doc[p_num].get_text("text")))
+                
+                try:
+                    batch_text_combined = "\n\n".join(batch_raw_texts)
+                    prompt_stage_1 = f"""
+                    🚨【範例過濾極度警告】🚨：
+                    - 本 PDF 的第一頁（或前幾頁）通常包含「作答範例」或「作答注意事項」。
+                    - **【嚴禁】** 擷取範例中的題目（如：範例第 1 題為單選題...）。
+                    - 你的擷取任務必須從真正的考題開始（通常在說明的橫線之後，或從第 1 題真正出現的地方開始）。
+                    - 確保 `question_number` 1 是考卷真正的第 1 題，而非範例題。
+
+                    🚨【實體考題校驗規則】🚨：
+                    1. 你的任務是擷取「正式試題」。
+                    2. 封面頁（Page 1）的內容通常是「作答範例」（如：第1題為單選題...），**【絕對禁止】** 擷取。
+                    3. 真正第一題通常出現在 Page 2 或 Page 1 的下半部（橫線之後）。
+                    4. 每一題的 `page_number` 必須精確記錄其在 PDF 中的實體頁碼。
+
+                    若題目是純文字（如選擇題），且沒有任何附圖或化學反應式圖像，請將 has_image 設為 false。只有當題目中出現獨立於文字行之外的複雜反應式、圖形或表格時，才設為 true 並圈選。
                     
-                    try:
-                        # (A) 處理題幹主圖裁切
-                        if q_data.get('has_image') and q_data.get('image_bboxes'):
-                            bboxes = q_data['image_bboxes']
-                            for b_idx, bbox in enumerate(bboxes, 1):
-                                if len(bbox) == 4 and all(v is not None for v in bbox):
-                                    ymin, xmin, ymax, xmax = bbox
-                                    
-                                    xmin_val = max(0, min(1000, min(xmin, xmax)))
-                                    xmax_val = max(0, min(1000, max(xmin, xmax)))
-                                    ymin_val = max(0, min(1000, min(ymin, ymax)))
-                                    ymax_val = max(0, min(1000, max(ymin, ymax)))
+                    你是一位專業的台灣高中閱卷與數位典藏專家。這是一組台灣高中考試的試卷連續影像。
+                    學年度：{year}，科目：{subject}。
+                    這組影像包含第 {batch_pages[0]+1} 頁到第 {batch_pages[-1]+1} 頁。
 
-                                    # 🚨 IoU 題組去重檢測：如果同頁面已經裁過極為接近的框，則直接共用，不重複生成圖片
-                                    p_num = q_data.get('page_number', 1)
-                                    if p_num not in batch_crops_cache:
-                                        batch_crops_cache[p_num] = []
-                                        
-                                    duplicate_path = None
-                                    for cache_item in batch_crops_cache[p_num]:
-                                        if get_bbox_overlap(bbox, cache_item["bbox"]) > 0.7:
-                                            duplicate_path = cache_item["path"]
-                                            break
-                                            
-                                    if duplicate_path:
-                                        if duplicate_path not in q_data['image_paths']:
-                                            q_data['image_paths'].append(duplicate_path)
-                                            cropped_imgs.append(Image.open(duplicate_path))
-                                        continue
-                                    
-                                    # 🚨 修正：防主圖切到頁眉頁尾與邊界裝飾垃圾
-                                    x0_raw = (xmin_val / 1000.0) * page.rect.width
-                                    y0_raw = (ymin_val / 1000.0) * page.rect.height
-                                    x1_raw = (xmax_val / 1000.0) * page.rect.width
-                                    y1_raw = (ymax_val / 1000.0) * page.rect.height
+                    【任務目標】
+                    請極其精準地擷取這幾頁中的所有考題，並將資料填入對應的 Pydantic 結構中。
 
-                                    x0 = max(page.rect.width * 0.03, min(x0_raw, page.rect.width * 0.97))
-                                    x1 = max(page.rect.width * 0.03, min(x1_raw, page.rect.width * 0.97))
-                                    y0 = max(page.rect.height * 0.065, min(y0_raw, page.rect.height * 0.935))
-                                    y1 = max(page.rect.height * 0.065, min(y1_raw, page.rect.height * 0.935))
+                    【手寫題與非選擇題評分標準精準對齊】
+                    本考卷包含非選擇題（如第22、24-31題等手寫題）。
+                    請對照下方提供的【官方評分原則文字】，將手寫題對應的「列式給分、答案給分、扣分限制」等極重要規則，精確填入 `scoring_criteria` 欄位中！
+                    
+                    🚨【數位文字與影像視覺雙重比對規限（零誤差保證）】🚨
+                    - 本系統提供了該頁面的『原始純文字對照（Text Layer）』。
+                    - 當你從影像中識別數學變數（如 $x, y, z, a, b$）或物理單位時，如果因為字體過小或解析度問題產生疑義，請【強制比對純文字對照區】中的相對應字元。
+                    - 英文大小寫、希臘字母（如 \\theta, \\phi, \\alpha）必須完全以底層數位文字層的命名為最高準則，嚴禁因為視覺模糊而自行臆測或改寫變數名稱！
 
-                                    width_pct = (xmax_val - xmin_val) / 10.0
-                                    height_pct = (ymax_val - ymin_val) / 10.0
-                                    
-                                    if width_pct < 2.5 or height_pct < 2.5:
-                                        continue
-                                    
-                                    # 💡 採用非對稱擴展安全區：向上與左右加寬，防止頂部公式切邊
-                                    x_pad = page.rect.width * 0.08      # 左右擴展 8%
-                                    y_pad_top = page.rect.height * 0.08  # 頂部向上多留 8% 緩衝區（大考圖號多在上方）
-                                    y_pad_bot = page.rect.height * 0.04  # 底部留 4%
-                                    
-                                    rect = fitz.Rect(x0 - x_pad, y0 - y_pad_top, x1 + x_pad, y1 + y_pad_bot)
-                                    rect = rect.intersect(page.rect)
+                    【一、剛性文字與公式規格化】
+                    1. **題目文字完全對齊**：`question_text` 必須與圖片及底層純文字 100% 吻合。
+                    2. **LaTeX 規範**：所有數學公式、化學式、變數符號、數值等，**必須**使用標準 LaTeX 語法包裹，確保排版美觀。
+                    3. **LaTeX 嚴格符號規範**：所有數學公式、化學式、變數符號，【行內公式】必須嚴格使用 `$...$` 包裹；【獨立行公式】必須嚴格使用 `$$...$$` 包裹。絕對禁止使用 `\\( \\)` 或 `\\[ \\]` 作為公式標籤！
+                    4. **🚨【選項分離與題幹清洗硬性規定】**：對於選擇題（單選與多選），**必須且強制**將題幹文字（`question_text`）中所有包含選項描述的部分（例如：尾部的 `(A) xxx (B) yyy...` 或 `(1) xxx (2) yyy...` 或者是行內的選項敘述）**完全清除乾淨**！題幹 `question_text` 內只能保留最純粹的題目問句，絕對不能殘留任何選項的標籤與其文字內容！所有的選項標籤與文字必須且只能存在於 `options` 欄位中，嚴禁在題幹與選項列表間發生資料雙重冗餘與重複！
+                    - 🚨【選填題無選項剛性鐵律】：**選填題（填空題，即題號為大寫字母 A, B, C... 或帶有 [ 9 ] 挖空者）絕對沒有選項！** 它的 `options` 屬性必須 100% 為空列表 `[]`。**絕對禁止**將解答卷或答案卡上的欄位索引與答案對照（如：`8. 1. 9. 3.`）當作選項寫入 `options`！
+                    4-2. **表格強制轉換**：數據表格務必轉換為 Markdown Table 格式嵌入。
+                    5. **內文嵌入選項**：若遇上古文或國文科「克漏字」等選項內嵌在文章段落中的狀況，請在題幹中保留如 (A)、(B) 等引導標記以維持文章完整，並將對應的代號與內容整理到 `options` 欄位中。
+                    5. **【選填題挖空規則（極度重要）】**：大考選填題常使用圓圈數字（如 \u2468、\u2469 或 \u246c-\u2460）代表畫卡格。請將其轉換為 `[ 9 ]`、`[ 10 ]` 或 `[ 13-1 ]` 的格式。
+                    \U0001f6a8**警告**：有時候圓圈數字旁邊**真的有根號或其他數學符號**（例如 $\\frac{{\\u2468\\sqrt{{\\u2469}}}}{{32}}$），請務必精準轉換為 `\\frac{{ [ 9 ] \\sqrt{{ [ 10 ] }} }}{{ 32 }}`！絕對不可以把真正的根號吃掉，也絕對禁止擅自把 \u2468 和 \u2469 強行合併成 `[ 9-10 ]`！請忠實反映圖片上的數學結構。
+                    6. **表格強制轉換**：若題目中包含數據表格（如：表1、表2），請【務必】將表格內容完整轉換為 Markdown Table 格式，並嵌入到 `question_text` 中相應的位置。絕對不可省略表格內容！
+                    7. **選填題答案與畫卡格子對應規範（極度重要）**：
+                       - 大考選填題的答案會對應至多個獨立的畫卡格子（例如：`[ 10-1 ]`、`[ 10-2 ]`、`[ 10-3 ]`）。
+                       - **【強制規定】**：在 `answer` 欄位中，**必須**將每一個格子所對應的答案字元（包含數字、正負號或特定根號代號）依序填入，並以半形逗號 `,` 隔開！
+                       - 例如：
+                         * 若題目為 $a=[ 10-1 ][ 10-2 ]$, $b=[ 10-3 ]$，其中 $a = -4$, $b = 3$，其對應畫卡格答案分別為 `-`、`4`、`3`，則 `answer` 欄位必須寫成 `-,4,3`，絕對不可直接相連寫成 `-43`。
+                         * 若選填題 A 答案為 $\frac{9}{10}$，畫卡格 9-10 為 9、1、0，則寫成 `9,1,0`，絕對不可寫成 `910`。
+                    8. **克漏字與文意選填特例（極度重要）**：克漏字的選項通常集中在文章下方。請你【主動去文章段落 (shared_context) 中尋找對應的題號】，將「包含該題號空格的那一整個完整句子」提取出來作為 `question_text`，並將題號替換為 `______`。絕對禁止將 (A) (B) (C) (D) 等選項文字當作題幹！
+                    9. **選填題挖空規則**：若遇到大考特有的圓圈畫卡題號（例如 ⑬-① ⑬-②），請統一轉換為標準挖空格式 `[ 13-1 ] [ 13-2 ]`，不要使用 LaTeX 的 \\bigcirc。這有利於系統自動生成填空輸入框。
+                    9-2. **🚨【選填題畫卡格圓圈數字不視為圖片】🚨**：
+                       大考選填題中出現的帶圓圈數字（如 ⑧、⑨、⑩）是排版文字的一部分（請按規則 9 轉換為 `[ 8 ]`、`[ 9 ]`、`[ 10 ]`）。**【絕對禁止】**將這些圓圈數字、分數線或其相鄰的填空文字框選為 `image_bboxes`！只有當題目中出現真正的實體插圖、函數圖形、幾何圖形或大型數據表時，才將其框選為 `image_bboxes`。
+                    10. **【極度精準的數學 OCR】**：數學公式與不等式的辨識必須一字不差！例如 `x-y` 絕對不能看錯成 `2x-y` 或 `x+y`，大於小於符號絕對不能反！請反覆核對圖片中的方程式。
+                    10-2. **🚨【微細符號與循環小數極度預警】🚨**：
+                       在數學科中，常常出現**循環小數**（例如 $1.\\bar{{5}}$，即數字 5 的上方有一條橫線，代表 $1.5555...$）。
+                       - 這類微小的上標橫線極易被低解析度 OCR 遺漏並誤讀為普通小數（如 $1.5$）。
+                       - 請你**仔細盯住原卷圖片上的每一個小數點與數字上方**！若看到數字上方有任何橫線、波浪號或圓點，**必須且強制**將其識別為標準 LaTeX 的循環小數格式，例如 `$1.\\bar{{5}}$`、`$7.\\bar{{7}}$` 或 `$1.\\dot{{5}}$`。
+                       - 絕對禁止遺漏這些符號並將其簡化為普通小數，這會導致整道題目的數論邏輯與選項對照徹底崩潰！
+                    11. **【防錯位與防遺漏警告】**：大考的題目偶爾會分欄排版。請務必遵循正常的閱讀順序（先左後右，先上後下）完整提取 `question_text`。若題目包含附表，請確保 Markdown Table 欄位數與原圖完全一致，絕不可漏掉任何一行數據！
+                    12. **【防選項合併】**：請確保 `options` 欄位中，每個選項是獨立的物件，絕對不可以把選項 A 和選項 B 融合成一個選項輸出。
+                    13. **頁碼追蹤（極度重要）**：你必須在 `page_number` 欄位中，填入該題目在原卷 PDF 中的真實頁碼（從 1 開始計數）。這對於裁切考題附圖與表格至關重要。
+                    14. **【字母 y 與數字 3 的防混淆警告（化學與代數特防）】**：在化學分子式（例如 $CH_3(CH_2)_yCl$）中，**斜體的小寫字母 $y$ 極易被誤判為數字 $3$**！
+                        如果題目中同時出現了 $x, z$ 作為待求變數（如 $CH_3SH_x$ 與 $CH_3NH_z$），夾在中間的變數絕對是小寫字母 $y$（即 $CH_3(CH_2)_yCl$），請務必精準辨識為小寫字母 $y$，絕對不可以看成數字 $3$！
+                    15. **【清洗圖形文字佔位符】**：大考 PDF 的純文字中常含有如 `[圖3 結構圖]`、`[圖形]`、`[圖片]` 或 `[圖 3]` 等無意義的純文字佔位符。請你在擷取 `question_text` 與 `shared_context` 時，**務必將這些無意義的圖形文字佔位符完全剔除**！因為我們後續會有實體的 `image_bboxes` 裁剪圖，不需要保留這些純文字垃圾。
+                    16. **【極度寬裕的 Bounding Box 標記】**：當你框選 `image_bboxes` 或選項附圖的 Bounding Box 時，**請務必畫得極度寬裕 (Very Generous)**！寧可多框 15% 的空白邊緣，也絕對不可以切到任何化學鍵、原子符號、反應箭頭、坐標軸文字、或選項字母 A, B, C 的邊角！
+                    17. **【題組判定極度嚴格警告】**：只有當試卷上明確印有『X-Y題為題組』時，才可將 X 到 Y 題歸為題組，並將共同引言寫入 `shared_context`。**絕對禁止**只因為多道題目印在同一頁、或者因為它們都是選擇題，就擅自編造『題組』將其歸類！非題組的題目，其 `shared_context` 必須為空！
+                    18. **科目精細分類**：請將考卷的原有名稱填入 'exam_source'，而 'sub_subject' 必須且只能從以下清單中挑選一項填寫：'物理', '化學', '生物', '地球科學', '歷史', '地理', '公民與社會', '數學', '英文', '國文', '國寫'。對於跨科考題，請強制選擇佔比最重的一科，絕對不可自創類別。
 
-                                    try:
-                                        clip_pix = page.get_pixmap(clip=rect, dpi=300)
-                                        safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
-                                        
-                                        img_filename = f"Q{safe_q_num}_{b_idx}.png"
-                                        img_filepath = os.path.join(img_dir, img_filename)
-                                        clip_pix.save(img_filepath)
-                                        
-                                        normalized_path = img_filepath.replace("\\", "/")
-                                        q_data['image_paths'].append(normalized_path)
-                                        cropped_imgs.append(Image.open(img_filepath))
+                    【圖片裁切極致規範 - 解決切錯/漏切問題】
+                    1. **題號包含原則**：Bounding Box 必須包裹住題號數字。
+                    2. **🚨選項附圖合併規則 (極重要)🚨**：
+                    - 如果題目選項 (A)~(E) 或 1~5 是圖形（如幾何圖、生物分類樹、化學結構）：
+                    - **【嚴禁】** 將 A, B, C, D, E 分開裁切成五張圖。
+                    - **【必須】** 直接框選一個覆蓋 A 到 E 所有選項的大型 Bounding Box，並放入該題 `image_bboxes` 中。
+                    3. **🚨嚴禁憑空捏造 Bounding Box🚨**：如果考卷影像中沒有明確的圖表、幾何圖形或附圖，絕對不可以因為題目敘述出現「圖形」、「正方體」、「橢圓」等字眼就憑空捏造 Bounding Box 座標！此時必須將 has_image 設為 false 且 image_bboxes 設為空列表 []。
+                    - 此時，個別選項的 `has_image` 設為 false，其文字內容填寫「【請參見題幹附圖中的選項內容】」。
+                    3. **表格與圖表標籤**：必須包含「圖15」或「表7」等標籤。
+                    4. **表格邊界**：框選表格時請多留 50 個單位的空白邊緣，嚴禁切到表格的框線或標題。
+                    5. **題號對位**：確保 `question_number` 欄位與你框選的 `image_bboxes` 屬於同一個邏輯區塊。絕對禁止將第 15 題的文字配上第 16 題的圖。
 
-                                        # 寫入快取，供後續同題組題目共用
-                                        batch_crops_cache[p_num].append({
-                                            "bbox": bbox,
-                                            "path": normalized_path
-                                        })
-                                    except Exception as e:
-                                        logging.error(f"裁切題幹圖片失敗: {e}")
 
-                        # (B) 處理「選項內」附圖裁切
-                        for opt in options:
-                            opt['image_paths'] = []
-                            if opt.get('has_image') and opt.get('image_bboxes'):
-                                opt_bboxes = opt['image_bboxes']
-                                for b_idx, bbox in enumerate(opt_bboxes, 1):
+                    【二、題組與附圖剛性規則】
+                    1. **題組共同題幹處理**：若本頁有「X-Y 為題組」（如閱讀測驗文章、實驗情境敘述），請務必將「共同引言/文章/數據表」**只填入 `shared_context` 欄位中**。`question_text` 絕對保持乾淨，只保留該單一子題的問句！
+                    2. **多圖定位 (image_bboxes)**：若該題含有多張分散的附圖、表格或化學結構式（例如同時包含圖 1 與圖 2，或包含表 1 與結構圖），請將**所有**附圖的 Bounding Box 分別精確框出，並以列表的列表（如 `[[ymin1, xmin1, ymax1, xmax1], [ymin2, xmin2, ymax2, xmax2]]`）填入 `image_bboxes`。寧可框大，也絕不漏掉任何一張圖。
+                    🚨 3. **選項附圖合併規則（極度重要，解決裁切不精準的致命傷）**：
+                       若選擇題的選項本身是圖形（如：五個細胞分裂圖、五個系統分類樹、五個幾何圖形）：
+                       - **如果選項（A, B, C, D, E）在版面上是「橫向排成一列」、或者「排成整齊的網格區塊」，請【絕對不要】將它們分割成五個零碎的小圖！**
+                       - 請你【直接將這整排/整個區塊的選項圖（必須包含 A, B, C, D, E 的標記以及它們所有的圖形）合併框成一個唯一的、寬裕的大 Bounding Box，放入主標題（題幹）的 `image_bboxes` 中】（此時題幹 `has_image` 設為 `true`）。
+                       - 此時，個別選項的 `has_image` 請設為 `false`，其 `image_bboxes` 設為空列表 `[]`，選項的 `value` 欄位統一填入：`"【圖形選項，請參見題幹附圖】"`。
+                       - 只有當選項圖在版面上分布極度散亂、完全無法合併為一個方框時，才允許將各個選項的 `has_image` 設為 `true` 並單獨框選。
+                    4. **附圖框選寬裕原則**：當你框選任何附圖或大表格時，**請務必框得極度寬裕（Generous）一些**。確保表格名稱、上方的標題文字、下方的選項標籤文字，都完整被包裹進 Bounding Box 中，避免在後續裁切時被切掉邊緣。
+
+                    【三、大考答案與評分絕對對齊】
+                    官方選擇題解答：
+                    {ans_text}
+
+                    官方非選題評分標準：
+                    {rubric_text}
+
+                    【四、標準輸出格式範例 (Few-Shot Example)】
+                    {{
+                        "questions": [
+                            {{
+                                "academic_year": "114分科",
+                                "exam_source": "114學測自然",
+                                "sub_subject": "物理",
+                                "question_number": "1",
+                                "page_number": 2,
+                                "question_text": "2024 年聯合國大會宣布 2025 年為國際量子科學與科技年（IYQ）...下列有關量子力學發展的敘述何者正確？",
+                                "has_image": false,
+                                "image_bboxes": [],
+                                "options": [
+                                    {{"key": "A", "value": "普朗克提出量子論成功解釋氫原子光譜的性質"}},
+                                    {{"key": "B", "value": "德布羅意提出物質波說明波與粒子的二象性"}}
+                                ],
+                                "answer": "E",
+                                "question_type": "單選題",
+                                "scoring_criteria": "",
+                                "full_page_image_path": "",
+                                "shared_context": ""
+                            }}
+                        ]
+                    }}
+                    「絕對禁止將 A、B、C、D 的選項附圖框線混入主題幹的 image_bboxes 中！」
+
+                    【五、防呆機制】：
+                    1. 絕對禁止將「純題組導言」當作一題輸出。
+                    2. options 的 key 只能是 A, B, C, D, E 或 1, 2, 3, 4。
+                    3. **【非選擇題拆分嚴格規定】**：若遇到非選擇題（例如大題為「一」，內含「(1)」、「(2)」兩小題），請將其拆分為兩個獨立 JSON 物件，`question_number` 分別命名為 `"一(1)"` 與 `"一(2)"`，並將大題幹的共同敘述放在 `shared_context` 中。**【絕對禁止】把大題幹本身（題號"一"）當成獨立的一題輸出，這會造成題目重複！**
+                    4. **【測驗說明排除】**：若本頁為「作答注意事項」或「作答範例」（出現「例：若第1題為單選題...」），請直接忽略本頁所有內容，切勿將範例當作考題！
+
+                    【本批次純文字參考（防漏字輔助，請與影像對比校驗）：】
+                    {batch_text_combined}
+                    """
+                    
+                    batch_contents_with_labels = [prompt_stage_1]
+                    for idx, p_num in enumerate(batch_pages):
+                        batch_contents_with_labels.append(f"=== 原卷 PDF 第 {p_num+1} 頁影像 ===")
+                        batch_contents_with_labels.append(batch_pil_imgs[idx])
+                    
+                    batch_contents_with_labels.append("\n\n=== 原始純文字對照 ===")
+                    batch_contents_with_labels.append(batch_text_combined)
+
+                    result_dict_1, error_1 = self.ai_manager.generate_with_retry(
+                        contents=batch_contents_with_labels,
+                        response_schema=PageExtraction,
+                        temperature=0.0,
+                        preferred_model=stage_1_model,
+                        enable_thinking=False
+                    )
+
+                    if result_dict_1:
+                        result_dict_1 = s2t_recursive(result_dict_1)
+
+                    if error_1 or not result_dict_1:
+                        logging.warning(f"Lite 模型掃描失敗，嘗試使用強力模型重試...")
+                        result_dict_1, error_1 = self.ai_manager.generate_with_retry(
+                            contents=[prompt_stage_1] + batch_pil_imgs + ["\n".join(batch_raw_texts)],
+                            response_schema=PageExtraction,
+                            preferred_model="gemini-3.5-flash"
+                        )
+                        if error_1:
+                            logging.error(f"該頁掃描徹底失敗: {error_1}")
+                            continue
+
+                    batch_crops_cache = {}
+
+                    def get_bbox_overlap(box1, box2):
+                        ymin1, xmin1, ymax1, xmax1 = box1
+                        ymin2, xmin2, ymax2, xmax2 = box2
+                        yi_min, xi_min = max(ymin1, ymin2), max(xmin1, xmin2)
+                        yi_max, xi_max = min(ymax1, ymax2), min(xmax1, xmax2)
+                        if yi_min >= yi_max or xi_min >= xi_max:
+                            return 0.0
+                        inter_area = (yi_max - yi_min) * (xi_max - xi_min)
+                        area1 = (ymax1 - ymin1) * (xmax1 - xmin1)
+                        area2 = (ymax2 - ymin2) * (xmax2 - xmin2)
+                        union_area = area1 + area2 - inter_area
+                        return inter_area / union_area if union_area > 0 else 0.0
+
+                    for q_data in result_dict_1.get('questions', []):
+                        try:
+                            parsed_page = int(q_data.get('page_number', 1))
+                            target_page_idx = max(0, min(parsed_page - 1, len(doc) - 1))
+                            q_data['page_number'] = target_page_idx + 1
+                        except Exception:
+                            target_page_idx = batch_pages[0]
+                            q_data['page_number'] = target_page_idx + 1
+
+                        page = doc[target_page_idx]
+                        full_page_filepath = q_image_paths[target_page_idx]
+
+                        q_data['full_page_image_path'] = full_page_filepath.replace("\\", "/")
+                        q_data['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
+                        q_data['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
+                        q_data['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else ""
+                        
+                        q_data['question_page_image_paths'] = q_image_paths
+                        q_data['answer_page_image_paths'] = a_image_paths
+                        q_data['rubric_page_image_paths'] = rubric_image_paths
+
+                        options = q_data.get('options', [])
+                        is_alpha = any(str(opt.get('key', '')).isalpha() for opt in options)
+                        expected_keys = ["A", "B", "C", "D", "E", "F", "G"] if is_alpha else ["1", "2", "3", "4", "5", "6", "7"]
+
+                        for idx, opt in enumerate(options):
+                            current_key = str(opt.get('key', '')).strip()
+                            if len(current_key) != 1 or not current_key.isalnum() or current_key.lower() == 'key':
+                                if idx < len(expected_keys):
+                                    opt['key'] = expected_keys[idx]
+
+                        q_data['image_paths'] = []
+                        cropped_imgs = []
+                        
+                        try:
+                            if q_data.get('has_image') and q_data.get('image_bboxes'):
+                                bboxes = q_data['image_bboxes']
+                                for b_idx, bbox in enumerate(bboxes, 1):
                                     if len(bbox) == 4 and all(v is not None for v in bbox):
                                         ymin, xmin, ymax, xmax = bbox
-                                        
                                         xmin_val = max(0, min(1000, min(xmin, xmax)))
                                         xmax_val = max(0, min(1000, max(xmin, xmax)))
                                         ymin_val = max(0, min(1000, min(ymin, ymax)))
                                         ymax_val = max(0, min(1000, max(ymin, ymax)))
 
-                                        # 選項圖同樣執行 IoU 去重
                                         p_num = q_data.get('page_number', 1)
                                         if p_num not in batch_crops_cache:
                                             batch_crops_cache[p_num] = []
@@ -2546,25 +2440,30 @@ class ExamParser:
                                                 break
                                                 
                                         if duplicate_path:
-                                            if duplicate_path not in opt['image_paths']:
-                                                opt['image_paths'].append(duplicate_path)
+                                            if duplicate_path not in q_data['image_paths']:
+                                                q_data['image_paths'].append(duplicate_path)
                                                 cropped_imgs.append(Image.open(duplicate_path))
                                             continue
                                         
-                                        x0 = (xmin_val / 1000.0) * page.rect.width
-                                        y0 = (ymin_val / 1000.0) * page.rect.height
-                                        x1 = (xmax_val / 1000.0) * page.rect.width
-                                        y1 = (ymax_val / 1000.0) * page.rect.height
+                                        x0_raw = (xmin_val / 1000.0) * page.rect.width
+                                        y0_raw = (ymin_val / 1000.0) * page.rect.height
+                                        x1_raw = (xmax_val / 1000.0) * page.rect.width
+                                        y1_raw = (ymax_val / 1000.0) * page.rect.height
+
+                                        x0 = max(page.rect.width * 0.03, min(x0_raw, page.rect.width * 0.97))
+                                        x1 = max(page.rect.width * 0.03, min(x1_raw, page.rect.width * 0.97))
+                                        y0 = max(page.rect.height * 0.065, min(y0_raw, page.rect.height * 0.935))
+                                        y1 = max(page.rect.height * 0.065, min(y1_raw, page.rect.height * 0.935))
 
                                         width_pct = (xmax_val - xmin_val) / 10.0
                                         height_pct = (ymax_val - ymin_val) / 10.0
                                         
-                                        if width_pct < 2.0 or height_pct < 2.0:
+                                        if width_pct < 2.5 or height_pct < 2.5:
                                             continue
-                                            
-                                        x_pad = page.rect.width * 0.07
-                                        y_pad_top = page.rect.height * 0.06
-                                        y_pad_bot = page.rect.height * 0.03
+                                        
+                                        x_pad = page.rect.width * 0.08
+                                        y_pad_top = page.rect.height * 0.08
+                                        y_pad_bot = page.rect.height * 0.04
                                         
                                         rect = fitz.Rect(x0 - x_pad, y0 - y_pad_top, x1 + x_pad, y1 + y_pad_bot)
                                         rect = rect.intersect(page.rect)
@@ -2572,449 +2471,448 @@ class ExamParser:
                                         try:
                                             clip_pix = page.get_pixmap(clip=rect, dpi=300)
                                             safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
-                                            opt_key = safe_filename(str(opt.get('key', 'X')).replace(" ", ""))
                                             
-                                            img_filename = f"Q{safe_q_num}_Opt{opt_key}_{b_idx}.png"
+                                            img_filename = f"Q{safe_q_num}_{b_idx}.png"
                                             img_filepath = os.path.join(img_dir, img_filename)
                                             clip_pix.save(img_filepath)
                                             
                                             normalized_path = img_filepath.replace("\\", "/")
-                                            opt['image_paths'].append(normalized_path)
+                                            q_data['image_paths'].append(normalized_path)
                                             cropped_imgs.append(Image.open(img_filepath))
 
-                                            # 寫入快取
                                             batch_crops_cache[p_num].append({
                                                 "bbox": bbox,
                                                 "path": normalized_path
                                             })
                                         except Exception as e:
-                                            logging.error(f"裁切選項 {opt_key} 圖片失敗: {e}")
+                                            logging.error(f"裁切題幹圖片失敗: {e}")
 
-                        # 圖片載入完成，將此題的基礎結構與裁剪圖片物件一併存回批次清單中
-                        q_data['_cropped_pil_images'] = cropped_imgs
-                        all_extracted_questions.append(q_data)
+                            for opt in options:
+                                opt['image_paths'] = []
+                                if opt.get('has_image') and opt.get('image_bboxes'):
+                                    opt_bboxes = opt['image_bboxes']
+                                    for b_idx, bbox in enumerate(opt_bboxes, 1):
+                                        if len(bbox) == 4 and all(v is not None for v in bbox):
+                                            ymin, xmin, ymax, xmax = bbox
+                                            xmin_val = max(0, min(1000, min(xmin, xmax)))
+                                            xmax_val = max(0, min(1000, max(xmin, xmax)))
+                                            ymin_val = max(0, min(1000, min(ymin, ymax)))
+                                            ymax_val = max(0, min(1000, max(ymin, ymax)))
 
-                    except Exception as e:
-                        logging.error(f"準備多模態資訊失敗: {e}")
+                                            p_num = q_data.get('page_number', 1)
+                                            if p_num not in batch_crops_cache:
+                                                batch_crops_cache[p_num] = []
+                                                
+                                            duplicate_path = None
+                                            for cache_item in batch_crops_cache[p_num]:
+                                                if get_bbox_overlap(bbox, cache_item["bbox"]) > 0.7:
+                                                    duplicate_path = cache_item["path"]
+                                                    break
+                                                    
+                                            if duplicate_path:
+                                                if duplicate_path not in opt['image_paths']:
+                                                    opt['image_paths'].append(duplicate_path)
+                                                    cropped_imgs.append(Image.open(duplicate_path))
+                                                continue
+                                            
+                                            x0 = (xmin_val / 1000.0) * page.rect.width
+                                            y0 = (ymin_val / 1000.0) * page.rect.height
+                                            x1 = (xmax_val / 1000.0) * page.rect.width
+                                            y1 = (ymax_val / 1000.0) * page.rect.height
 
-            finally:
-                # 釋放階段一分頁內存
-                for img in batch_pil_imgs:
-                    try:
-                        img.close()
-                    except Exception:
-                        pass
+                                            width_pct = (xmax_val - xmin_val) / 10.0
+                                            height_pct = (ymax_val - ymin_val) / 10.0
+                                            
+                                            if width_pct < 2.0 or height_pct < 2.0:
+                                                continue
+                                                
+                                            x_pad = page.rect.width * 0.07
+                                            y_pad_top = page.rect.height * 0.06
+                                            y_pad_bot = page.rect.height * 0.03
+                                            
+                                            rect = fitz.Rect(x0 - x_pad, y0 - y_pad_top, x1 + x_pad, y1 + y_pad_bot)
+                                            rect = rect.intersect(page.rect)
 
-        
-        
-        # 🚨 [核心修復] 第一階段擷取完成，立即執行自動清洗與選填題長度驗證
-        all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
-        # 🚨 [跨批次去重] 強制在進入解題前執行去重，過濾交界處重複讀取的題目
-        all_extracted_questions = deduplicate_questions(all_extracted_questions)
+                                            try:
+                                                clip_pix = page.get_pixmap(clip=rect, dpi=300)
+                                                safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
+                                                opt_key = safe_filename(str(opt.get('key', 'X')).replace(" ", ""))
+                                                
+                                                img_filename = f"Q{safe_q_num}_Opt{opt_key}_{b_idx}.png"
+                                                img_filepath = os.path.join(img_dir, img_filename)
+                                                clip_pix.save(img_filepath)
+                                                
+                                                normalized_path = img_filepath.replace("\\", "/")
+                                                opt['image_paths'].append(normalized_path)
+                                                cropped_imgs.append(Image.open(img_filepath))
 
-        # 🚨 [防禦性機制 - 提案四：科目範疇與子學科安全邊界對齊器]
-        # 避免大考綜合考科（如社會、自然）因題幹涉及交叉學科詞彙，導致 Stage 1 模型產生跨科分類污染
-        # （例如：在社會科中將包含「生物多樣性」的地理題錯誤分類為「生物」）
-        for q_data in all_extracted_questions:
-            q_sub = q_data.get("sub_subject")
-            
-            if normalized_subject == "社會":
-                if q_sub not in ["歷史", "地理", "公民與社會"]:
-                    q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
-                    if any(k in q_text for k in ["憲法", "法律", "政府", "權利", "經濟", "市場", "社會", "勞工", "法規", "法治"]):
-                        q_data["sub_subject"] = "公民與社會"
-                    elif any(k in q_text for k in ["地圖", "氣候", "地形", "空間", "地理", "貿易", "生活圈", "自然環境", "沙丘", "生活圈", "位置"]):
-                        q_data["sub_subject"] = "地理"
-                    else:
-                        q_data["sub_subject"] = "歷史"
-            elif normalized_subject == "自然":
-                if q_sub not in ["物理", "化學", "生物", "地球科學"]:
-                    q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
-                    if any(k in q_text for k in ["力", "速度", "電", "磁", "能量", "波", "加速度", "力學"]):
-                        q_data["sub_subject"] = "物理"
-                    elif any(k in q_text for k in ["化學", "反應", "分子", "溶液", "元素", "原子", "化合物"]):
-                        q_data["sub_subject"] = "化學"
-                    elif any(k in q_text for k in ["細胞", "基因", "生態", "植物", "動物", "生物", "染色體", "群落"]):
-                        q_data["sub_subject"] = "生物"
-                    else:
-                        q_data["sub_subject"] = "地球科學"
-            else:
-                # 單一學科考卷，強行對位，不允許任何分叉
-                q_data["sub_subject"] = normalized_subject
+                                                batch_crops_cache[p_num].append({
+                                                    "bbox": bbox,
+                                                    "path": normalized_path
+                                                })
+                                            except Exception as e:
+                                                logging.error(f"裁切選項 {opt_key} 圖片失敗: {e}")
 
-        # 🚨 [防禦性機制 - 提案一：全卷題號覆蓋率主動對齊與精準補漏機制]
-        try:
-            expected_q_nums = []
-            ans_map = json.loads(ans_text)
-            if isinstance(ans_map, dict):
-                expected_q_nums = sorted(list(ans_map.keys()), key=natural_sort_key)
+                            q_data['_cropped_pil_images'] = cropped_imgs
+                            all_extracted_questions.append(q_data)
+
+                        except Exception as e:
+                            logging.error(f"準備多模態資訊失敗: {e}")
+
+                finally:
+                    for img in batch_pil_imgs:
+                        try: img.close()
+                        except Exception: pass
+
+            all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
+            all_extracted_questions = deduplicate_questions(all_extracted_questions)
+
+            for q_data in all_extracted_questions:
+                q_sub = q_data.get("sub_subject")
                 
-            # 🚨 健全的子題/畫卡格號與範疇覆蓋檢查器，防止將 A-2, 9-2 等選填題畫卡格子誤判為獨立缺失題目
-            def get_base_q_num(q_num_str: str) -> str:
-                q_num_str = str(q_num_str).strip()
-                match = re.match(r'^(\d+)-(\d+)$', q_num_str)
-                if match:
-                    return match.group(1)
-                match_letter = re.match(r'^([A-Ga-g])-(\d+)$', q_num_str)
-                if match_letter:
-                    return match_letter.group(1)
-                return q_num_str
+                if normalized_subject == "社會":
+                    if q_sub not in ["歷史", "地理", "公民與社會"]:
+                        q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
+                        if any(k in q_text for k in ["憲法", "法律", "政府", "權利", "經濟", "市場", "社會", "勞工", "法規", "法治"]):
+                            q_data["sub_subject"] = "公民與社會"
+                        elif any(k in q_text for k in ["地圖", "氣候", "地形", "空間", "地理", "貿易", "生活圈", "自然環境", "沙丘", "生活圈", "位置"]):
+                            q_data["sub_subject"] = "地理"
+                        else:
+                            q_data["sub_subject"] = "歷史"
+                elif normalized_subject == "自然":
+                    if q_sub not in ["物理", "化學", "生物", "地球科學"]:
+                        q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
+                        if any(k in q_text for k in ["力", "速度", "電", "磁", "能量", "波", "加速度", "力學"]):
+                            q_data["sub_subject"] = "物理"
+                        elif any(k in q_text for k in ["化學", "反應", "分子", "溶液", "元素", "原子", "化合物"]):
+                            q_data["sub_subject"] = "化學"
+                        elif any(k in q_text for k in ["細胞", "基因", "生態", "植物", "動物", "生物", "染色體", "群落"]):
+                            q_data["sub_subject"] = "生物"
+                        else:
+                            q_data["sub_subject"] = "地球科學"
+                else:
+                    q_data["sub_subject"] = normalized_subject
 
-            def is_question_covered(expected_base: str, extracted_questions: list) -> bool:
-                expected_base = str(expected_base).strip()
-                for q_item in extracted_questions:
-                    q_num = str(q_item.get("question_number", "")).strip()
-                    if q_num == expected_base:
-                        return True
-                    range_match = re.match(r'^(\d+)-(\d+)$', q_num)
-                    if range_match:
-                        try:
-                            start = int(range_match.group(1))
-                            end = int(range_match.group(2))
-                            val = int(expected_base)
-                            if start <= val <= end:
-                                return True
-                        except ValueError:
-                            pass
-                    if q_num.startswith(expected_base) and len(q_num) > len(expected_base):
-                        next_char = q_num[len(expected_base)]
-                        if not next_char.isalnum():
-                            return True
-                return False
-
-            def get_official_answer_for_base(base_num: str, ans_dict: dict) -> str:
-                if base_num in ans_dict:
-                    return str(ans_dict[base_num])
-                sub_keys = []
-                for k in ans_dict.keys():
-                    if k.startswith(f"{base_num}-"):
-                        suffix = k[len(base_num)+1:]
-                        if suffix.isdigit():
-                            sub_keys.append((int(suffix), k))
-                if sub_keys:
-                    sub_keys.sort()
-                    return ",".join(str(ans_dict[k]) for _, k in sub_keys)
-                return ""
-
-            gaps = []
-            for num in expected_q_nums:
-                base_num = get_base_q_num(num)
-                if not is_question_covered(base_num, all_extracted_questions):
-                    if base_num not in gaps:
-                        gaps.append(base_num)
-            
-            if gaps:
-                logging.warning(f"⚠️ [補漏機制啟動] 偵測到有 {len(gaps)} 道題目在第一階段漏抓：{gaps}")
-                for gap_num in gaps:
-                    # 1. 尋找缺失題號最可能存在的 PDF 頁面
-                    target_page_num = 0
-                    for page_idx in range(len(doc)):
-                        page_text = doc[page_idx].get_text("text")
-                        # 使用正則匹配，在頁面純文字中尋找該題號的物理邊界
-                        if re.search(rf'\b{gap_num}\b', page_text) or f" {gap_num} " in page_text:
-                            target_page_num = page_idx
-                            break
+            try:
+                expected_q_nums = []
+                ans_map = json.loads(ans_text)
+                if isinstance(ans_map, dict):
+                    expected_q_nums = sorted(list(ans_map.keys()), key=natural_sort_key)
                     
-                    logging.info(f"🔍 題號 {gap_num} 最可能位於 PDF 第 {target_page_num+1} 頁，啟動單題高精度定向擷取...")
-                    
-                    gap_page = doc[target_page_num]
-                    gap_image_path = q_image_paths[target_page_num]
-                    
-                    official_ans_val = get_official_answer_for_base(gap_num, ans_map)
-                    ans_prompt_part = ""
-                    if official_ans_val:
-                        ans_prompt_part = f"\n🚨【本題官方標準答案】：{official_ans_val}\n請直接將此答案填入 `answer` 欄位中，絕對不可變更或縮水。"
+                def get_base_q_num(q_num_str: str) -> str:
+                    q_num_str = str(q_num_str).strip()
+                    match = re.match(r'^(\d+)-(\d+)$', q_num_str)
+                    if match: return match.group(1)
+                    match_letter = re.match(r'^([A-Ga-g])-(\d+)$', q_num_str)
+                    if match_letter: return match_letter.group(1)
+                    return q_num_str
 
-                    gap_prompt = f"""
-                    我們在全卷掃描中漏掉了第 {gap_num} 題。請仔細閱讀以下試卷影像：
-                    1. 請精確找出第 {gap_num} 題的完整題幹、選項（若有）。{ans_prompt_part}
-                    2. 將該單題的資料結構化填入 Pydantic 結構。
-                    3. 🚨 必須將 `page_number` 設為 {target_page_num+1}。
-                    """
-                    
-                    with Image.open(gap_image_path) as gap_pil:
-                        res_gap, _ = self.ai_manager.generate_with_retry(
-                            contents=[gap_prompt, gap_pil, f"=== 原卷第 {target_page_num+1} 頁純文字 ===\n" + s2t(gap_page.get_text("text"))],
-                            response_schema=PageExtraction,
-                            temperature=0.0,
-                            preferred_model="gemini-3.5-flash",
-                            enable_thinking=True,
-                            task_desc=f"{paper_tag} [單題補漏 Q{gap_num}]"
-                        )
-                        
-                        if res_gap and res_gap.get('questions'):
-                            for new_q in res_gap['questions']:
-                                if str(new_q.get("question_number")) == str(gap_num):
-                                    # 修正頁碼與基本路徑
-                                    new_q['page_number'] = target_page_num + 1
-                                    new_q['full_page_image_path'] = gap_image_path.replace("\\", "/")
-                                    new_q['question_page_image_paths'] = q_image_paths
-                                    new_q['answer_page_image_paths'] = a_image_paths
-                                    new_q['rubric_page_image_paths'] = rubric_image_paths
-                                    new_q['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
-                                    new_q['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
-                                    new_q['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else ""
-                                    
-                                    # 執行補漏題目的主圖與選項圖裁切
-                                    new_q['image_paths'] = []
-                                    if new_q.get('has_image') and new_q.get('image_bboxes'):
-                                        new_q['image_paths'] = self.execute_crop(gap_page, new_q['image_bboxes'], img_dir, f"Q{gap_num}_Gap")
-                                    
-                                    # 🚨 補件：同步載入並快取已裁剪的 PIL 影像，避免後續階段遺漏多模態資訊
-                                    new_q['_cropped_pil_images'] = [Image.open(p) for p in new_q['image_paths'] if os.path.exists(p)]
-                                    
-                                    all_extracted_questions.append(new_q)
-                                    logging.info(f"🎯 [補漏成功] 已成功補回第 {gap_num} 題，並完成影像高精裁切與 PIL 緩衝。")
-                                    break
-                
-                # 重新排序與校驗
-                all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
-                # 最後排序題號以維持最終 JSON 整齊，防範字典序排序導致 10 排在 2 前面
-                all_extracted_questions.sort(key=lambda x: natural_sort_key(x.get('question_number', '0')))
-
-                # 🆕 提取詳解本中的所有題目官方解析，並綁定至各題 question 結構中
-                official_explanations = {}
-                if a_pdf:
-                    official_explanations.update(self.parse_detailed_explanations(a_pdf))
-                if rubric_pdf:
-                    official_explanations.update(self.parse_detailed_explanations(rubric_pdf))
-                    
-                for q_data in all_extracted_questions:
-                    matched_exp = None
-                    for key_num, exp_text in official_explanations.items():
-                        if is_precise_match(q_data, key_num):
-                            matched_exp = exp_text
-                            break
-                    q_data['official_explanation'] = matched_exp if matched_exp else ""
-
-                # 題目擷取完成後，進行對位補件
-                # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
-        except Exception as e:
-            logging.error(f"❌ [補漏引擎異常] 執行補漏時發生未預期錯誤: {e}")
-
-        # 🚨 [選填題格子對照驗證] 強制在進入解題前核對格子數量與答案長度
-        mismatch_count = sum(1 for q in all_extracted_questions if q.get("_length_mismatch"))
-        if mismatch_count > 0:
-            logging.warning(f"⚠️ [選填題格子對照驗證] 偵測到 {mismatch_count} 題選填題存在挖空數量與答案長度不一致的問題！這將在解題階段向 AI 發出高度預警。")
-        else:
-            logging.info("🎯 [選填題格子對照驗證] 全數通過！所有選填題挖空數皆與官方答案長度吻合。")
-
-        # 題目擷取完成後，進行對位補件
-
-        # 🚨 第一階段所有的頁面 PDF 已經掃描與裁切完成，此時安全關閉 PDF 檔案
-        # 🚨 第一階段所有的頁面 PDF 已經掃描與裁切完成，在此處安全關閉 PDF 檔
-
-        # 題目擷取完成後，進行對位補件
-        # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
-        # 🚨【自動幾何圖解與多圖精確嵌入規範】🚨
-            # 題目擷取完成後，進行對位補件
-        # 🚨 [防禦性機制 - 提案二：混合題型「選擇答案與手寫標準」跨 PDF 跨模態自動縫合器]
-        for q_data in all_extracted_questions:
-            q_num = q_data['question_number']
-            q_type = q_data.get('question_type', '')
-            has_options = len(q_data.get("options", [])) > 0
-            
-            # 1. 直接調用上層已定義的精確對位邏輯
-            matched_key = next((k for k in rubric_visual_map if is_precise_match(q_data, k)), None)
-            
-            if matched_key:
-                q_data['scoring_criteria'] = rubric_visual_map[matched_key]['text']
-                q_data['rubric_image_paths'] = rubric_visual_map[matched_key]['paths']
-                logging.info(f"🔗 [評分補件] 題號 {q_num} 已成功掛載手寫圖文標準")
-                
-                # 2. 🚨 混合題型自動偵測：若一題同時有選項與手寫評分標準，定義其為「混合題」
-                if has_options:
-                    q_data['question_type'] = "混合題"
-                    logging.info(f"💎 [混合題偵測] 題號 {q_num} 具備雙重屬性，已重塑其類型為: 混合題")
-                    
-                    # 3. 跨 PDF 選擇答案縫合：當答案卷答案為非選標記、空白或無答案時，從評分圖片中反向提取選擇題答案
-                    current_ans = str(q_data.get('answer', '')).strip()
-                    non_choice_indicators = ["見評分", "非選擇", "手寫", "無", "畫在", "作圖", "作答", ""]
-                    
-                    if any(ind in current_ans for ind in non_choice_indicators) or not current_ans:
-                        rubric_paths = q_data.get('rubric_image_paths', [])
-                        if rubric_paths and os.path.exists(rubric_paths[0]):
-                            logging.info(f"⚖️ [跨PDF縫合] 題號 {q_num} (混合題) 無直接選擇答案，啟動跨模態答案反向提取...")
-                            
-                            class ExtractedAnswer(BaseModel):
-                                answer: str = Field(description="從評分標準圖片中精確提取出的選擇題或勾選題部分的標準答案。必須且只能是選項字母或數字（如 '4'、'C' 或多選 'ACD'），嚴禁包含任何中文字或說明。")
-
-                            stitch_prompt = f"""
-                            這是一份大考混合題的官方評分標準。
-                            請你仔細閱讀這張圖片，找出該混合題中「選擇題/單選/多選/勾選」部分的標準答案。
-                            我們距離選擇題部分的答案字元（如 'C' 或 '4'），不要有任何其他說明。
-                            """
-                            
+                def is_question_covered(expected_base: str, extracted_questions: list) -> bool:
+                    expected_base = str(expected_base).strip()
+                    for q_item in extracted_questions:
+                        q_num = str(q_item.get("question_number", "")).strip()
+                        if q_num == expected_base: return True
+                        range_match = re.match(r'^(\d+)-(\d+)$', q_num)
+                        if range_match:
                             try:
-                                with Image.open(rubric_paths[0]) as rub_img:
-                                    res_stitch, _ = self.ai_manager.generate_with_retry(
-                                        contents=[stitch_prompt, rub_img],
-                                        response_schema=ExtractedAnswer,
-                                        temperature=0.0,
-                                        preferred_model="gemini-3.5-flash",
-                                        enable_thinking=False,
-                                        task_desc=f"{paper_tag} [混合題答案縫合 Q{q_num}]"
-                                    )
-                                    if res_stitch and res_stitch.get('answer'):
-                                        cleaned_stitch_ans = clean_ocr_answer_format(res_stitch['answer'])
-                                        if cleaned_stitch_ans:
-                                            q_data['answer'] = cleaned_stitch_ans
-                                            logging.info(f"🎯 [縫合成功] 題號 {q_num} (混合題) 選擇答案已修正為: {q_data['answer']}")
-                            except Exception as e:
-                                logging.error(f"混合題答案跨模態縫合失敗: {e}") 
+                                start, end = int(range_match.group(1)), int(range_match.group(2))
+                                val = int(expected_base)
+                                if start <= val <= end: return True
+                            except ValueError: pass
+                        if q_num.startswith(expected_base) and len(q_num) > len(expected_base):
+                            next_char = q_num[len(expected_base)]
+                            if not next_char.isalnum(): return True
+                    return False
 
-                # 4. 🚨 [防禦性機制 - 提案三：混合題「勾選與選填選項」跨模態反向重建器]
-                # 針對新課綱中常見的「勾選+簡答」混合題，其選項（如 ☑ 臺灣省戒嚴令）只印在答題卷上，
-                # 導致從題目卷中擷取的 options 為空。我們在此主動利用已掛載的 評分標準文字/圖片 進行反向提取重建。
-                sc_text = q_data.get('scoring_criteria', '')
-                has_checkbox_clue = "勾選" in q_data.get('question_text', '') or any(sym in sc_text for sym in ["☑", "□", "■", "✔"])
+                def get_official_answer_for_base(base_num: str, ans_dict: dict) -> str:
+                    if base_num in ans_dict: return str(ans_dict[base_num])
+                    sub_keys = []
+                    for k in ans_dict.keys():
+                        if k.startswith(f"{base_num}-"):
+                            suffix = k[len(base_num)+1:]
+                            if suffix.isdigit(): sub_keys.append((int(suffix), k))
+                    if sub_keys:
+                        sub_keys.sort()
+                        return ",".join(str(ans_dict[k]) for _, k in sub_keys)
+                    return ""
+
+                gaps = []
+                for num in expected_q_nums:
+                    base_num = get_base_q_num(num)
+                    if not is_question_covered(base_num, all_extracted_questions):
+                        if base_num not in gaps: gaps.append(base_num)
                 
-                if has_checkbox_clue and not q_data.get('options'):
-                    logging.info(f"⚖️ [選項重建] 偵測到題號 {q_num} 為「勾選混合題」且缺少選項，啟動跨模態選項提取...")
-                    
-                    class ExtractedCheckboxes(BaseModel):
-                        options: List[OptionItem] = Field(description="從評分標準或答題卷中提取的所有勾選選項列表。按順序為 A, B, C, D...。")
-                        correct_key: str = Field(description="被勾選（☑ 或 ■）的正確選項代號（如 'A', 'B' 等）。")
-
-                    stitch_prompt = f"""
-                    這是一份大考非選擇題的官方評分標準。
-                    請你仔細閱讀以下評分文字與圖片，找出該題在答題卷上供學生「勾選」的所有選項內容（通常在『滿分參考答案』中以 ☑ 或 □ 標示）。
-                    
-                    任務：
-                    1. 提取所有選項的文字，依序編號為 A, B, C, D...。
-                    2. 找出被勾選（☑ 或帶有打勾、黑塊標記）的那個正確選項，將其 key（如 'A'）填入 `correct_key`。
-                    
-                    【評分標準文字對照】：
-                    {sc_text}
-                    """
-                    
-                    rubric_paths = q_data.get('rubric_image_paths', [])
-                    stitch_contents = [stitch_prompt]
-                    if rubric_paths and os.path.exists(rubric_paths[0]):
-                        stitch_contents.append(Image.open(rubric_paths[0]))
+                if gaps:
+                    logging.warning(f"⚠️ [補漏機制啟動] 偵測到有 {len(gaps)} 道題目在第一階段漏抓：{gaps}")
+                    for gap_num in gaps:
+                        target_page_num = 0
+                        for page_idx in range(len(doc)):
+                            page_text = doc[page_idx].get_text("text")
+                            if re.search(rf'\b{gap_num}\b', page_text) or f" {gap_num} " in page_text:
+                                target_page_num = page_idx
+                                break
                         
-                    try:
-                        res_opts, _ = self.ai_manager.generate_with_retry(
-                            contents=stitch_contents,
-                            response_schema=ExtractedCheckboxes,
-                            temperature=0.0,
-                            preferred_model="gemini-3.5-flash",
-                            enable_thinking=True,
-                            task_desc=f"{paper_tag} [混合題選項重建 Q{q_num}]"
-                        )
-                        if res_opts and res_opts.get('options'):
-                            # 將重建的選項寫回題目的 options 欄位中
-                            q_data['options'] = res_opts['options']
-                            q_data['question_type'] = "混合題"
+                        logging.info(f"🔍 題號 {gap_num} 最可能位於 PDF 第 {target_page_num+1} 頁，啟動單題高精度定向擷取...")
+                        
+                        gap_page = doc[target_page_num]
+                        gap_image_path = q_image_paths[target_page_num]
+                        
+                        official_ans_val = get_official_answer_for_base(gap_num, ans_map)
+                        ans_prompt_part = f"\n🚨【本題官方標準答案】：{official_ans_val}\n請直接將此答案填入 `answer` 欄位中，絕對不可變更或縮水。" if official_ans_val else ""
+
+                        gap_prompt = f"""
+                        我們在全卷掃描中漏掉了第 {gap_num} 題。請仔細閱讀以下試卷影像：
+                        1. 請精確找出第 {gap_num} 題的完整題幹、選項（若有）。{ans_prompt_part}
+                        2. 將該單題的資料結構化填入 Pydantic 結構。
+                        3. 🚨 必須將 `page_number` 設為 {target_page_num+1}。
+                        """
+                        
+                        with Image.open(gap_image_path) as gap_pil:
+                            res_gap, _ = self.ai_manager.generate_with_retry(
+                                contents=[gap_prompt, gap_pil, f"=== 原卷第 {target_page_num+1} 頁純文字 ===\n" + s2t(gap_page.get_text("text"))],
+                                response_schema=PageExtraction,
+                                temperature=0.0,
+                                preferred_model="gemini-3.5-flash",
+                                enable_thinking=True,
+                                task_desc=f"{paper_tag} [單題補漏 Q{gap_num}]"
+                            )
                             
-                            # 如果原本答案為空、斜線或指示詞，則將 correct_key 作為答案
-                            current_ans = str(q_data.get('answer', '')).strip()
-                            if current_ans in ["", "／", "/", "\\", "無"]:
-                                q_data['answer'] = res_opts.get('correct_key', '')
-                                
-                            logging.info(f"🎯 [重建成功] 題號 {q_num} 已成功恢復 {len(q_data['options'])} 個勾選選項，並更新答案為: {q_data['answer']}")
-                    except Exception as e:
-                        logging.error(f"混合題勾選選項重建失敗: {e}")
+                            if res_gap and res_gap.get('questions'):
+                                for new_q in res_gap['questions']:
+                                    if str(new_q.get("question_number")) == str(gap_num):
+                                        new_q['page_number'] = target_page_num + 1
+                                        new_q['full_page_image_path'] = gap_image_path.replace("\\", "/")
+                                        new_q['question_page_image_paths'] = q_image_paths
+                                        new_q['answer_page_image_paths'] = a_image_paths
+                                        new_q['rubric_page_image_paths'] = rubric_image_paths
+                                        new_q['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
+                                        new_q['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
+                                        new_q['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else ""
+                                        
+                                        new_q['image_paths'] = []
+                                        if new_q.get('has_image') and new_q.get('image_bboxes'):
+                                            new_q['image_paths'] = self.execute_crop(gap_page, new_q['image_bboxes'], img_dir, f"Q{gap_num}_Gap")
+                                        
+                                        new_q['_cropped_pil_images'] = [Image.open(p) for p in new_q['image_paths'] if os.path.exists(p)]
+                                        all_extracted_questions.append(new_q)
+                                        logging.info(f"🎯 [補漏成功] 已成功補回第 {gap_num} 題，並完成影像高精裁切與 PIL 緩衝。")
+                                        break
+                    
+                    all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
+                    all_extracted_questions.sort(key=lambda x: natural_sort_key(x.get('question_number', '0')))
 
-
-        # 🚨 [題組圖片資源共享防污染機制] 嚴格驗證題號鄰近性與非通用說明的題組共享
-        # 🚨 新增：題組題圖片與資源自動傳播共享機制
-        # 只要兩題以上的 shared_context 相同且不為空，即判定為同一題組。
-        # 我們將它們的所有裁剪圖片、Bounding Boxes 進行合併，使題組內的每一題（如第7題）都能共享並看見題組原圖（如第6題的結構圖）！
-        
-        # 🚨 [題組圖片資源共享防污染機制] 嚴格驗證題號鄰近性與非通用說明的題組共享
-        def is_generic_instruction(text):
-            generic_keywords = ["注意事項", "答案卡", "畫記", "作答說明", "答題說明", "本部分", "單選題", "多選題", "選填題"]
-            matches = sum(1 for kw in generic_keywords if kw in text)
-            return matches >= 2 or len(text.strip()) < 20
-
-        def is_authentic_group_context(text):
-            # 🚨 修正：題組共用背景必須包含明確的群組說明或圖表關鍵字，防止相似積木背景或模板文字引發錯誤分組
-            group_keywords = ["題組", "閱讀", "共用", "下列各題", "圖", "表", "實驗", "情境", "背景"]
-            return any(kw in text for kw in group_keywords)
-        
-        # 修正：利用字元交集比例，容忍 OCR 產生的微小標點符號或空格差異
-        def get_context_similarity(s1, s2):
-            set1 = set(s1.replace(" ", "").replace("\n", ""))
-            set2 = set(s2.replace(" ", "").replace("\n", ""))
-            if not set1 or not set2:
-                return 0.0
-            return len(set1.intersection(set2)) / float(len(set1.union(set2)))
-
-        group_pools = {}
-        for i, q in enumerate(all_extracted_questions):
-            sc = q.get('shared_context', '').strip()
-            if not sc or is_generic_instruction(sc) or not is_authentic_group_context(sc):
-                continue
-                
-            matched_sc = None
-            for existing_sc in group_pools.keys():
-                prev_questions = group_pools[existing_sc]["questions"]
-                is_nearby = (i - prev_questions[-1]["index"] <= 4)
-                similarity = get_context_similarity(sc, existing_sc)
-                
-                # 🚨 跨頁題組相容性判定：若字元相似度 >= 0.92，或是題號鄰近且雙方皆含有較長（>100字）的實質背景描述，
-                # 則視為同一個因跨頁而產生文本斷裂的題組，進行歸併與後續的文本縫合
-                if similarity >= 0.92 or (is_nearby and len(sc) > 100 and len(existing_sc) > 100):
-                    matched_sc = existing_sc
-                    break
+                    official_explanations = {}
+                    if a_pdf: official_explanations.update(self.parse_detailed_explanations(a_pdf))
+                    if rubric_pdf: official_explanations.update(self.parse_detailed_explanations(rubric_pdf))
                         
-            if matched_sc:
-                group_pools[matched_sc]["questions"].append({"index": i, "data": q})
-            else:
-                group_pools[sc] = {
-                    "questions": [{"index": i, "data": q}],
-                    "image_paths": [],
-                    "image_bboxes": [],
-                    "_cropped_pil_images": []
-                }
+                    for q_data in all_extracted_questions:
+                        matched_exp = None
+                        for key_num, exp_text in official_explanations.items():
+                            if is_precise_match(q_data, key_num):
+                                matched_exp = exp_text
+                                break
+                        q_data['official_explanation'] = matched_exp if matched_exp else ""
 
-        # 僅針對真正含有 2 題或以上的題組進行資源共享，並對位去重與文本拼接
-        for sc, pool in group_pools.items():
-            if len(pool["questions"]) < 2:
-                continue
-            
-            # 🚨 解決「跨頁文本斷裂 (Context-Splitting)」：提取並拼合題組中所有相異的 shared_context 文本片段
-            combined_context_parts = []
-            for item in pool["questions"]:
-                part_sc = item["data"].get("shared_context", "").strip()
-                if part_sc and part_sc not in combined_context_parts:
-                    # 避免部分重合的子字串產生重複冗餘，僅加入相異部分
-                    if not any(part_sc in existing or existing in part_sc for existing in combined_context_parts):
-                        combined_context_parts.append(part_sc)
-            
-            merged_shared_context = "\n\n".join(combined_context_parts)
+            except Exception as e:
+                logging.error(f"❌ [補漏引擎異常] 執行補漏時發生未預期錯誤: {e}")
+
+            mismatch_count = sum(1 for q in all_extracted_questions if q.get("_length_mismatch"))
+            if mismatch_count > 0:
+                logging.warning(f"⚠️ [選填題格子對照驗證] 偵測到 {mismatch_count} 題選填題存在挖空數量與答案長度不一致的問題！")
+            else:
+                logging.info("🎯 [選填題格子對照驗證] 全數通過！所有選填題挖空數皆與官方答案長度吻合。")
+
+            for q_data in all_extracted_questions:
+                q_num = q_data['question_number']
+                has_options = len(q_data.get("options", [])) > 0
+                matched_key = next((k for k in rubric_visual_map if is_precise_match(q_data, k)), None)
                 
-            for item in pool["questions"]:
-                q = item["data"]
-                # 🚨 修正：防選項附圖污染！僅共享題組題幹的非選項主圖，絕對排除含有 "_Opt" 字眼的選項專屬附圖
-                pool["image_paths"].extend([p for p in q.get("image_paths", []) if "_Opt" not in p])
-                pool["image_bboxes"].extend(q.get("image_bboxes", []))
-                pool["_cropped_pil_images"].extend(q.get("_cropped_pil_images", []))
+                if matched_key:
+                    q_data['scoring_criteria'] = rubric_visual_map[matched_key]['text']
+                    q_data['rubric_image_paths'] = rubric_visual_map[matched_key]['paths']
+                    logging.info(f"🔗 [評分補件] 題號 {q_num} 已成功掛載手寫圖文標準")
+                    
+                    if has_options:
+                        q_data['question_type'] = "混合題"
+                        logging.info(f"💎 [混合題偵測] 題號 {q_num} 具備雙重屬性，已重塑其類型為: 混合題")
+                        
+                        current_ans = str(q_data.get('answer', '')).strip()
+                        non_choice_indicators = ["見評分", "非選擇", "手寫", "無", "畫在", "作圖", "作答", ""]
+                        
+                        if any(ind in current_ans for ind in non_choice_indicators) or not current_ans:
+                            rubric_paths = q_data.get('rubric_image_paths', [])
+                            if rubric_paths and os.path.exists(rubric_paths[0]):
+                                logging.info(f"⚖️ [跨PDF縫合] 題號 {q_num} (混合題) 無直接選擇答案，啟動跨模態答案反向提取...")
+                                
+                                class ExtractedAnswer(BaseModel):
+                                    answer: str = Field(description="從評分標準圖片中精確提取出的選擇題或勾選題部分的標準答案。必須且只能是選項字母或數字，嚴禁包含任何中文字或說明。")
+
+                                stitch_prompt = f"""
+                                這是一份大考混合題的官方評分標準。
+                                請你仔細閱讀這張圖片，找出該混合題中「選擇題/單選/多選/勾選」部分的標準答案。
+                                我們距離選擇題部分的答案字元（如 'C' 或 '4'），不要有任何其他說明。
+                                """
+                                
+                                try:
+                                    with Image.open(rubric_paths[0]) as rub_img:
+                                        res_stitch, _ = self.ai_manager.generate_with_retry(
+                                            contents=[stitch_prompt, rub_img],
+                                            response_schema=ExtractedAnswer,
+                                            temperature=0.0,
+                                            preferred_model="gemini-3.5-flash",
+                                            enable_thinking=False,
+                                            task_desc=f"{paper_tag} [混合題答案縫合 Q{q_num}]"
+                                        )
+                                        if res_stitch and res_stitch.get('answer'):
+                                            cleaned_stitch_ans = clean_ocr_answer_format(res_stitch['answer'])
+                                            if cleaned_stitch_ans:
+                                                q_data['answer'] = cleaned_stitch_ans
+                                                logging.info(f"🎯 [縫合成功] 題號 {q_num} (混合題) 選擇答案已修正為: {q_data['answer']}")
+                                except Exception as e:
+                                    logging.error(f"混合題答案跨模態縫合失敗: {e}")
+
+                    sc_text = q_data.get('scoring_criteria', '')
+                    has_checkbox_clue = "勾選" in q_data.get('question_text', '') or any(sym in sc_text for sym in ["☑", "□", "■", "✔"])
+                    
+                    if has_checkbox_clue and not q_data.get('options'):
+                        logging.info(f"⚖️ [選項重建] 偵測到題號 {q_num} 為「勾選混合題」且缺少選項，啟動跨模態選項提取...")
+                        
+                        class ExtractedCheckboxes(BaseModel):
+                            options: List[OptionItem] = Field(description="從評分標準或答題卷中提取的所有勾選選項列表。按順序為 A, B, C, D...。")
+                            correct_key: str = Field(description="被勾選（☑ 或 ■）的正確選項代號。")
+
+                        stitch_prompt = f"""
+                        這是一份大考非選擇題的官方評分標準。
+                        請你仔細閱讀以下評分文字與圖片，找出該題在答題卷上供學生「勾選」的所有選項內容（通常在『滿分參考答案』中以 ☑ 或 □ 標示）。
+                        
+                        任務：
+                        1. 提取所有選項的文字，依序編號為 A, B, C, D...。
+                        2. 找出被勾選（☑ 或帶有打勾、黑塊標記）的那個正確選項，將其 key 填入 `correct_key`。
+                        
+                        【評分標準文字對照】：
+                        {sc_text}
+                        """
+                        
+                        rubric_paths = q_data.get('rubric_image_paths', [])
+                        stitch_contents = [stitch_prompt]
+                        if rubric_paths and os.path.exists(rubric_paths[0]):
+                            stitch_contents.append(Image.open(rubric_paths[0]))
+                            
+                        try:
+                            res_opts, _ = self.ai_manager.generate_with_retry(
+                                contents=stitch_contents,
+                                response_schema=ExtractedCheckboxes,
+                                temperature=0.0,
+                                preferred_model="gemini-3.5-flash",
+                                enable_thinking=True,
+                                task_desc=f"{paper_tag} [混合題選項重建 Q{q_num}]"
+                            )
+                            if res_opts and res_opts.get('options'):
+                                q_data['options'] = res_opts['options']
+                                q_data['question_type'] = "混合題"
+                                current_ans = str(q_data.get('answer', '')).strip()
+                                if current_ans in ["", "／", "/", "\\", "無"]:
+                                    q_data['answer'] = res_opts.get('correct_key', '')
+                                logging.info(f"🎯 [重建成功] 題號 {q_num} 已成功恢復 {len(q_data['options'])} 個勾選選項，並更新答案為: {q_data['answer']}")
+                        except Exception as e:
+                            logging.error(f"混合題勾選選項重建失敗: {e}")
+
+            def is_generic_instruction(text):
+                generic_keywords = ["注意事項", "答案卡", "畫記", "作答說明", "答題說明", "本部分", "單選題", "多選題", "選填題"]
+                matches = sum(1 for kw in generic_keywords if kw in text)
+                return matches >= 2 or len(text.strip()) < 20
+
+            def is_authentic_group_context(text):
+                group_keywords = ["題組", "閱讀", "共用", "下列各題", "圖", "表", "實驗", "情境", "背景"]
+                return any(kw in text for kw in group_keywords)
             
-            # 資源去重
-            unique_paths = list(dict.fromkeys(pool["image_paths"]))
-            unique_bboxes = []
-            for bbox in pool["image_bboxes"]:
-                if bbox not in unique_bboxes:
-                    unique_bboxes.append(bbox)
+            def get_context_similarity(s1, s2):
+                set1 = set(s1.replace(" ", "").replace("\n", ""))
+                set2 = set(s2.replace(" ", "").replace("\n", ""))
+                if not set1 or not set2: return 0.0
+                return len(set1.intersection(set2)) / float(len(set1.union(set2)))
+
+            group_pools = {}
+            for i, q in enumerate(all_extracted_questions):
+                sc = q.get('shared_context', '').strip()
+                if not sc or is_generic_instruction(sc) or not is_authentic_group_context(sc):
+                    continue
                     
-            seen_ids = set()
-            unique_pil_imgs = []
-            for img in pool["_cropped_pil_images"]:
-                if id(img) not in seen_ids:
-                    seen_ids.add(id(img))
-                    unique_pil_imgs.append(img)
+                matched_sc = None
+                for existing_sc in group_pools.keys():
+                    prev_questions = group_pools[existing_sc]["questions"]
+                    is_nearby = (i - prev_questions[-1]["index"] <= 4)
+                    similarity = get_context_similarity(sc, existing_sc)
                     
-            for item in pool["questions"]:
-                q = item["data"]
-                q['shared_context'] = merged_shared_context # 🚨 核心修正：將縫合後最完整的題組背景同步寫回每一題，杜絕跨頁資訊遺漏！
-                q['image_paths'] = unique_paths
-                q['image_bboxes'] = unique_bboxes
-                q['_cropped_pil_images'] = unique_pil_imgs
-                q['has_image'] = len(unique_paths) > 0
-                logging.info(f"  -> 🔗 [題組共享] 題號 {q['question_number']} 已自動共享並連結題組圖片與完整拼合上下文。")
+                    if similarity >= 0.92 or (is_nearby and len(sc) > 100 and len(existing_sc) > 100):
+                        matched_sc = existing_sc
+                        break
+                            
+                if matched_sc:
+                    group_pools[matched_sc]["questions"].append({"index": i, "data": q})
+                else:
+                    group_pools[sc] = {
+                        "questions": [{"index": i, "data": q}],
+                        "image_paths": [],
+                        "image_bboxes": [],
+                        "_cropped_pil_images": []
+                    }
+
+            for sc, pool in group_pools.items():
+                if len(pool["questions"]) < 2: continue
                 
+                combined_context_parts = []
+                for item in pool["questions"]:
+                    part_sc = item["data"].get("shared_context", "").strip()
+                    if part_sc and part_sc not in combined_context_parts:
+                        if not any(part_sc in existing or existing in part_sc for existing in combined_context_parts):
+                            combined_context_parts.append(part_sc)
+                
+                merged_shared_context = "\n\n".join(combined_context_parts)
+                    
+                for item in pool["questions"]:
+                    q = item["data"]
+                    pool["image_paths"].extend([p for p in q.get("image_paths", []) if "_Opt" not in p])
+                    pool["image_bboxes"].extend(q.get("image_bboxes", []))
+                    pool["_cropped_pil_images"].extend(q.get("_cropped_pil_images", []))
+                
+                unique_paths = list(dict.fromkeys(pool["image_paths"]))
+                unique_bboxes = []
+                for bbox in pool["image_bboxes"]:
+                    if bbox not in unique_bboxes: unique_bboxes.append(bbox)
+                        
+                seen_ids = set()
+                unique_pil_imgs = []
+                for img in pool["_cropped_pil_images"]:
+                    if id(img) not in seen_ids:
+                        seen_ids.add(id(img))
+                        unique_pil_imgs.append(img)
+                        
+                for item in pool["questions"]:
+                    q = item["data"]
+                    q['shared_context'] = merged_shared_context
+                    q['image_paths'] = unique_paths
+                    q['image_bboxes'] = unique_bboxes
+                    q['_cropped_pil_images'] = unique_pil_imgs
+                    q['has_image'] = len(unique_paths) > 0
+                    logging.info(f"  -> 🔗 [題組共享] 題號 {q['question_number']} 已自動共享並連結題組圖片與完整拼合上下文。")
+
+            # 🆕 完成第一階段掃描後，將題目結構安全寫入快取檔
+            try:
+                clean_extracted_questions = []
+                for q_item in all_extracted_questions:
+                    q_copy = dict(q_item)
+                    q_copy.pop('_cropped_pil_images', None)
+                    clean_extracted_questions.append(q_copy)
+                with open(raw_extracted_json_path, "w", encoding="utf-8") as f:
+                    json.dump(clean_extracted_questions, f, ensure_ascii=False, indent=4)
+                logging.info(f"💾 [Stage 1 快取儲存] 第一階段題目結構已安全寫入：{raw_extracted_json_path}")
+            except Exception as e:
+                logging.error(f"寫入 Stage 1 快取失敗: {e}")
+
+            doc.close()
+            # === 第一階段 結束點 ===
+
         math_scope_instruction = ""
         if math_type:
             math_scope_instruction = f"""
@@ -3176,13 +3074,12 @@ class ExamParser:
                     # 🚨【自動幾何圖解與多圖精確嵌入規範】🚨
                     safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
                     item_desc += f"""
-                    如果你認為本題的某些解法（如標準解法、另解一等）需要圖解輔助說明，**請直接在對應的說明文字旁邊緊鄰地嵌入 Markdown 圖片語法**。
-                    - **【格式限制】**：請在你的 Markdown 內文中，依照需要嵌入以下精確路徑：
-                      * 第一張圖請嵌入：`![圖 1](images/{spec_name}/diagram_Q{safe_q_num}_1.png)`
-                      * 第二張圖請嵌入：`![圖 2](images/{spec_name}/diagram_Q{safe_q_num}_2.png)`
-                      * 第三張圖請嵌入：`![圖 3](images/{spec_name}/diagram_Q{safe_q_num}_3.png)`
-                    - **【多圖對齊】**：一題可以有多個不同的解法，您可以針對每個解法或步驟分別嵌入「圖 1」、「圖 2」等。請在文字中配合描述，例如：「...如圖 1 所示 ![圖 1](images/{spec_name}/diagram_Q{safe_q_num}_1.png)，可以做出三角外接圓來解此題...」。
-                    - 請完全照抄上述圖片 Markdown 語法，我們系統會在後續自動讀取這些圖片路徑，並呼叫 Python 繪圖腳本將對應的實體圖片繪製並儲存至該路徑！
+                    💡【圖解原理引導】：若本題涉及幾何結構、函數圖形、受力分析或實驗示意圖，**非常鼓勵您針對不同解法（如標準解法用圖 1，另解一用圖 2）或關鍵步驟嵌入圖解**，幫助學生建立直覺。但若為純代數或純文字概念題，則保持純文字即可，無須刻意湊圖。
+                    - **【格式限制】**：若需繪圖，請在內文中緊鄰說明文字處嵌入以下精確 Markdown 語法：
+                      * 第一張圖嵌入：`![圖 1](images/{spec_name}/diagram_Q{safe_q_num}_1.png)`
+                      * 第二張圖嵌入：`![圖 2](images/{spec_name}/diagram_Q{safe_q_num}_2.png)`
+                      * 第三張圖嵌入：`![圖 3](images/{spec_name}/diagram_Q{safe_q_num}_3.png)`
+                    - **【配合文字解說】**：嵌入圖片時請配合上下文引導（如：「...同學們請觀察圖 1 ![圖 1](...) 中的受力方向...」）。系統會在背景自動為您繪製真實實體圖形！
                     """
 
                     # 🚨 核心優化：如果是題組題（含有共同背景），放寬「題號一致性」審查警告，防止 AI 誤判因共用圖表而產生的標籤不一致，避免陷入重試死循環
@@ -3231,12 +3128,12 @@ class ExamParser:
                 batch_contents.insert(0, batch_prompt)
 
                 try:
-                    # === 將 Stage 2 引擎切回 Google Gemini 以容納超長知識庫 Token ===
+                    # === 將 Stage 2 切換至主力 gemini-3.6-flash ===
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
                         contents=batch_contents, 
                         response_schema=QuestionSolutionBatch,
                         temperature=0.3,
-                        preferred_model="gemini-3.5-flash", 
+                        preferred_model="gemini-3.6-flash", 
                         provider="google",
                         enable_thinking=True,
                         task_desc=f"{paper_tag} [Gemini 深度解題]"
@@ -3375,8 +3272,8 @@ class ExamParser:
                             safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
                             detailed_sol_text = sol.get('detailed_solution', '')
                             
-                            # 1. 透過正規表達式掃描詳解內文中，AI 主動嵌入的所有自訂圖片編號 (例如 1, 2, 3)
-                            pattern = rf"images/{re.escape(spec_name)}/diagram_Q{re.escape(safe_q_num)}_(\d+)\.png"
+                            # 1. 放寬正規表達式：無論 AI 寫 ./images/ 還是其他前綴，皆能精確抓取圖 1, 圖 2, 圖 3 ...
+                            pattern = rf"diagram_Q{re.escape(safe_q_num)}_(\d+)\.png"
                             matches = re.findall(pattern, detailed_sol_text)
                             
                             # 狀況 A：如果 AI 在詳解內文中，主動嵌入了圖片
@@ -3400,8 +3297,23 @@ class ExamParser:
                                     3. 必須在程式碼開頭加入以下繁體中文與負號支援設定：
                                        ```python
                                        import matplotlib.pyplot as plt
-                                       plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'Noto Sans CJK TC', 'sans-serif']
-                                       plt.rcParams['axes.unicode_minus'] = False  # 避免負號顯示為方塊亂碼
+                                       import matplotlib.font_manager as fm
+                                       import os
+
+                                       # 自動在 Linux/Ubuntu 尋找並註冊中文字型
+                                       font_candidates = [
+                                           '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+                                           '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
+                                           '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc'
+                                       ]
+                                       for fp in font_candidates:
+                                           if os.path.exists(fp):
+                                               fm.fontManager.addfont(fp)
+                                               plt.rcParams['font.family'] = fm.FontProperties(fname=fp).get_name()
+                                               break
+
+                                       plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Microsoft JhengHei', 'PingFang TC', 'sans-serif']
+                                       plt.rcParams['axes.unicode_minus'] = False
                                        ```
                                     4. 使用 plt.axis('equal') 保持幾何比例。
                                     5. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
@@ -3413,7 +3325,7 @@ class ExamParser:
                                             contents=[qwen_prompt],
                                             response_schema=DiagramResponse,
                                             temperature=0.1,
-                                            preferred_model="gemini-3.1-flash-lite",
+                                            preferred_model="gemini-3.5-flash-lite",
                                             enable_thinking=False,
                                             task_desc=f"{paper_tag} [繪製 圖{img_num}]"
                                         )
@@ -3474,7 +3386,7 @@ class ExamParser:
                                         contents=[qwen_prompt],
                                         response_schema=DiagramResponse,
                                         temperature=0.1,
-                                        preferred_model="gemini-3.1-flash-lite",
+                                        preferred_model="gemini-3.5-flash-lite",
                                         enable_thinking=False,
                                         task_desc=f"{paper_tag} [保底繪圖]"
                                     )
@@ -3574,12 +3486,12 @@ class ExamParser:
                     
                     validator_batch_prompt = llama_cot_instruction + PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
                     
-                    # === 將 Stage 3 審查引擎切回 Google Gemini ===
+                    # === 將 Stage 3 切換至主力 gemini-3.6-flash ===
                     val_dict, val_err = self.ai_manager.generate_with_retry(
                         contents=[validator_batch_prompt], 
                         response_schema=SolutionValidatorBatch,
                         temperature=0.0, 
-                        preferred_model="gemini-3.5-flash", 
+                        preferred_model="gemini-3.6-flash", 
                         provider="google", 
                         enable_thinking=True,
                         task_desc=f"{paper_tag} [Gemini 審查]"
@@ -3908,12 +3820,13 @@ class ExamParser:
             logging.info(f"🎉 [{year} {subject}] 完整解析成功並儲存：{json_path}")
             
             # 正式完成後，自動將先前的暫存檔清除，避免殘留
-            if os.path.exists(partial_json_path):
-                try:
-                    os.remove(partial_json_path)
-                    logging.info(f"🧹 [暫存清理] 已自動清除暫存進度檔：{partial_json_path}")
-                except Exception:
-                    pass
+            for tmp_path in [partial_json_path, raw_extracted_json_path]:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                        logging.info(f"🧹 [暫存清理] 已自動清除暫存檔：{tmp_path}")
+                    except Exception:
+                        pass
         
         
         # 🚨 新增：若有審查未通過的歷史紀錄，自動儲存至專屬的詳細 JSON 日誌中
@@ -3933,48 +3846,76 @@ class ExamParser:
 # ==========================================
 def auto_find_exam_sets(directories: List[str]) -> List[dict]:
     """
-    🚨 [跨年度/學科精確對位匹配器] 重構：
-    徹底摒棄依賴 loose prefix (f.split("_")[0]) 的分組邏輯。
-    我們對每一個 PDF 文件名進行深度元數據 (學年度, 考試類型, 科目, 文件角色) 提取。
-    只有當 Year, Exam Type, Subject 三者完全一致時，才將其歸為同一個 Exam Task。
-    徹底根除 111 年考卷配到 107 年答案或 109 年評分標準的檔案錯配災難！
+    🚨 [跨年度/學科/模擬考全自動強健對位匹配器 (全面適應真實網抓題庫檔名)]：
+    1. 完整支援「公社科/公社/社會科/國綜/國寫/數A/數B/數甲/數乙」等全套科目簡稱。
+    2. 智慧識別「與詳解/與解析/含解析/試題+解析/試題暨詳解」等二合一 PDF 檔。
+    3. 自動過濾「解答更正表/五標統計表/英聽」雜訊檔。
+    4. 支援「全科共用詳解本 (如：自然組詳解.pdf、全科解答.pdf)」自動保底跨檔綁定！
     """
     exam_sets = []
     
     SUBJECT_MAPPING = {
-        "國文": ["國文", "國綜", "國語文", "國文考科", "國文考科國綜"],
-        "國寫": ["國寫", "國文寫作"],
-        "英文": ["英文", "英語"],
-        "數學甲": ["數學甲", "數甲", "數學甲考科"],
-        "數學乙": ["數學乙", "數乙", "數學乙考科"],
-        "數學A": ["數學A", "數A", "數學A考科"],
-        "數學B": ["數學B", "數B", "數學B考科"],
-        "數學": ["數學", "數學考科"],
-        "物理": ["物理"],
-        "化學": ["化學"],
-        "生物": ["生物"],
+        "國文": ["國文", "國綜", "國語文", "國文考科", "國文考科國綜", "國文科"],
+        "國寫": ["國寫", "國語文寫作", "國文寫作", "寫作測驗", "國作"],
+        "英文": ["英文", "英語", "英文科", "英語科"],
+        "數學甲": ["數學甲", "數甲", "數學甲考科", "高中數學甲"],
+        "數學乙": ["數學乙", "數乙", "數學乙考科", "高中數學乙"],
+        "數學A": ["數學A", "數A", "數學A考科", "南一四模數學Ａ", "高中數學A"],
+        "數學B": ["數學B", "數B", "數學B考科", "南一四模數學Ｂ", "高中數學B"],
+        "數學": ["數學", "數學考科", "數學科", "高中數學"],
+        "物理": ["物理", "物理科", "物理考科"],
+        "化學": ["化學", "化學科", "化學考科"],
+        "生物": ["生物", "生物科", "生物考科"],
         "地球科學": ["地球科學", "地科"],
-        "歷史": ["歷史"],
-        "地理": ["地理"],
-        "公民與社會": ["公民與社會", "公民"],
-        "自然": ["自然"],
-        "社會": ["社會"]
+        "歷史": ["歷史", "歷史科", "歷史考科"],
+        "地理": ["地理", "地理科", "地理考科"],
+        "公民與社會": ["公民與社會", "公民", "公社科", "公社", "公民科", "公民與社會科", "公民考科", "社會與公民"],
+        "自然": ["自然", "自然科", "自然考科"],
+        "社會": ["社會", "社會科", "社會考科"]
     }
 
     def parse_metadata(filename_clean: str) -> dict:
-        # 1. 提取學年度 (例如 107學年度, 111學年度)
-        year_match = re.search(r'(\d+)(學年度|年)', filename_clean)
-        year = year_match.group(0) if year_match else "未知年份"
-        
-        # 2. 判斷考試類型
+        # 0. 排除「英聽/聽力」以及純「解答更正/級距五標」雜訊
+        if any(k in filename_clean for k in ["英聽", "聽力", "解答更正", "更正表", "級距", "五標", "統計圖", "統計表"]):
+            return {"year": "未知年份", "exam_type": "IGNORE", "mock_tag": "", "subject": "未知科目", "role": "ignore"}
+
+        # 1. 提取學年度 (例如 101學年度, 114學年度, 113年, 108年, 9501, 114E7)
+        year_match = re.search(r'(\d{2,3})(?:學年度|年|E\d+|_|\b)', filename_clean)
+        year = "未知年份"
+        if year_match:
+            year_num = int(year_match.group(1))
+            if 80 <= year_num <= 120:  # 符合民國 80~120 年區間
+                year = f"{year_num}學年度"
+
+        # 2. 判斷考試類型與模擬考標籤 (mock_tag)
         exam_type = "MOCK"
-        if any(k in filename_clean for k in ["指考", "指定科目", "分科"]):
+        mock_tag = ""
+        
+        is_ast = any(k in filename_clean for k in ["指考", "指定科目", "分科"])
+        is_gsat = any(k in filename_clean for k in ["學測", "學科能力"])
+        is_mock_kw = any(k in filename_clean for k in ["模擬", "模考", "全模", "北模", "中模", "南模", "竹模", "全區", "中區", "台中區", "台北區", "北區", "南區", "詮達", "全華", "翰林", "南一", "文昌", "漢樺", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"])
+
+        if is_ast and not is_mock_kw:
             exam_type = "AST"
-        elif any(k in filename_clean for k in ["學測", "學科能力"]):
-            if not any(k in filename_clean for k in ["模擬", "模考"]):
-                exam_type = "GSAT"
-                
-        # 3. 判斷科目 (優先採用 SUBJECT_MAPPING 進行對位)
+        elif is_gsat and not is_mock_kw:
+            exam_type = "GSAT"
+        else:
+            exam_type = "MOCK"
+            # 抓取機構/區域/版本標籤
+            org_match = re.search(r'(北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|台北區|臺北區|北區|南區|北北基|新北基|高雄區|翰林|南一|文昌|漢樺|詮達|全華)', filename_clean)
+            org_str = org_match.group(1) if org_match else ""
+
+            # 抓取次數/代碼標籤 (支援「第七次」、「第二次」、「114E7」、「第1次」、「E4」等)
+            times_match = re.search(r'(第[一二三四五六七八九十0-9]+次|\d+模|E\d+|第[0-9]+次)', filename_clean)
+            times_str = times_match.group(1) if times_match else ""
+
+            if org_str or times_str:
+                mock_tag = f"_{org_str}{times_str}".strip("_")
+                mock_tag = f"_{mock_tag}"
+            else:
+                mock_tag = "_模擬考"
+
+        # 3. 判斷科目
         subject = "未知科目"
         for official_name, aliases in SUBJECT_MAPPING.items():
             if any(alias in filename_clean for alias in aliases):
@@ -3982,17 +3923,25 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 break
                 
         # 4. 判斷文件角色
-        role = "other"
-        if any(k in filename_clean for k in ["非選", "評分", "原則", "標準"]):
-            role = "rubric"
-        elif any(k in filename_clean for k in ["答案", "解答"]):
-            role = "answer"
-        elif any(k in filename_clean for k in ["試卷", "題目", "試題"]):
-            role = "question"
+        combined_keywords = ["與詳解", "與解析", "含解析", "含詳解", "含解答", "+解析", "&解答", "暨詳解", "暨答案", "題目+解析", "試題與解析", "試題加詳解", "試題暨詳解", "考科暨答案"]
+        has_combined_kw = any(k in filename_clean for k in combined_keywords)
+
+        has_question_kw = any(k in filename_clean for k in ["試卷", "題目", "試題", "題本", "內頁", "封面+內頁", "封面＋內頁"])
+        has_answer_kw = any(k in filename_clean for k in ["答案", "解答", "解析", "詳解", "詳答", "參考答案", "參考解答", "解答本"])
+
+        if has_combined_kw or (has_question_kw and has_answer_kw):
+            role = "combined"  # 題目與解析二合一 PDF
+        elif any(k in filename_clean for k in ["非選", "評分", "原則", "標準"]):
+            role = "rubric"     # 評分標準
+        elif has_answer_kw:
+            role = "answer"    # 純解答檔
+        else:
+            role = "question"  # 純題目檔
             
         return {
             "year": year,
             "exam_type": exam_type,
+            "mock_tag": mock_tag,
             "subject": subject,
             "role": role
         }
@@ -4006,40 +3955,68 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             if not pdf_files:
                 continue
             
-            # 依據精確三元組 (Year, Exam Type, Subject) 進行分組
+            # 依據 (Year, Exam Type, Mock Tag, Subject) 進行精確四元組分組
             task_groups = {}
+            global_answer_files = [] # 收集該資料夾下的全科/組別共用解答檔 (如: 自然組詳解.pdf, 全科解答.pdf)
+
             for f in pdf_files:
                 meta = parse_metadata(f)
-                # 只有具備有效年份與科目的檔案才參與精確分組，防範垃圾檔案干擾
-                if meta["year"] == "未知年份" or meta["subject"] == "未知科目":
+                if meta["role"] == "ignore" or meta["year"] == "未知年份":
                     continue
-                key = (meta["year"], meta["exam_type"], meta["subject"])
+                
+                # 紀錄潛在的全科/組別共用解答檔
+                if meta["role"] == "answer" and meta["subject"] == "未知科目":
+                    global_answer_files.append(os.path.join(root, f))
+                    continue
+
+                if meta["subject"] == "未知科目":
+                    continue
+
+                key = (meta["year"], meta["exam_type"], meta["mock_tag"], meta["subject"])
                 if key not in task_groups:
                     task_groups[key] = []
                 task_groups[key].append((f, meta))
             
-            # 🚨 修正：統一調用 task_groups 變數，並精確拆分 tuple 進行角色分配，杜絕 NameError
             for key, grouped_files in task_groups.items():
-                q_candidates = [filename for filename, meta in grouped_files if meta["role"] == "question"]
+                # 尋找題目檔 (包含獨立題目檔與二合一 combined 檔)
+                q_candidates = [filename for filename, meta in grouped_files if meta["role"] in ["question", "combined"]]
                 if not q_candidates:
                     continue
-                # 依據檔名長度挑選最主要的題目 PDF
                 final_q_file = sorted(q_candidates, key=lambda x: len(x), reverse=True)[0]
                 
+                # 尋找解答檔
                 a_candidates = [filename for filename, meta in grouped_files if meta["role"] == "answer"]
-                final_a_file = a_candidates[0] if a_candidates else None
+                if a_candidates:
+                    final_a_file = os.path.join(root, a_candidates[0])
+                elif any(meta["role"] == "combined" for filename, meta in grouped_files if filename == final_q_file):
+                    final_a_file = os.path.join(root, final_q_file)  # 二合一檔！
+                elif global_answer_files:
+                    # 智慧比對組別（例如：物理題配對 自然組詳解.pdf）
+                    subj = key[3]
+                    matched_global = None
+                    for gf in global_answer_files:
+                        gf_base = os.path.basename(gf)
+                        if subj in ["物理", "化學", "生物", "自然"] and "自然" in gf_base:
+                            matched_global = gf; break
+                        elif subj in ["歷史", "地理", "公民與社會", "社會"] and "社會" in gf_base:
+                            matched_global = gf; break
+                    if not matched_global:
+                        matched_global = global_answer_files[0]
+                    final_a_file = matched_global
+                else:
+                    final_a_file = None
                 
                 rubric_candidates = [filename for filename, meta in grouped_files if meta["role"] == "rubric"]
-                final_rubric_file = rubric_candidates[0] if rubric_candidates else None
+                final_rubric_file = os.path.join(root, rubric_candidates[0]) if rubric_candidates else None
                 
                 exam_sets.append({
                     "year": key[0],
                     "exam_type": key[1],
-                    "mock_tag": "",  # 模擬考特定標籤由下方獨立解析（若有）
-                    "subject": key[2],
+                    "mock_tag": key[2],
+                    "subject": key[3],
                     "q_pdf": os.path.join(root, final_q_file),
-                    "a_pdf": os.path.join(root, final_a_file) if final_a_file else None,
-                    "rubric_pdf": os.path.join(root, final_rubric_file) if final_rubric_file else None
+                    "a_pdf": final_a_file,
+                    "rubric_pdf": final_rubric_file
                 })
     return exam_sets
 # ==========================================
@@ -4063,18 +4040,19 @@ if __name__ == "__main__":
         print(f"打散後最後一組: {API_KEYS[-1][:15]}...")
     # 推薦使用 flash 模型處理多模態 (Vision) 任務，速度快且便宜
     MODELS = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-3.1-flash-lite-preview",
+        "gemini-3.6-flash",         
+        "gemini-3.5-flash",         
+        "gemini-3-flash",           
+        "gemini-3.5-flash-lite",    
+        "gemini-3.1-flash-lite",    
+        "gemini-2.5-flash"         
     ]
     
     manager = GeminiFreeTierManager(api_keys=API_KEYS, models=MODELS)
     parser = ExamParser(ai_manager=manager)
 
     # 1. 指定你的題庫根目錄
-    TARGET_DIRECTORIES = ["ast_exam_papers_only", "gsat_exam_papers_only"]
+    TARGET_DIRECTORIES = ["ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only"]
     output_directory = "./exam_database_output"
     
     # 2. 自動尋找所有要處理的試卷

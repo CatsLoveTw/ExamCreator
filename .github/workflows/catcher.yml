@@ -36,13 +36,11 @@ jobs:
       - name: Configure rclone
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
-          # 引入個人帳號的 OAuth 授權 Token
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           printf "%s" "$GEMINI_API_KEYS_ENV" > key.txt
           
-          # 直接使用個人 Token 建立 rclone.conf (免用服務帳號 JSON)
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
@@ -57,15 +55,35 @@ jobs:
           mkdir -p gdrive_workspace
           rclone sync gdrive: ./gdrive_workspace --config rclone.conf -v
 
-          # 解壓縮題庫 ZIP 檔到執行環境
+          # 1. 解壓縮一般題庫 exams.zip (若存在)
           if [ -f "./gdrive_workspace/exams.zip" ]; then
             echo "📦 找到 exams.zip，正在解壓縮..."
             unzip -q -o ./gdrive_workspace/exams.zip -d ./
           else
-            echo "⚠️ 警告：未在 Google Drive 找到 exams.zip"
+            echo "ℹ️ 提示：未在 Google Drive 找到 exams.zip"
           fi
 
-          # 將雲端的歷史解析結果複製過來，讓 catcher.py 能進行重複判定
+          # 2. 解壓縮模擬考題庫 mock.zip (若存在，內含 mock_exam_papers_only)
+          if [ -f "./gdrive_workspace/mock.zip" ]; then
+            echo "📦 找到 mock.zip，正在解壓縮模擬考題庫..."
+            unzip -q -o ./gdrive_workspace/mock.zip -d ./
+          else
+            echo "ℹ️ 提示：未在 Google Drive 找到 mock.zip"
+          fi
+
+          # 3. 🆕 解壓縮全套題庫 full.zip (若存在，內含 gsat_exam_papers_only 與 ast_exam_papers_only)
+          if [ -f "./gdrive_workspace/full.zip" ]; then
+            echo "📦 找到 full.zip，正在解壓縮全套題庫..."
+            unzip -q -o ./gdrive_workspace/full.zip -d ./
+          else
+            echo "ℹ️ 提示：未在 Google Drive 找到 full.zip"
+          fi
+
+          # 4. 列出當前環境中所有已準備就緒的題庫資料夾
+          echo "🔍 檢查解壓後的題庫資料夾列表："
+          ls -d *_exam_papers_only 2>/dev/null || echo "⚠️ 警告：未找到任何 *_exam_papers_only 題庫資料夾"
+
+          # 將雲端的歷史解析結果複製過來，讓 catcher.py 能進行重複判定與斷點續傳
           mkdir -p exam_database_output
           if [ -d "./gdrive_workspace/exam_database_output" ]; then
             cp -r ./gdrive_workspace/exam_database_output/* ./exam_database_output/ || true
@@ -83,9 +101,9 @@ jobs:
       - name: Push Results to Google Drive
         if: always()
         run: |
-          echo "⬆️ 執行完畢，開始將最新解析結果上傳回 Google Drive..."
+          echo "⬆️ 執行完畢，開始將最新解析結果（含學測、分科與模擬考）上傳回 Google Drive..."
           
-          # 同步輸出資料夾 (只會上傳/更新有變動的檔案)
+          # 同步輸出資料夾 (只會上傳/更新有變動的 JSON 檔與圖片)
           rclone sync ./exam_database_output gdrive:exam_database_output --config rclone.conf -v
           
           # 更新知識庫與金鑰日誌檔
@@ -97,4 +115,4 @@ jobs:
           fi
           
           # 清除敏感金鑰與暫存
-          rm rclone.conf key.txt
+          rm -f rclone.conf key.txt
