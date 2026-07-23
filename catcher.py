@@ -833,11 +833,10 @@ class GeminiFreeTierManager:
             except Exception as e:
                 logging.error(f"無法寫入金鑰錯誤日誌 key_errors_summary.txt: {e}")
     
-    def escape_latex_backslashes(self, raw_text: str) -> str:
+   def escape_latex_backslashes(self, raw_text: str) -> str:
         """
         精確且安全地將 JSON 字串內所有代表 LaTeX 指令的單反斜線轉義為雙反斜線。
-        僅排除標準 JSON 允許的轉義字元（如 \\n, \\t, \\r, \\b, \\f, \\"）。
-        這能徹底避免 \\le 變形損毀或 \\pm 被暴力轉義成 \\neq 的問題。
+        防範 \frac, \text, \beta, \right, \nu 等指令被誤判為 JSON 控制字元 (\f, \t, \b, \r, \n)。
         """
         if not raw_text:
             return raw_text
@@ -848,17 +847,32 @@ class GeminiFreeTierManager:
         # 2. 定義轉義邏輯
         def replace_backslash(match):
             full_match = match.group(0)
-            # 如果是標準的 6 字元 Unicode 轉義字元，直接完整保留，不作轉義
+            # 如果是標準的 6 字元 Unicode 轉義字元 (\uXXXX)，完整保留
             if full_match.startswith('\\u') and len(full_match) == 6:
                 return full_match
             
-            char = match.group(1) if match.group(1) else match.group(2)
+            char = match.group(2) if match.group(2) else match.group(1)
+            
+            # 如果是 \" 或 \/，屬於標準 JSON 字串轉義，保持原樣
+            if char in ['"', '/']:
+                return full_match
+                
+            # 檢查後續字元：若 \f, \t, \b, \r, \n 後面緊跟著英文字母，代表是 LaTeX 指令 (例如 \frac, \text, \beta, \right, \nu)
+            end_idx = match.end()
+            next_char = raw_text[end_idx] if end_idx < len(raw_text) else ''
+            
             if char in ['b', 'f', 'n', 'r', 't']:
-                return match.group(0)
+                if next_char.isalpha():
+                    # 這是 LaTeX 指令，強制轉義反斜線！
+                    return "\\\\" + char
+                # 否則視為普通 JSON 控制字元 (如獨立的 \n 換行)
+                return full_match
+                
+            # 其他所有反斜線指令 (如 \alpha, \theta, \le, \ge, \pi 等) 強制轉義
             return "\\\\" + char
 
         # 優先匹配 \\uXXXX，其次匹配單個 \\(.)
-        raw_text = re.sub(r'(\\u[0-9a-fA-F]{4})|\\(.)', replace_backslash, raw_text)
+        raw_text = re.sub(r'(\\u[0-9a-fA-F]{4})|\\(.)', replace_backslash, replace_backslash_logic if 'replace_backslash_logic' in locals() else replace_backslash)
         
         # 3. 還原保護的雙反斜線
         raw_text = raw_text.replace("__DBL_SLASH__", "\\\\")
