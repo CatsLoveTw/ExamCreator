@@ -3346,6 +3346,9 @@ class ExamParser:
                                         
                                         if res and res.get('need_diagram') and res.get('python_code'):
                                             py_code = res['python_code'].strip()
+                                            # 🚨 清理 Markdown 程式碼區塊標記與還原 \n 換行符
+                                            py_code = py_code.replace("```python", "").replace("```", "").strip()
+                                            py_code = py_code.replace("\\n", "\n").replace("\\t", "\t")
                                             
                                             with open(script_path, "w", encoding="utf-8") as f:
                                                 f.write(py_code)
@@ -3362,7 +3365,7 @@ class ExamParser:
                                         logging.error(f"自動幾何圖解模組發生錯誤 (題號 {safe_q_num} 圖 {img_num}): {e}")
                                     finally:
                                         # 💡 不論執行成功、發生異常、或超時中斷，100% 執行清理
-                                        if os.path.exists(script_path):
+                                        if script_path and os.path.exists(script_path):
                                             try:
                                                 os.remove(script_path)
                                             except Exception as cleanup_err:
@@ -3395,6 +3398,7 @@ class ExamParser:
                                 4. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
                                 """
                                 
+                                script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_1.py")
                                 try:
                                     res, err = self.ai_manager.generate_with_retry(
                                         contents=[qwen_prompt],
@@ -3407,8 +3411,10 @@ class ExamParser:
                                     
                                     if res and res.get('need_diagram') and res.get('python_code'):
                                         py_code = res['python_code'].strip()
+                                        # 🚨 清理 Markdown 程式碼區塊標記與還原 \n 換行符
+                                        py_code = py_code.replace("```python", "").replace("```", "").strip()
+                                        py_code = py_code.replace("\\n", "\n").replace("\\t", "\t")
                                         
-                                        script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_1.py")
                                         with open(script_path, "w", encoding="utf-8") as f:
                                             f.write(py_code)
                                             
@@ -3423,14 +3429,11 @@ class ExamParser:
                                             logging.info(f"✅ 題號 {safe_q_num} 保底圖解生成與附加成功！")
                                         else:
                                             logging.warning(f"⚠️ 題號 {safe_q_num} 保底腳本執行失敗: {result.stderr}")
-                                            
-                                        if os.path.exists(script_path):
-                                            os.remove(script_path)
                                 except Exception as e:
                                     logging.error(f"自動幾何圖解保底模組發生錯誤 (題號 {safe_q_num}): {e}")
                                 finally:
                                     # 💡 確保不論執行結果如何，皆落實暫存檔回收
-                                    if os.path.exists(script_path):
+                                    if script_path and os.path.exists(script_path):
                                         try:
                                             os.remove(script_path)
                                         except Exception as cleanup_err:
