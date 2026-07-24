@@ -79,6 +79,14 @@ jobs:
             echo "ℹ️ 提示：未在 Google Drive 找到 full.zip"
           fi
 
+          # 4. 解壓縮學校段考題庫 school.zip (若存在，內含 school_exam_papers_only)
+          if [ -f "./gdrive_workspace/school.zip" ]; then
+            echo "📦 找到 school.zip，正在解壓縮學校定期考題庫..."
+            unzip -q -o ./gdrive_workspace/school.zip -d ./
+          else
+            echo "ℹ️ 提示：未在 Google Drive 找到 school.zip"
+          fi
+
           # 4. 列出當前環境中所有已準備就緒的題庫資料夾
           echo "🔍 檢查解壓後的題庫資料夾列表："
           ls -d *_exam_papers_only 2>/dev/null || echo "⚠️ 警告：未找到任何 *_exam_papers_only 題庫資料夾"

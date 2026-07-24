@@ -678,6 +678,8 @@ class ExtractedQuestion(BaseModel):
     answer_page_image_paths: List[str] = Field(default=[], description="整份標準答案每一頁的圖片路徑清單")
     rubric_image_paths: List[str] = Field(default=[], description="從評分標準 PDF 中裁切出的正確答案與評分表圖片路徑")
     scoring_criteria: str = Field(default="", description="針對非選擇題、簡答題、手寫題，從官方評分標準中精確提取的給分步驟與扣分細則。選擇題請留空。")
+    has_official_answer: bool = Field(default=True, description="本題是否有官方提供之標準解答。若此試卷為無解答之學校定期考/段考，設為 false。")
+    school_name: str = Field(default="", description="若為學校定期考/段考，記錄學校名稱（如 '臺北市立建國高級中學' 或 '建國中學'）；非學校段考則留空。")
 
 
 class PageExtraction(BaseModel):
@@ -814,7 +816,7 @@ class GeminiFreeTierManager:
         self.models = models
         self.model_idx = 0
         self.lock = threading.Lock()
-        self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型groq_keys_env = os.environ.get("GROQ_API_KEY", "")
+        self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型
         groq_keys_env = os.environ.get("GROQ_API_KEY", "")
         self.groq_keys = [k.strip() for k in groq_keys_env.split(",") if k.strip()]
         self.groq_key_idx = 0
@@ -1438,7 +1440,9 @@ class ExamParser:
     - 有些解答卷的頁尾或邊角會印有其他科目的備註（例如：某某科第18題不計分/送分）。請你【只關注並讀取結構化答案表格內部的數字】，**絕對禁止**將表格外的「不計分」或「送分」等字眼錯誤掛載到正常的數學選填題上！
 
     【嚴格轉換規則】：
-    1. **單選與多選題**：答案必須為純英文字母或數字。如果是多選，請將所有字母相連（如 "134" 或 "ACD"），嚴禁加逗號。
+    1. **單選與多選題與是非題**：
+       - 若答案為字母或數字，請精確提取（如 "A", "BC", "3"）。
+       - **【是非題專用】**：若答案表內為圓圈 `O`（或 `○`）與叉號 `X`（或 `✕`），請一律標準化為大寫英文字母 `O` 與 `X`（例如第 1 題填 `"O"`，第 3 題填 `"X"`），或者轉為選項代號 `A` (代表 O/正確) 與 `B` (代表 X/錯誤)。
     2. **選填題（核心格式）**：若該題（如 A, B, C）跨越了多個列號，你**必須**將每個列號對應的答案字元（包含數字、負號 `-` 或正負號 `±`）以半角逗號 `,` 隔開。
        - 例如：選填 B 對應列號 12, 13, 14, 15，其答案分別為 3、1、1、3，則輸出 "B" 的答案為 `"3,1,1,3"`。
        - 例如：選填 C 的答案為 -、7、2，則寫成 `"-,7,2"`。
@@ -2026,7 +2030,7 @@ class ExamParser:
             cleaned_questions.append(q)
         return cleaned_questions
 
-    def process_exam_paper(self, subject: str, year: str, exam_type: str, mock_tag: str, q_pdf: str, a_pdf: Optional[str], rubric_pdf: Optional[str], output_dir: str, skip_cover: bool = False):
+    def process_exam_paper(self, subject: str, year: str, exam_type: str, mock_tag: str, q_pdf: str, a_pdf: Optional[str], rubric_pdf: Optional[str], output_dir: str, skip_cover: bool = False, school_name: str = ""):
         safe_year = safe_filename(year)
         safe_subject = safe_filename(subject)
         paper_tag = f"[{year} {subject}]" # 🚨 新增：本份考卷的唯一日誌與 API 派發識別標籤
@@ -2057,29 +2061,32 @@ class ExamParser:
         # stage_2_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         # validator_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         
-        # 1. 決定大類資料夾名稱 (學測 / 分科指考 / 模擬考)
-        type_folder = "學測" if exam_type == "GSAT" else ("分科指考" if exam_type == "AST" else "模擬考")
-        
-        # 2. 決定這份試卷的唯一識別名稱
-        if exam_type == "MOCK":
-            spec_name = f"{safe_year}_模擬考{mock_tag}_{safe_subject}"
-        else:
-            spec_name = f"{safe_year}_{type_folder}_{safe_subject}"
-            
-        # 3. 決定學年度與考卷名稱之 100% 剛性標準化變數，徹底根除跨頁面、跨模型生出不一致考卷名稱與年份之 Bug
         year_digits = "".join(filter(str.isdigit, year))
         if not year_digits:
             year_digits = year
-            
-        if exam_type == "GSAT":
-            standard_academic_year = f"{year_digits}學測"
-            standard_exam_source = f"{year_digits}學年度學科能力測驗{subject}"
-        elif exam_type == "AST":
-            standard_academic_year = f"{year_digits}分科"
-            standard_exam_source = f"{year_digits}學年度分科測驗{subject}"
-        else:  # MOCK
+
+        # 1. 決定大類資料夾名稱與學校獨立目錄
+        if exam_type == "SCHOOL":
+            safe_school = safe_filename(school_name) if school_name else "通用學校"
+            type_folder = os.path.join("學校定期考", safe_school)
+            spec_name = f"{safe_year}_{safe_school}{mock_tag}_{safe_subject}"
+            standard_academic_year = f"{year_digits}定期考"
+            standard_exam_source = f"{year_digits}學年度{school_name if school_name else ''}定期考{mock_tag}_{subject}"
+        elif exam_type == "MOCK":
+            type_folder = "模擬考"
+            spec_name = f"{safe_year}_模擬考{mock_tag}_{safe_subject}"
             standard_academic_year = f"{year_digits}模考"
             standard_exam_source = f"{year_digits}學年度模擬考{mock_tag}_{subject}"
+        elif exam_type == "GSAT":
+            type_folder = "學測"
+            spec_name = f"{safe_year}_學測_{safe_subject}"
+            standard_academic_year = f"{year_digits}學測"
+            standard_exam_source = f"{year_digits}學年度學科能力測驗{subject}"
+        else: # AST
+            type_folder = "分科指考"
+            spec_name = f"{safe_year}_分科指考_{safe_subject}"
+            standard_academic_year = f"{year_digits}分科"
+            standard_exam_source = f"{year_digits}學年度分科測驗{subject}"
 
         # 4. 建立專屬的分類資料夾與 JSON 儲存路徑
         os.makedirs(os.path.join(output_dir, type_folder), exist_ok=True)
@@ -2218,12 +2225,23 @@ class ExamParser:
                 
                 try:
                     batch_text_combined = "\n\n".join(batch_raw_texts)
+                    has_official_ans_flag = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
+
                     prompt_stage_1 = f"""
-                    🚨【範例過濾極度警告】🚨：
-                    - 本 PDF 的第一頁（或前幾頁）通常包含「作答範例」或「作答注意事項」。
-                    - **【嚴禁】** 擷取範例中的題目（如：範例第 1 題為單選題...）。
-                    - 你的擷取任務必須從真正的考題開始（通常在說明的橫線之後，或從第 1 題真正出現的地方開始）。
-                    - 確保 `question_number` 1 是考卷真正的第 1 題，而非範例題。
+                    🚨【無解答試卷與解答頁過濾極度警告】🚨：
+                    當前試卷官方解答狀況：{'【有官方解答】' if has_official_ans_flag else '【無官方解答（學校段考/定期考）】'}。
+                    1. **【解答頁/答案卷過濾】**：若本 PDF 的最後幾頁為「答案卷」、「手寫解答格」或「解答對照表」（頁面帶有班級、座號、得分欄位或 O/X 表格），**【絕對禁止】** 將解答頁當作試題擷取！只擷取真正的題目頁面。
+                    2. **【範例過濾】**：若第一頁有「作答注意事項」或「範例」，切勿擷取範例題。
+
+                    🚨【是非題 (True/False) 標準化轉單選題剛性規則】🚨：
+                    若題目為「是非題」（例如：1. $sin 26^\circ = cos 64^\circ$）：
+                    - **【題型】**：必須將 `question_type` 強制設為 `"單選題"`。
+                    - **【選項】**：因為原題未印出選項，你**必須自動為其生成兩個標準選項**：
+                      `options`: [
+                          {{"key": "A", "value": "正確 (○)"}},
+                          {{"key": "B", "value": "錯誤 (✕)"}}
+                      ]
+                    - **【答案對應】**：若官方解答為 `O` 或 `○`，`answer` 填 `"A"`（或 `"O"`）；若官方解答為 `X` 或 `✕`，`answer` 填 `"B"`（或 `"X"`）。
 
                     🚨【實體考題校驗規則】🚨：
                     1. 你的任務是擷取「正式試題」。
@@ -2418,6 +2436,9 @@ class ExamParser:
                         q_data['question_page_image_paths'] = q_image_paths
                         q_data['answer_page_image_paths'] = a_image_paths
                         q_data['rubric_page_image_paths'] = rubric_image_paths
+                        # 標註本題是否有官方答案與學校名稱
+                        q_data['has_official_answer'] = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
+                        q_data['school_name'] = school_name if exam_type == "SCHOOL" else ""
 
                         options = q_data.get('options', [])
                         is_alpha = any(str(opt.get('key', '')).isalpha() for opt in options)
@@ -3083,7 +3104,12 @@ class ExamParser:
                     if q_text_prompt.strip() in ["", "______", "___"]:
                         q_text_prompt = f"【定位引導】：請針對 `shared_context` 中編號為 [{q_data['question_number']}] 的空格進行前後文邏輯與語意銜接分析，求出最適合填入第 [{q_data['question_number']}] 空格的正確選項。"
                     
-                    item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：【{q_data['answer']}】\n"
+                    has_off_ans = q_data.get('has_official_answer', True)
+                    ans_label = f"【{q_data['answer']}】" if has_off_ans else "【無官方解答（請由你嚴謹推導並填入正確答案）】"
+                    
+                    item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n是否有官方解答：{has_off_ans}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：{ans_label}\n"
+                    if not has_off_ans:
+                        item_desc += "⚠️【無官方答案特別提醒】：本試卷屬於學校定期考/段考，無官方解答。請務必在 `detailed_solution` 與 `options_analysis` 中寫出最嚴謹的推導，並將求得的最終答案填入 `answer` 欄位中！\n"
                     
                     # 🚨【自動幾何圖解與多圖精確嵌入規範】🚨
                     safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
@@ -3226,26 +3252,31 @@ class ExamParser:
                                     derived_correct_keys.append(opt.get("key", "").strip())
                                     
                             derived_ans = "".join(sorted(derived_correct_keys))
+                            
+                            # 💡 核心補件：若本試卷無官方解答（學校段考），自動將 AI 推導出的答案填入 answer 欄位中
+                            if not q_data.get('has_official_answer', True) and derived_ans:
+                                q_data['answer'] = derived_ans
+                                logging.info(f"💡 [無官方解答自動填補] 題號 {q_data['question_number']} 已根據 AI 推導自動寫入答案: '{derived_ans}'")
+
                             official_ans = str(q_data.get('answer', '')).strip()
                             
                             # 雙向清理格式（去除所有逗號與空格），確保多選題 '3,4' 與 '34' 等價比對
                             derived_clean = derived_ans.replace(",", "").replace(" ", "")
                             official_clean = official_ans.replace(",", "").replace(" ", "")
                             
-                            # 🚨 [大防禦機制修補]：
-                            # 1. 正常情況下，若推導答案與官方答案不符，觸發衝突。
-                            # 2. 空值/無解防禦：若該題為單選題，但 AI 的選項分析中竟然「沒有推導出任何一個正確選項」（derived_clean 為空），這在邏輯上本身就是嚴重漏洞，必須直接強制攔截並重試/仲裁！
-                            has_conflict = False
-                            if q_data.get("question_type") == "單選題" and (not derived_clean or len(derived_clean) != 1):
-                                has_conflict = True
-                            elif derived_clean != official_clean:
-                                has_conflict = True
-                                
-                            if has_conflict and official_clean:
-                                # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
-                                valid_batch[idx]["_discrepancy_detected"] = True
-                                valid_batch[idx]["_derived_ans"] = derived_ans if derived_ans else "（未順利推導出唯一正確選項）"
-                                logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
+                            # 🚨 [大防禦機制修補]：只有在「有官方解答」的情況下才進行學術衝突攔截
+                            if q_data.get('has_official_answer', True):
+                                has_conflict = False
+                                if q_data.get("question_type") == "單選題" and (not derived_clean or len(derived_clean) != 1):
+                                    has_conflict = True
+                                elif derived_clean != official_clean:
+                                    has_conflict = True
+                                    
+                                if has_conflict and official_clean:
+                                    # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
+                                    valid_batch[idx]["_discrepancy_detected"] = True
+                                    valid_batch[idx]["_derived_ans"] = derived_ans if derived_ans else "（未順利推導出唯一正確選項）"
+                                    logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
                                 
                     # 4. 執行原有的 Markdown 格式化轉換
                     # 🚨 [防禦性機制 - 提案二：選填題/非選題格式自動化預校驗器]
@@ -3266,7 +3297,8 @@ class ExamParser:
                             derived_clean = derived_ans.replace(",", "").replace(" ", "")
                             official_clean = official_ans.replace(",", "").replace(" ", "")
                             
-                            if derived_clean and official_clean and derived_clean != official_clean:
+                            # 若有官方答案才進行對照衝突檢查
+                            if q_data.get('has_official_answer', True) and derived_clean and official_clean and derived_clean != official_clean:
                                 # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
                                 valid_batch[idx]["_discrepancy_detected"] = True
                                 valid_batch[idx]["_derived_ans"] = derived_ans
@@ -3891,10 +3923,10 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         "社會": ["社會", "社會科", "社會考科"]
     }
 
-    def parse_metadata(filename_clean: str) -> dict:
+    def parse_metadata(filename_clean: str, rel_dir_path: str = "") -> dict:
         # 0. 排除「英聽/聽力」以及純「解答更正/級距五標」雜訊
         if any(k in filename_clean for k in ["英聽", "聽力", "解答更正", "更正表", "級距", "五標", "統計圖", "統計表"]):
-            return {"year": "未知年份", "exam_type": "IGNORE", "mock_tag": "", "subject": "未知科目", "role": "ignore"}
+            return {"year": "未知年份", "exam_type": "IGNORE", "mock_tag": "", "school_name": "", "subject": "未知科目", "role": "ignore"}
 
         # 1. 提取學年度 (例如 101學年度, 114學年度, 113年, 108年, 9501, 114E7)
         year_match = re.search(r'(\d{2,3})(?:學年度|年|E\d+|_|\b)', filename_clean)
@@ -3904,25 +3936,42 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             if 80 <= year_num <= 120:  # 符合民國 80~120 年區間
                 year = f"{year_num}學年度"
 
-        # 2. 判斷考試類型與模擬考標籤 (mock_tag)
+        # 2. 智慧提取學校名稱 (過濾掉根目錄名稱，抓取真正的學校子資料夾)
+        school_name = ""
+        if rel_dir_path and rel_dir_path != ".":
+            dir_parts = [p for p in rel_dir_path.replace("\\", "/").split("/") if p and p != "." and p not in ["school_exam_papers_only", "ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only"]]
+            if dir_parts:
+                school_name = dir_parts[0]  # 第一層學校目錄名稱（如：建國中學）
+
+        if not school_name:
+            sch_match = re.search(r'([\u4e00-\u9fa5]{2,10}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', filename_clean)
+            if sch_match:
+                school_name = sch_match.group(1)
+
+        # 3. 判斷考試類型與標籤 (mock_tag)
         exam_type = "MOCK"
         mock_tag = ""
         
         is_ast = any(k in filename_clean for k in ["指考", "指定科目", "分科"])
         is_gsat = any(k in filename_clean for k in ["學測", "學科能力"])
+        is_school = "school_exam_papers_only" in rel_dir_path or any(k in filename_clean for k in ["定期考", "段考", "期中考", "期末考", "月考", "定期次考"])
         is_mock_kw = any(k in filename_clean for k in ["模擬", "模考", "全模", "北模", "中模", "南模", "竹模", "全區", "中區", "台中區", "台北區", "北區", "南區", "詮達", "全華", "翰林", "南一", "文昌", "漢樺", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"])
 
         if is_ast and not is_mock_kw:
             exam_type = "AST"
         elif is_gsat and not is_mock_kw:
             exam_type = "GSAT"
+        elif is_school and not is_mock_kw:
+            exam_type = "SCHOOL"
+            school_match = re.search(r'((?:第[一二三四五六七八九十0-9]+次?)?(?:定期考|段考|期中考|期末考|月考))', filename_clean)
+            if school_match:
+                mock_tag = f"_{school_match.group(1)}"
+            else:
+                mock_tag = "_定期考"
         else:
             exam_type = "MOCK"
-            # 抓取機構/區域/版本標籤
             org_match = re.search(r'(北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|台北區|臺北區|北區|南區|北北基|新北基|高雄區|翰林|南一|文昌|漢樺|詮達|全華)', filename_clean)
             org_str = org_match.group(1) if org_match else ""
-
-            # 抓取次數/代碼標籤 (支援「第七次」、「第二次」、「114E7」、「第1次」、「E4」等)
             times_match = re.search(r'(第[一二三四五六七八九十0-9]+次|\d+模|E\d+|第[0-9]+次)', filename_clean)
             times_str = times_match.group(1) if times_match else ""
 
@@ -3932,14 +3981,14 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             else:
                 mock_tag = "_模擬考"
 
-        # 3. 判斷科目
+        # 4. 判斷科目
         subject = "未知科目"
         for official_name, aliases in SUBJECT_MAPPING.items():
             if any(alias in filename_clean for alias in aliases):
                 subject = official_name
                 break
                 
-        # 4. 判斷文件角色
+        # 5. 判斷文件角色
         combined_keywords = ["與詳解", "與解析", "含解析", "含詳解", "含解答", "+解析", "&解答", "暨詳解", "暨答案", "題目+解析", "試題與解析", "試題加詳解", "試題暨詳解", "考科暨答案"]
         has_combined_kw = any(k in filename_clean for k in combined_keywords)
 
@@ -3959,6 +4008,7 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             "year": year,
             "exam_type": exam_type,
             "mock_tag": mock_tag,
+            "school_name": school_name,
             "subject": subject,
             "role": role
         }
@@ -3972,16 +4022,17 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             if not pdf_files:
                 continue
             
-            # 依據 (Year, Exam Type, Mock Tag, Subject) 進行精確四元組分組
+            rel_dir_path = os.path.relpath(root, base_dir) if base_dir in root else ""
+            
+            # 依據 (Year, Exam Type, Mock Tag, School Name, Subject) 進行精確五元組分組
             task_groups = {}
-            global_answer_files = [] # 收集該資料夾下的全科/組別共用解答檔 (如: 自然組詳解.pdf, 全科解答.pdf)
+            global_answer_files = []
 
             for f in pdf_files:
-                meta = parse_metadata(f)
+                meta = parse_metadata(f, rel_dir_path=os.path.join(base_dir, rel_dir_path) if rel_dir_path != "." else base_dir)
                 if meta["role"] == "ignore" or meta["year"] == "未知年份":
                     continue
                 
-                # 紀錄潛在的全科/組別共用解答檔
                 if meta["role"] == "answer" and meta["subject"] == "未知科目":
                     global_answer_files.append(os.path.join(root, f))
                     continue
@@ -3989,13 +4040,12 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 if meta["subject"] == "未知科目":
                     continue
 
-                key = (meta["year"], meta["exam_type"], meta["mock_tag"], meta["subject"])
+                key = (meta["year"], meta["exam_type"], meta["mock_tag"], meta["school_name"], meta["subject"])
                 if key not in task_groups:
                     task_groups[key] = []
                 task_groups[key].append((f, meta))
             
             for key, grouped_files in task_groups.items():
-                # 尋找題目檔 (包含獨立題目檔與二合一 combined 檔)
                 q_candidates = [filename for filename, meta in grouped_files if meta["role"] in ["question", "combined"]]
                 if not q_candidates:
                     continue
@@ -4006,10 +4056,9 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 if a_candidates:
                     final_a_file = os.path.join(root, a_candidates[0])
                 elif any(meta["role"] == "combined" for filename, meta in grouped_files if filename == final_q_file):
-                    final_a_file = os.path.join(root, final_q_file)  # 二合一檔！
+                    final_a_file = os.path.join(root, final_q_file)
                 elif global_answer_files:
-                    # 智慧比對組別（例如：物理題配對 自然組詳解.pdf）
-                    subj = key[3]
+                    subj = key[4]
                     matched_global = None
                     for gf in global_answer_files:
                         gf_base = os.path.basename(gf)
@@ -4020,6 +4069,10 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     if not matched_global:
                         matched_global = global_answer_files[0]
                     final_a_file = matched_global
+                elif key[1] == "SCHOOL":
+                    # 學校段考保底機制：答案常直接附在題目 PDF 的最後一頁（如北一女試題）
+                    # 將題目 PDF 本身代入解答欄位，由解答 OCR 自動嘗試檢索尾頁解答表
+                    final_a_file = os.path.join(root, final_q_file)
                 else:
                     final_a_file = None
                 
@@ -4030,7 +4083,8 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     "year": key[0],
                     "exam_type": key[1],
                     "mock_tag": key[2],
-                    "subject": key[3],
+                    "school_name": key[3],
+                    "subject": key[4],
                     "q_pdf": os.path.join(root, final_q_file),
                     "a_pdf": final_a_file,
                     "rubric_pdf": final_rubric_file
@@ -4068,8 +4122,8 @@ if __name__ == "__main__":
     manager = GeminiFreeTierManager(api_keys=API_KEYS, models=MODELS)
     parser = ExamParser(ai_manager=manager)
 
-    # 1. 指定你的題庫根目錄
-    TARGET_DIRECTORIES = ["ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only"]
+    # 1. 指定你的題庫根目錄（包含學校定期考 school_exam_papers_only）
+    TARGET_DIRECTORIES = ["ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only", "school_exam_papers_only"]
     output_directory = "./exam_database_output"
     
     # 2. 自動尋找所有要處理的試卷
@@ -4091,7 +4145,8 @@ if __name__ == "__main__":
                 q_pdf=task["q_pdf"],
                 a_pdf=task["a_pdf"],
                 rubric_pdf=task["rubric_pdf"],
-                output_dir=output_directory
+                output_dir=output_directory,
+                school_name=task.get("school_name", "")
             ))
             
         # 等待所有考卷處理完畢
