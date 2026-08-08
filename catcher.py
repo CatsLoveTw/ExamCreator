@@ -185,6 +185,48 @@ def normalize_and_merge_subject_taxonomy(taxonomy: dict) -> dict:
         
     return new_taxonomy
 
+def sanitize_latex_syntax(text: str) -> str:
+    """具備區塊保護的高階 LaTeX 語法修復器（防止將 $$ 內部拆碎）"""
+    if not isinstance(text, str) or not text:
+        return text
+
+    # 1. 第一步：先保護並清洗所有的 $$ ... $$ 大公式區塊
+    def clean_display_block(m):
+        content = m.group(1)
+        # 強制移除大公式內部的所有 $ 符號，防止 Toggle 錯亂
+        content = content.replace('$', '')
+        # 修正矩陣與 cases 環境內的單斜線換行
+        content = re.sub(r'(\\(?:begin|end)\{(?:cases|pmatrix|matrix|bmatrix)\}.*?)', lambda x: x.group(1), content)
+        content = re.sub(r'(?<=[\w\)\}])\s*\\\s+(?=[\w\(\{])', r' \\\\ ', content)
+        return f"$${content.strip()}$$"
+
+    text = re.sub(r'\$\$(.*?)\$\$', clean_display_block, text, flags=re.DOTALL)
+
+    # 2. 第二步：縫合碎裂的 $...$ 區塊（例如：$\frac{a}{b}$ = $\frac{c}{d}$ \implies ...）
+    text = re.sub(r'\$([^$]+)\$\s*([=\+\-\*\/\:\implies\le\ge\rightarrow]+|\\[a-zA-Z]+)\s*\$([^$]+)\$', r'$\1 \2 \3$', text)
+
+    # 3. 第三步：只對「完全不在 $ 或 $$ 內部」的裸露關鍵字補 $，且忽略已在公式內的內容
+    def wrap_bare_latex(m):
+        cmd = m.group(0)
+        return f" ${cmd}$ "
+
+    bare_pattern = r'(?<![\$\w\\])(\\(?:Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|alpha|beta|gamma|delta|epsilon|theta|iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|phi|chi|psi|omega|frac\{[^}]+\}\{[^}]+\}|sqrt\{[^}]+\}))(?![\$\w])'
+
+    # 分割出公式內與公式外
+    parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
+    for i in range(len(parts)):
+        # 奇數索引是公式內部 ($...$ 或 $$...$$)，偶數索引是純文字區塊
+        if i % 2 == 0:
+            parts[i] = re.sub(bare_pattern, wrap_bare_latex, parts[i])
+            # 將偶數區塊內的 \textbf{...} 轉為 Markdown **...**
+            parts[i] = re.sub(r'\\textbf\{([^}]+)\}', r'**\1**', parts[i])
+
+    text = "".join(parts)
+
+    # 4. 清除重複空格與無效空符號
+    text = re.sub(r' +', ' ', text)
+    return text.strip()
+
 def fix_latex_text_macros(text: str) -> str:
     """
     偵測 text 中的 \\text{...} 結構（支援嵌套大括號 {}），
@@ -917,17 +959,37 @@ class GeminiFreeTierManager:
     def repair_latex_control_chars(self, text: str) -> str:
         if not isinstance(text, str):
             return text
-        # 還原 LaTeX 安全預留字串
+        
+        # 1. 還原 LaTeX 安全預留字串
         text = text.replace("__LTXS__", "\\")
-        # 🚨 核心修復：將 JSON 解析時被誤判為控制字元的 LaTeX 指令（如 \f, \r, \b, \t）還原為正常 LaTeX 反斜線
+        
+        # 2. 精確修復控制字元：避免將 \quad 變成 \tquad，或將 \beta 變成 \b eta
+        # 只有當控制字元後面接的是特定 LaTeX 關鍵字時才進行精確還原
         replacements = {
-            "\x0c": r"\f",  # 修正 \frac, \forall 被誤轉為 form feed (\x0c) 的問題
-            "\x0d": r"\r",  # 修正 \rightarrow, \right 被誤轉為 carriage return (\x0d) 的問題
-            "\x08": r"\b",  # 修正 \big, \beta 被誤轉為 backspace (\x08) 的問題
-            "\x09": r"\t",  # 修正 \text, \theta 被誤轉為 tab (\x09) 的問題
+            "\x0c": r"\f",  # Form Feed
+            "\x0d": r"\r",  # Carriage Return
+            "\x08": r"\b",  # Backspace
+            "\x09": r"\t",  # Tab
         }
         for char, replacement in replacements.items():
             text = text.replace(char, replacement)
+            
+        # 3. 修復因替換導致的粘連錯字 (如 \tquad -> \quad, \tcdot -> \cdot)
+        corrupted_fixes = {
+            r"\tquad": r"\quad",
+            r"\tqquad": r"\qquad",
+            r"\tcdot": r"\cdot",
+            r"\ttan": r"\tan",
+            r"\tsec": r"\sec",
+            r"\tpm": r"\pm",
+            r"\ttext": r"\text",
+            r"\tnet": r"\net",
+            r"\root{": r"\sqrt{",
+            r"\bx": r"bx",
+        }
+        for bad, good in corrupted_fixes.items():
+            text = text.replace(bad, good)
+            
         return text
 
     def repair_hallucinated_latex(self, text: str) -> str:
@@ -1046,16 +1108,20 @@ class GeminiFreeTierManager:
     def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
         with self.lock:
             msg = error_msg.lower()
-            is_rpm = any(k in msg for k in ["per minute", "perminute", "requests per minute", "rpm"])
-            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "free_tier_requests", "rpd"])
+            is_quota = any(k in msg for k in ["quota", "resource_exhausted", "free_tier", "limit_exceeded"])
+            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd"])
             
-            if is_rpd and not is_rpm:
+            if is_rpd or (is_quota and "day" in msg):
                 key.mark_rpd_exhausted()
-                logging.warning(f"[每日額度報銷] 金鑰 {key.api_key[:8]}... 已達每日上限 (RPD)，已轉移至背景冷卻。")
+                logging.warning(f"🚨 [RPD 每日上限] 金鑰 {key.api_key[:8]}... 已達每日總配額上限，轉入每日冷卻。")
+            elif is_quota:
+                # 觸發 TPM / Quota 限制：強制鎖定該金鑰 300 秒 (5分鐘)，切斷無意義的死循環
+                key.request_times.extend([time.time() + 240] * 20)
+                logging.warning(f"⏳ [TPM/配額深層鎖定] 金鑰 {key.api_key[:8]}... 觸發配額上限，進入 300 秒深層冷卻。")
             else:
-                # 429 RPM 冷卻時，大幅注入 12 個時間戳記，強制鎖定該金鑰 60 秒禁止發送
-                key.request_times.extend([time.time()] * 12)
-                logging.info(f"⏳ [RPM 強制鎖定] 金鑰 {key.api_key[:8]}... 觸發 429，進入 60 秒深層冷卻。")
+                # 普通 RPM 限流：鎖定 90 秒
+                key.request_times.extend([time.time() + 30] * 15)
+                logging.info(f"⏳ [RPM 短暫鎖定] 金鑰 {key.api_key[:8]}... 觸發 429 限流，進入 90 秒冷卻。")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=5, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
@@ -1090,12 +1156,12 @@ class GeminiFreeTierManager:
                     thinking_config = types.ThinkingConfig(thinking_level="MINIMAL")
                 
             try:
-                # 🚨 核心修改：引入隨機平滑抖動（Jitter）
+                # 🚨 核心修改：加大請求平滑間隔 (8~15秒)，有效避開 Google TPM 限流峰值
                 import random
-                time.sleep(random.uniform(1.8, 6))
+                time.sleep(random.uniform(8.0, 15.0))
 
                 desc_str = f" {task_desc}" if task_desc else ""
-                print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API，思考: {thinking_config.thinking_level if thinking_config else '關閉'} / 溫度: {temperature} (第 {attempts + 1} 次嘗試)...", flush=True)
+                print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
                 # 每次執行時顯示金鑰狀態
                 self.print_keys_status()
 
@@ -2075,9 +2141,13 @@ class ExamParser:
         return cleaned_questions
 
     def process_exam_paper(self, subject: str, year: str, exam_type: str, mock_tag: str, q_pdf: str, a_pdf: Optional[str], rubric_pdf: Optional[str], output_dir: str, skip_cover: bool = False, school_name: str = ""):
+        # 🚨 函數最頂層初始化審查紀錄變數與鎖，確保最後收尾存檔時 100% 可存取
+        validation_records = []
+        val_log_lock = threading.Lock()
+
         safe_year = safe_filename(year)
         safe_subject = safe_filename(subject)
-        paper_tag = f"[{year} {subject}]" # 🚨 新增：本份考卷的唯一日誌與 API 派發識別標籤
+        paper_tag = f"[{year} {subject}]"
 
         # 💡 將題號對位邏輯拉到最頂端，供後續所有解析對齊模組共用
         def is_precise_match(q_data: dict, r_k: str) -> bool:
@@ -2192,6 +2262,9 @@ class ExamParser:
         subject_rubric = SUBJECT_DIFFICULTY_RUBRICS.get(normalized_subject, GENERAL_DIFFICULTY_RUBRIC)
         # --------------------------------------------------------------------------------------------------
 
+        # 🚨 全局初始化審查日誌與執行緒鎖（確保快取命中時依然能正常存取）
+        validation_records = []
+        val_log_lock = threading.Lock()
         all_extracted_questions = []
 
         # 🆕 1. 優先檢查是否有第一階段題目快取檔
@@ -3117,8 +3190,15 @@ class ExamParser:
         all_final_questions = []
         queue_lock = threading.Lock() # 保護寫入共用陣列的鎖
 
-        # 💡 將已加載的詳解建立成對位索引表
-        partial_map = {q.get("question_number"): q for q in loaded_partial_questions if q.get("detailed_solution")}
+        # 🚨 定義有效詳解檢查器：只要包含「超時」、「失敗」、「系統提示」等字樣，一律判定為無效！
+        def is_valid_solution(sol_text: str) -> bool:
+            if not sol_text or not isinstance(sol_text, str) or len(sol_text.strip()) < 15:
+                return False
+            invalid_keywords = ["超時或失敗", "系統提示", "引發系統內部", "無法生成", "未完成", "崩潰"]
+            return not any(kw in sol_text for kw in invalid_keywords)
+
+        # 💡 將已加載的【有效詳解】建立成對位索引表（自動剔除先前超時或失敗的無效詳解，強制重跑）
+        partial_map = {q.get("question_number"): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
         task_queue = []
         for q in all_extracted_questions:
@@ -3265,8 +3345,7 @@ class ExamParser:
                     for item in failed_batch:
                         item["retry_count"] += 1
                         if item["retry_count"] >= max_single_attempts:
-                            item["q_data"]["detailed_solution"] = "詳解批次生成超時或失敗。"
-                            with queue_lock: all_final_questions.append(item["q_data"])
+                            logging.warning(f"⚠️ 題號 {item['q_data'].get('question_number')} 已達最大重試次數，本次不寫入資料庫，保留至下次自動重跑。")
                         else:
                             retry_items.append(item)
 
@@ -3436,9 +3515,18 @@ class ExamParser:
                                         
                                         if res and res.get('need_diagram') and res.get('python_code'):
                                             py_code = res['python_code'].strip()
-                                            # 🚨 清理 Markdown 程式碼區塊標記與還原 \n 換行符
-                                            py_code = py_code.replace("```python", "").replace("```", "").strip()
-                                            py_code = py_code.replace("\\n", "\n").replace("\\t", "\t")
+                                            # 🚨 清理 Markdown 程式碼區塊標記
+                                            py_code = re.sub(r'^```python\s*', '', py_code)
+                                            py_code = re.sub(r'\s*```$', '', py_code).strip()
+                                            
+                                            # 智慧修復：若整段程式碼被壓縮在單一行且包含 '\n' 字面量，自動展平為多行
+                                            py_code = py_code.replace('\\n', '\n').replace('\\t', '\t')
+                                            py_code = py_code.replace('\r\n', '\n')
+
+                                            # 再次確保 Markdown 標記被乾淨剔除
+                                            py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
+                                            py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
+                                            py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
                                             
                                             with open(script_path, "w", encoding="utf-8") as f:
                                                 f.write(py_code)
@@ -3501,9 +3589,18 @@ class ExamParser:
                                     
                                     if res and res.get('need_diagram') and res.get('python_code'):
                                         py_code = res['python_code'].strip()
-                                        # 🚨 清理 Markdown 程式碼區塊標記與還原 \n 換行符
-                                        py_code = py_code.replace("```python", "").replace("```", "").strip()
-                                        py_code = py_code.replace("\\n", "\n").replace("\\t", "\t")
+                                        # 🚨 清理 Markdown 程式碼區塊標記
+                                        py_code = re.sub(r'^```python\s*', '', py_code)
+                                        py_code = re.sub(r'\s*```$', '', py_code).strip()
+                                        
+                                        # 智慧修復：若整段程式碼被壓縮在單一行且包含 '\n' 字面量，自動展平為多行
+                                        py_code = py_code.replace('\\n', '\n').replace('\\t', '\t')
+                                        py_code = py_code.replace('\r\n', '\n')
+
+                                        # 再次確保 Markdown 標記被乾淨剔除
+                                        py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
+                                        py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
+                                        py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
                                         
                                         with open(script_path, "w", encoding="utf-8") as f:
                                             f.write(py_code)
@@ -3716,11 +3813,11 @@ class ExamParser:
                                     )
 
                                     if recheck_dict and recheck_dict.get('is_confident') is True:
-                                        # 更新數據
-                                        q_data['shared_context'] = recheck_dict.get('corrected_shared_context', q_data['shared_context']) # 🆕 新增此行
-                                        q_data['question_text'] = recheck_dict.get('corrected_question_text', q_data['question_text'])
-                                        q_data['options'] = recheck_dict.get('corrected_options', q_data['options'])
-                                        q_data['answer'] = recheck_dict.get('corrected_answer', q_data['answer'])
+                                        # 更新數據（全防禦取值，防止 KeyError 崩潰）
+                                        q_data['shared_context'] = recheck_dict.get('corrected_shared_context', q_data.get('shared_context', ''))
+                                        q_data['question_text'] = recheck_dict.get('corrected_question_text', q_data.get('question_text', ''))
+                                        q_data['options'] = recheck_dict.get('corrected_options', q_data.get('options', []))
+                                        q_data['answer'] = recheck_dict.get('corrected_answer', q_data.get('answer', ''))
 
                                         # 處理補裁切
                                         if recheck_dict.get('found_new_images') and recheck_dict.get('new_image_bboxes'):
@@ -3792,8 +3889,7 @@ class ExamParser:
                                 retry_items.append(item)
                                 logging.warning(f"🔴 {paper_tag} 題號：{q_data['question_number']} 審查退回：{item['critique']}")
                             else:
-                                q_data['detailed_solution'] = "\n\n> **⚠️ [系統提示]：本題偵測到潛在瑕疵。**\n\n" + q_data.get('detailed_solution', '')
-                                with queue_lock: all_final_questions.append(q_data)
+                                logging.warning(f"⚠️ 題號 {q_data.get('question_number')} 審查未通過且已達重試上限，本次不寫入資料庫，保留至下次自動重跑。")
                     
                     return retry_items, new_batch_size
                 except RPDExhaustedException as ree:
@@ -3900,19 +3996,23 @@ class ExamParser:
             if isinstance(obj, dict):
                 return {k: clean_paths(v) for k, v in obj.items()}
             if isinstance(obj, str):
-                # 統一 Windows 與網頁斜線路徑格式
                 if "./" in obj or "gsat_" in obj or "ast_" in obj:
                     obj = obj.replace("\\", "/")
-                # 執行全局 LaTeX 符號強制標準化
+                # 1. 執行原本的分隔符號轉換
                 obj = normalize_latex_delimiters(obj)
+                # 2. 🚨 執行新增的高階 LaTeX 語法錯誤清洗
+                obj = sanitize_latex_syntax(obj)
             return obj
 
-        # 💡 [安全保存與暫存判定]
-        # 若已完成的題數小於原卷解構出的所有題目數，代表因 RPD 耗盡而中斷
-        is_partial = len(all_final_questions) < len(all_extracted_questions)
+        # 💡 [安全保存與品質嚴格驗證]
+        # 1. 嚴格過濾：只保留真正具備有效詳解的題目
+        valid_solved_questions = [q for q in all_final_questions if is_valid_solution(q.get("detailed_solution"))]
+        
+        # 2. 判讀全卷是否 100% 成功完成
+        is_partial = len(valid_solved_questions) < len(all_extracted_questions)
 
-        all_final_questions = clean_paths(all_final_questions)
-        for q in all_final_questions:
+        valid_solved_questions = clean_paths(valid_solved_questions)
+        for q in valid_solved_questions:
             q["academic_year"] = standard_academic_year
             q["exam_source"] = standard_exam_source
             if '_cropped_pil_images' in q:
@@ -3922,18 +4022,16 @@ class ExamParser:
                 del q['_cropped_pil_images']
 
         if is_partial:
-            # 寫入未完成的暫存檔
+            # 只要還有任何一題失敗/超時，絕對不產生最終 database，保留 raw 暫存等待下次重跑！
             with open(partial_json_path, "w", encoding="utf-8") as f:
-                json.dump(all_final_questions, f, ensure_ascii=False, indent=4)
-            logging.warning(f"💾 [中斷點保存] [{year} {subject}] 解析未完整。已成功將當前完成的 {len(all_final_questions)} 題詳解寫入暫存檔：{partial_json_path}")
-            raise RPDExhaustedException("因 RPD 每日限額耗盡，任務被安全中斷並保存。")
+                json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
+            logging.warning(f"💾 [未全數完成 - 自動留存 Raw] [{year} {subject}] 全卷共 {len(all_extracted_questions)} 題，已成功完成 {len(valid_solved_questions)} 題高品質詳解。失敗/超時之題目已保留於 Raw 快取中，下次執行將自動補跑！")
         else:
-            # 完整解析成功，寫入正式資料庫
+            # 全卷 100% 每題都有完美詳解，才正式寫入資料庫並清除 Raw 快取
             with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(all_final_questions, f, ensure_ascii=False, indent=4)
-            logging.info(f"🎉 [{year} {subject}] 完整解析成功並儲存：{json_path}")
+                json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
+            logging.info(f"🎉 [{year} {subject}] 全部 {len(valid_solved_questions)} 題皆已 100% 高品質完成解析並儲存：{json_path}")
             
-            # 正式完成後，自動將先前的暫存檔清除，避免殘留
             for tmp_path in [partial_json_path, raw_extracted_json_path]:
                 if os.path.exists(tmp_path):
                     try:
