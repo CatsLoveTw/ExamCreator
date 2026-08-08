@@ -9,6 +9,7 @@ on:
 jobs:
   run-parser:
     runs-on: ubuntu-latest
+    timeout-minutes: 350 # Job 層級安全超時保護 (5.8小時)
 
     steps:
       - name: Checkout code
@@ -102,6 +103,8 @@ jobs:
           cp ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
 
       - name: Run parser script
+        timeout-minutes: 320 # 給予腳本最多 5.3 小時，超時將主動切斷並跳至下一步上傳進度
+        continue-on-error: true
         env:
             GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python catcher.py

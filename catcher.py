@@ -24,6 +24,13 @@ import datetime
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+GLOBAL_START_TIME = time.time()
+MAX_EXECUTION_TIME_SECONDS = 5.0 * 3600  # 5 小時安全時間上限，保證在 6h GHA 砍掉前優雅退出
+
+class TimeoutSafetyException(Exception):
+    """自定義異常：當執行時間接近 GitHub Actions 上限時觸發安全保存與退出"""
+    pass
+
 class RPDExhaustedException(Exception):
     """自定義異常：當所有可用 API 金鑰的每日限制 (RPD) 皆耗盡時觸發"""
     pass
@@ -47,10 +54,7 @@ except ImportError:
         '标': '標', '准': '準', '图': '圖', '形': '形', '对': '對', '称': '稱', '轴': '軸', '与': '與',
         '配': '配', '方': '方', '法': '法', '值': '值', '几': '幾', '何': '何', '特': '特', '东': '東',
         '征': '徵', '微': '微', '积': '積', '分': '分', '定': '定', '不': '不', '代': '代', '化': '化',
-        '简': '簡', '两': '兩', '个': '個', '实': '實', '根': '根', '筛': '篩', '单': '單', '西': '西',
-        '峰': '峰', '一': '一', '维': '維', '据': '據', '析': '析', '相': '相', '次': '次', '累': '累',
-        '加': '加', '判': '判', '读': '讀', '均': '均', '位': '位', '众': '眾', '散': '散', '布': '布',
-        '强': '強', '弱': '弱', '联': '聯', '過': '過', '濾': '濾', '處': '處', '理': '理', '資': '資',
+        '简': '簡', '两': '兩', '个': '個', '实': '實', '根': '根', '强': '強', '弱': '弱', '联': '聯', '過': '過', '濾': '濾', '處': '處', '理': '理', '資': '資',
         '源': '源', '問': '問', '題': '題', '機': '機', '率': '率', '隨': '隨', '變': '變', '數': '數',
         '期': '期', '望': '望', '之': '之', '物': '物', '意': '意', '義': '義', '科': '科', '歷': '歷',
         '史': '史', '社': '社', '會': '會', '國': '國', '寫': '寫', '項': '項', '式': '式', '論': '論',
@@ -61,7 +65,7 @@ except ImportError:
         '态': '態', '发': '發', '光': '光', '离': '離', '子': '子', '阴': '陰', '阳': '陽', '键': '鍵',
         '构': '構', '结': '結', '类': '類', '种': '種', '网': '網', '络': '絡', '环': '環', '境': '境',
         '概': '機', '屏': '螢', '幕': '幕', '内': '內', '存': '存', '算': '算', '法': '法', '矢': '向',
-        '标': '純', '宏': '巨', '观': '觀'
+        '标': '純', '宏': '巨', '观': '觀', '确': '確', '实': '實'
     }
     def s2t(text: str) -> str:
         if not isinstance(text, str):
@@ -89,7 +93,15 @@ def clean_ocr_answer_format(ans_str: str) -> str:
     import re
     ans_str = str(ans_str).strip()
     
-    # 🚨 核心修正：若包含大考官方的「無答案」、「送分」、「全體給分」、「不計分」等字樣，完整保留並標準化，避免被後續的正則剝除成無意義的殘留數字
+    # 1. 剝除包裹的括號，例如 (3) -> 3, (1) -> 1, （A） -> A
+    ans_str = re.sub(r'^[（\(]([A-Ga-g0-9,]+)[）\)]$', r'\1', ans_str)
+    
+    # 2. 若出現 "6（即選項 (3)）" 等說明字眼，優先提取括號內或最後的正確選項數字/字母
+    opt_match = re.search(r'[（\(]([A-Ga-g1-9])[）\)]', ans_str)
+    if opt_match and "選項" in ans_str:
+        return opt_match.group(1).upper()
+        
+    # 🚨 核心修正：若包含大考官方的「無答案」、「送分」、「全體給分」、「不計分」等字樣，完整保留並標準化
     if any(k in ans_str for k in ["無答案", "全體給分", "送分", "不計分"]):
         return "無答案（全體給分）"
         
@@ -243,20 +255,40 @@ def recursive_fix_latex(obj):
 
 def pre_validate_format(q_data: dict, sol_data: dict):
     """
-    [防禦性機制 - 提案二：選填題/非選題格式自動化預校驗器]
+    [防禦性機制 - 提案二：選填題/非選題格式自動化預校驗器 + 數字選項代號自動修復]
     """
-    # 0. 自動就地修正 LaTeX 中 \\text{} 包裹數學公式等瑕疵，避免觸發 validator 的審查退回
     fixed_sol = recursive_fix_latex(sol_data)
     if isinstance(fixed_sol, dict):
         for k, v in fixed_sol.items():
             sol_data[k] = v
 
-    # 1. 修正：當目前題目並非「選擇與非選並存」的混合題，且為非選擇題型時，清空 options_analysis 避免格式混淆
+    # 1. 選擇題答案數字 (1,2,3,4,5) 自動映射為英文字母 (A,B,C,D,E)
+    opts = q_data.get("options", [])
+    if opts and q_data.get("question_type") in ["單選題", "多選題"]:
+        opt_keys = [str(o.get("key", "")).strip() for o in opts]
+        ans_str = str(q_data.get("answer", "")).strip()
+        
+        # 若選項 key 為 A,B,C,D,E 但答案寫 1,2,3,4,5 或 3,4
+        if any(k.isalpha() for k in opt_keys) and any(c.isdigit() for c in ans_str):
+            num_to_alpha = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E", "6": "F", "7": "G"}
+            converted_parts = []
+            for char in ans_str.replace(" ", "").split(","):
+                for sub_char in char:
+                    if sub_char in num_to_alpha:
+                        converted_parts.append(num_to_alpha[sub_char])
+                    elif sub_char.isalpha():
+                        converted_parts.append(sub_char.upper())
+            if converted_parts:
+                new_ans = ",".join(sorted(list(dict.fromkeys(converted_parts))))
+                q_data["answer"] = new_ans
+                logging.info(f"🔄 [答案 Key 對齊] 題號 {q_data.get('question_number')} 答案已自動從 '{ans_str}' 修復對齊為 '{new_ans}'")
+
+    # 2. 當目前題目並非「選擇與非選並存」的混合題，且為非選擇題型時，清空 options_analysis 避免格式混淆
     is_hybrid = len(q_data.get("options", [])) > 0 and len(q_data.get("scoring_criteria", "")) > 0
     if q_data.get("question_type") in ["選填題", "簡答題", "繪圖作圖題"] and not is_hybrid:
         sol_data["options_analysis"] = []
         
-    # 2. 自動修正選填題答案格式，若無半形逗號則依記挖空數量強制拆分
+    # 3. 自動修正選填題答案格式，若無半形逗號則依記挖空數量強制拆分
     if q_data.get("question_type") == "選填題" and "," not in str(q_data.get("answer", "")):
         raw_ans = str(q_data.get("answer", "")).strip()
         expected_count = q_data.get("_expected_blank_count", 0)
@@ -419,13 +451,15 @@ PROMPT_STAGE_2_MAIN = """
 
 【二、學科公式與 LaTeX 規範】
 - 🚨【極度重要：LaTeX 安全傳輸與反斜線轉義規範】🚨
-  為了防止 JSON 傳輸與解析時 LaTeX 的反斜線 `\\` 被損毀、遺失或誤判為 JSON 控制字元（如 \\t, \\f, \\n），**你必須在輸出所有 LaTeX 公式時，將所有 LaTeX 中的反斜線 `\\` 替換為特殊的預留安全標記 `__LTXS__`**！
+  為了防止 JSON 傳輸與解析時 LaTeX 的反斜線 `\\` 被損毀、遺失 or 誤判為 JSON 控制字元（如 \\t, \\f, \\n），你必須在輸出所有 LaTeX 公式時，將所有 LaTeX 中的反斜線 \\ 替換為特殊的預留安全標記 __LTXS__！
   - 例如：`\\frac{{1}}{{2}}` 必須寫成 `__LTXS__frac{{1}}{{2}}`。
   - `\\theta` 必須寫成 `__LTXS__theta`。
   - `\\rightarrow` 必須寫成 `__LTXS__rightarrow`。
   - `\\text{{...}}` 寫成 `__LTXS__text{{...}}`。
   - `\\begin{{matrix}}` 寫成 `__LTXS__begin{{matrix}}`。
-  - 🚨【絕對禁止】在公式中輸出任何真正的單反斜線 `\\`，一律且強制使用 `__LTXS__`！
+  - 🚨【絕對禁止】在公式中輸出 any 真正的單反斜線 `\\`，一律且強制使用 `__LTXS__`！
+- 🚨【極重要：Matplotlib 繪圖程式碼規範（防制語法崩潰）】🚨：
+  在任何生成的 Python 繪圖程式碼（如用於產生圖表的腳本）中，若字串、圖例（legend）或標籤（label）包含 any LaTeX 數學公式（如 `\\in`, `\\frac`），**必須將該字串聲明為 Python 原始字串（raw string）**，即在字串前加上 `r` 前綴（例如：`r'參數 $a \\in [-\\frac{{1}}{{2}}, 1]$ 之覆蓋區域'`），**絕對禁止**使用一般字串，否則會因反斜線轉義（如 `\\f` 變成換頁符）導致腳本語法崩潰或 Matplotlib 解析失敗！
 - 嚴格遵守標準 LaTeX 語法。
 - 🚨【指數與冪次 LaTeX 規範】：當表示指數函數、高次冪或含有多個字元的上標（如 2 的 x+1 次方，或 e 的 -x 次方）時，**必須**將整個指數/上標部分用 LaTeX 的大括號 `{{}}` 完整包裹，例如寫成 `$2^{{x+1}}$`、`$e^{{-x}}$`，**絕對禁止**寫成 `$2^x+1$` 或 `$2^-x$`（這會被渲染/解讀為 $2^x + 1$ 或 $2^- \\cdot x$，造成嚴重的學術邏輯與網頁渲染錯誤）。在非 LaTeX 純文字語境下，必須使用括號表示，如 `2^(x+1)`。
 - 🚨【化學式專屬指令】：所有化學反應式必須使用 LaTeX 格式。
@@ -1012,18 +1046,16 @@ class GeminiFreeTierManager:
     def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
         with self.lock:
             msg = error_msg.lower()
-            # 🚨 精確區分每分鐘頻率限制 (RPM) 與每日上限 (RPD)
             is_rpm = any(k in msg for k in ["per minute", "perminute", "requests per minute", "rpm"])
             is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "free_tier_requests", "rpd"])
             
-            # 只有在「明確包含每日限制」且「不是每分鐘限制」時，才判定為 RPD 耗盡
             if is_rpd and not is_rpm:
                 key.mark_rpd_exhausted()
                 logging.warning(f"[每日額度報銷] 金鑰 {key.api_key[:8]}... 已達每日上限 (RPD)，已轉移至背景冷卻。")
             else:
-                # 突發型 429 或每分鐘頻率限制 (RPM)，僅增加 60 秒冷卻懲罰，切勿誤殺金鑰！
-                key.request_times.extend([time.time()] * 3)
-                logging.info(f"⏳ [RPM 冷卻] 金鑰 {key.api_key[:8]}... 觸發每分鐘頻率限制 (429)，短暫進入背景冷卻。")
+                # 429 RPM 冷卻時，大幅注入 12 個時間戳記，強制鎖定該金鑰 60 秒禁止發送
+                key.request_times.extend([time.time()] * 12)
+                logging.info(f"⏳ [RPM 強制鎖定] 金鑰 {key.api_key[:8]}... 觸發 429，進入 60 秒深層冷卻。")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=5, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
@@ -1415,8 +1447,12 @@ def safe_filename(name: str) -> str:
     
 class ExamParser:
     # 🚨 將提示詞作為類別屬性（縮排 4 格），確保 self.ANSWERS_OCR_PROMPT 的呼叫完全合規
-    ANSWERS_OCR_PROMPT = """這是一份台灣大考的解答卷（選擇與選填題答案表）圖片。
+    ANSWERS_OCR_PROMPT = """這是一份台灣大考或學校段考的解答卷/答案卡/答案卷圖片。
     請你扮演最嚴謹、零失誤的官方數據核對專家，將「題號/列號」與「標準答案」精確萃取為 JSON 列表。
+
+    🚨【無解答頁面極度警告】🚨：
+    如果傳入的圖片只是純題目試卷，裡面完全沒有印刷好的解答表格、老師手寫劃記的答案卷、或參考答案對照表，你【必須】直接輸出空列表 `{"answers": []}`！
+    絕對禁止自己嘗試去解題，也絕對禁止將題目本身的選項字母 (A, B, C...) 或數字拿來當作答案！
 
     🚨【多欄表格與列號防錯位極度警告（致命考點）】🚨：
     台灣大考的選填題（如 A, B, C, D...）在答案卷上，是以「列號」（如 8, 9, 10, 11, 12...）作為對應格子的。
@@ -2006,6 +2042,14 @@ class ExamParser:
             if q_type in ["單選題", "多選題"]:
                 q["scoring_criteria"] = ""
                 
+            # 2. 【方案 1：選填題「挖空結構與答案長度」自動比對器】
+                
+            # 🚨 [防禦性機制 - 提案三：選擇題「評分標準」反向去污染清洗器]
+            # 若為選擇題，硬性將第一階段可能因 AI 讀取大篇幅 Rubric 產生的幻覺與錯位 scoring_criteria 清空，
+            # 確保資料庫中僅有非選擇題/手寫題包含評分標準，徹底消除選擇題（如 Q31, Q53）被寫入評分說明之 Bug。
+            if q_type in ["單選題", "多選題"]:
+                q["scoring_criteria"] = ""
+                
                 
             # 2. 【方案 1：選填題「挖空結構與答案長度」自動比對器】
             if q_type == "選填題":
@@ -2065,13 +2109,14 @@ class ExamParser:
         if not year_digits:
             year_digits = year
 
-        # 1. 決定大類資料夾名稱與學校獨立目錄
+        # 1. 決定大類資料夾名稱與學校獨立目錄（注入上下學期標籤，防止 114上 與 114下 同名覆蓋）
+        sem_tag = "上" if "上學期" in year else ("下" if "下學期" in year else "")
         if exam_type == "SCHOOL":
             safe_school = safe_filename(school_name) if school_name else "通用學校"
             type_folder = os.path.join("學校定期考", safe_school)
             spec_name = f"{safe_year}_{safe_school}{mock_tag}_{safe_subject}"
-            standard_academic_year = f"{year_digits}定期考"
-            standard_exam_source = f"{year_digits}學年度{school_name if school_name else ''}定期考{mock_tag}_{subject}"
+            standard_academic_year = f"{year_digits}{sem_tag}定期考"
+            standard_exam_source = f"{year_digits}學年度{sem_tag+'學期' if sem_tag else ''}{school_name if school_name else ''}定期考{mock_tag}_{subject}"
         elif exam_type == "MOCK":
             type_folder = "模擬考"
             spec_name = f"{safe_year}_模擬考{mock_tag}_{safe_subject}"
@@ -2087,6 +2132,8 @@ class ExamParser:
             spec_name = f"{safe_year}_分科指考_{safe_subject}"
             standard_academic_year = f"{year_digits}分科"
             standard_exam_source = f"{year_digits}學年度分科測驗{subject}"
+            
+        spec_name = re.sub(r'[\s\n\r\t]+', '', spec_name)
 
         # 4. 建立專屬的分類資料夾與 JSON 儲存路徑
         os.makedirs(os.path.join(output_dir, type_folder), exist_ok=True)
@@ -2112,6 +2159,7 @@ class ExamParser:
             
         # 4. 建立這份試卷專屬的圖片資料夾
         img_dir = os.path.join(output_dir, type_folder, "images", spec_name)
+        img_dir = re.sub(r'[\n\r\t]+', '', img_dir).replace("\\", "/")
         os.makedirs(img_dir, exist_ok=True)
 
         # ----------------- 【學科與數學類別標準化映射】 (放置於快取檢查外，全域皆可調用) -----------------
@@ -2630,9 +2678,15 @@ class ExamParser:
 
             try:
                 expected_q_nums = []
-                ans_map = json.loads(ans_text)
-                if isinstance(ans_map, dict):
-                    expected_q_nums = sorted(list(ans_map.keys()), key=natural_sort_key)
+                ans_map = {}
+                try:
+                    if ans_text and ans_text != "無官方解答。":
+                        ans_map = json.loads(ans_text)
+                        if isinstance(ans_map, dict):
+                            expected_q_nums = sorted(list(ans_map.keys()), key=natural_sort_key)
+                except Exception as e:
+                    logging.warning(f"⚠️ [解答 JSON 解析警告] 官方答案格式非標準 JSON，已自動降級防護: {e}")
+                    ans_map = {}
                     
                 def get_base_q_num(q_num_str: str) -> str:
                     q_num_str = str(q_num_str).strip()
@@ -3330,39 +3384,43 @@ class ExamParser:
                                     diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
                                     
                                     qwen_prompt = f"""
-                                    你是一位頂尖的 Python 數學繪圖專家。以下是一道高中理科題目的題幹與詳細解答：
+                                    你是一位頂尖的 Python 數學與 3D/2D 繪圖專家。以下是一道高中理科題目的題幹與詳細解答：
                                     
                                     【題幹】：{q_data.get('question_text', '')}
                                     【詳細解答】：{detailed_sol_text}
                                     
-                                    請針對解答中提到的「圖 {img_num}」（圖片儲存路徑為 `{diagram_filepath}`），撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 來繪製該圖表，並儲存至該路徑。
+                                    請針對解答中提到的「圖 {img_num}」（圖片儲存路徑為 `{diagram_filepath}`），撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib, numpy 與 mpl_toolkits.mplot3d 繪製該圖表並儲存。
                                     
-                                    【繪圖剛性要求】：
-                                    1. 本次任務【只負責繪製與表現「圖 {img_num}」】！請仔細閱讀詳細解答中對「圖 {img_num}」的文字描述，精確表現其對應的點、線、圓、幾何交點或受力向量。
-                                    2. 圖片標示「允許且鼓勵使用繁體中文說明」（如：點 A, 外接圓, 受力 F）。
-                                    3. 必須在程式碼開頭加入以下繁體中文與負號支援設定：
+                                    【繪圖剛性要求與 Linux 字型完全相容設定】：
+                                    1. 允許且鼓勵使用繁體中文標示（如：點 A, 外接圓, 平面 ADH）。
+                                    2. 必須在程式碼最開頭**原封不動**加入以下字型與 3D 庫導入設定：
                                        ```python
+                                       import matplotlib
+                                       matplotlib.use('Agg')
                                        import matplotlib.pyplot as plt
                                        import matplotlib.font_manager as fm
+                                       import numpy as np
                                        import os
+                                       from mpl_toolkits.mplot3d import Axes3D
 
-                                       # 自動在 Linux/Ubuntu 尋找並註冊中文字型
                                        font_candidates = [
                                            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-                                           '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',
-                                           '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc'
+                                           '/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc',
+                                           '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+                                           'C:/Windows/Fonts/msjh.ttc'
                                        ]
+                                       font_prop = None
                                        for fp in font_candidates:
                                            if os.path.exists(fp):
                                                fm.fontManager.addfont(fp)
-                                               plt.rcParams['font.family'] = fm.FontProperties(fname=fp).get_name()
+                                               font_prop = fm.FontProperties(fname=fp)
+                                               plt.rcParams['font.family'] = font_prop.get_name()
                                                break
-
-                                       plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Microsoft JhengHei', 'PingFang TC', 'sans-serif']
                                        plt.rcParams['axes.unicode_minus'] = False
                                        ```
-                                    4. 使用 plt.axis('equal') 保持幾何比例。
-                                    5. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
+                                    3. 若為 3D 空間圖形（如正立方體、空間平面、向量），請使用 `fig.add_subplot(111, projection='3d')` 繪製！
+                                    4. 若為 2D 圖形，請使用 `plt.axis('equal')` 保持正比例。
+                                    5. 程式碼必須能獨立執行，最末尾必須包含 `plt.savefig(r"{diagram_filepath}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。輸出純 Python 程式碼，不要包含 ```python 標籤。
                                     """
                                     
                                     script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_{img_num}.py")
@@ -3387,7 +3445,7 @@ class ExamParser:
                                                 
                                             logging.info(f"🎨 正在背景執行 Gemini 繪圖腳本 (題號 {safe_q_num} 的圖 {img_num})...")
                                             import subprocess
-                                            result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=15)
+                                            result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=30)
                                             
                                             if result.returncode == 0 and os.path.exists(diagram_filepath):
                                                 logging.info(f"✅ 題號 {safe_q_num} 的圖 {img_num} 自動圖解生成並儲存成功！")
@@ -3696,11 +3754,12 @@ class ExamParser:
                             # 成功通過，加上總結句
                             ans = str(q_data.get('answer', '')).strip()
                             if ans:
-                                # 🚨 核心修正：若官方答案為無答案或送分，則輸出優雅的中文總結，防止生成 (無)(答)(案)(全)(體)(給)(分) 的火星文
+                                # 清理答案字串中的多餘括號與說明文字
+                                clean_ans_code = re.sub(r'[^\w,]', '', ans)
                                 if any(k in ans for k in ["無答案", "全體給分", "送分", "不計分"]):
                                     q_data['detailed_solution'] += f"\n\n**綜上所述，本題官方公佈無答案，全體給分。**"
                                 elif q_data.get('question_type', '') in ["單選題", "多選題"]:
-                                    formatted_parts = [f"({char})" for char in ans if char.isalnum()]
+                                    formatted_parts = [f"({char})" for char in clean_ans_code if char.isalnum()]
                                     q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確選項為：{''.join(formatted_parts)}**"
                                 elif q_data.get('question_type', '') == "選填題" and "," in ans:
                                     formatted_parts = ans.split(",")
@@ -3766,7 +3825,7 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = min(len(API_KEYS), 8) # 根據 Key 數量決定並發量
+        max_workers = min(len(API_KEYS), 4) # 根據 Key 數量決定並發量
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -3799,8 +3858,14 @@ class ExamParser:
                     except Exception as e:
                         logging.error(f"批次處理執行緒發生例外: {e}")
                 
+                # 檢查是否接近 5 小時全域執行上限
+                if time.time() - GLOBAL_START_TIME > MAX_EXECUTION_TIME_SECONDS:
+                    logging.critical("⏱️ [全域時間預警] 已達 5 小時執行上限！將強制停止新任務，安全保存已完成之進度...")
+                    for f in futures:
+                        f.cancel()
+                    raise TimeoutSafetyException("已達 5 小時安全時間上限。")
+
                 if rpd_hit:
-                    # 立即取消所有未完成的任務
                     for f in futures:
                         f.cancel()
                     break
@@ -3928,33 +3993,86 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         if any(k in filename_clean for k in ["英聽", "聽力", "解答更正", "更正表", "級距", "五標", "統計圖", "統計表"]):
             return {"year": "未知年份", "exam_type": "IGNORE", "mock_tag": "", "school_name": "", "subject": "未知科目", "role": "ignore"}
 
-        # 1. 提取學年度 (例如 101學年度, 114學年度, 113年, 108年, 9501, 114E7)
-        year_match = re.search(r'(\d{2,3})(?:學年度|年|E\d+|_|\b)', filename_clean)
-        year = "未知年份"
-        if year_match:
-            year_num = int(year_match.group(1))
-            if 80 <= year_num <= 120:  # 符合民國 80~120 年區間
-                year = f"{year_num}學年度"
-
-        # 2. 智慧提取學校名稱 (過濾掉根目錄名稱，抓取真正的學校子資料夾)
-        school_name = ""
+        # 解析路徑層級 (例如: school_exam_papers_only/北一女中/數學/高二文組試題/)
+        dir_parts = []
         if rel_dir_path and rel_dir_path != ".":
-            dir_parts = [p for p in rel_dir_path.replace("\\", "/").split("/") if p and p != "." and p not in ["school_exam_papers_only", "ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only"]]
-            if dir_parts:
-                school_name = dir_parts[0]  # 第一層學校目錄名稱（如：建國中學）
+            dir_parts = [p for p in rel_dir_path.replace("\\", "/").split("/") if p and p != "." and p not in ["school_exam_papers_only", "ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only", "學校定期考", "分科指考", "學測", "模擬考"]]
+
+        # 1. 智慧提取學校名稱（多層目錄保底取第一層）
+        school_name = ""
+        if dir_parts:
+            school_name = dir_parts[0]  # 第一層永遠是學校名稱（如：北一女中、建國中學）
 
         if not school_name:
             sch_match = re.search(r'([\u4e00-\u9fa5]{2,10}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', filename_clean)
             if sch_match:
                 school_name = sch_match.group(1)
 
-        # 3. 判斷考試類型與標籤 (mock_tag)
+        # 2. 智慧提取學年度與上下學期 (解析 109_1, 108_1, 114_1, 112_高三_2 等)
+        year_match = re.search(r'(\d{2,3})(?:學年度|年|E\d+|_|\b)', filename_clean)
+        year = "未知年份"
+        semester_str = ""
+
+        if re.search(r'(?:_1_|1學期|上學期|第一學期|_1$|高[一二三]_1|_\d{2,3}_1_)', filename_clean) or re.search(r'^\d{2,3}_1\b', filename_clean):
+            semester_str = "上學期"
+        elif re.search(r'(?:_2_|2學期|下學期|第二學期|_2$|高[一二三]_2|_\d{2,3}_2_)', filename_clean) or re.search(r'^\d{2,3}_2\b', filename_clean):
+            semester_str = "下學期"
+
+        if year_match:
+            year_num = int(year_match.group(1))
+            if 80 <= year_num <= 120:  # 符合民國 80~120 年區間
+                year = f"{year_num}學年度{semester_str}"
+
+        # 3. 智慧提取年級與文理組別 (高一/高二/高三, 文組/理組)
+        combined_path_text = "/".join(dir_parts) + "/" + filename_clean
+
+        grade_str = ""
+        grade_match = re.search(r'(高[一二三]|高1|高2|高3|10年級|11年級|12年級)', combined_path_text)
+        if grade_match:
+            g_raw = grade_match.group(1)
+            if g_raw in ["高一", "高1", "10年級"]: grade_str = "高一"
+            elif g_raw in ["高二", "高2", "11年級"]: grade_str = "高二"
+            elif g_raw in ["高三", "高3", "12年級"]: grade_str = "高三"
+
+        stream_str = ""
+        if any(k in combined_path_text for k in ["文組", "社會組", "數A文", "數B文", "文科"]):
+            stream_str = "文組"
+        elif any(k in combined_path_text for k in ["理組", "自然組", "理科"]) or re.search(r'高[二三]理', combined_path_text):
+            stream_str = "理組"
+
+        # 4. 判斷科目 (優先檔名，若檔名沒寫科目則從資料夾層級 '北一女中/數學/...' 補齊)
+        subject = "未知科目"
+        
+        # 4a. 先嘗試從檔名比對精確科目
+        for official_name, aliases in SUBJECT_MAPPING.items():
+            if any(alias in filename_clean for alias in aliases):
+                subject = official_name
+                break
+
+        # 4b. 若檔名完全沒寫科目（如 108_1_高二理_第一次段考.pdf），從資料夾層級 (dir_parts[1]) 提取
+        if subject == "未知科目" and len(dir_parts) >= 2:
+            folder_subj = dir_parts[1]
+            for official_name, aliases in SUBJECT_MAPPING.items():
+                if any(alias in folder_subj for alias in aliases):
+                    subject = official_name
+                    break
+
+        # 4c. 數學科目精細約束：除非明確寫有「數甲」或「數乙」，否則一律歸類為「數學」（或「數學A」/「數學B」）
+        if subject in ["數學甲", "數學乙"] and not any(k in combined_path_text for k in ["數甲", "數學甲", "數乙", "數學乙"]):
+            if any(k in combined_path_text for k in ["數A", "數學A"]):
+                subject = "數學A"
+            elif any(k in combined_path_text for k in ["數B", "數學B"]):
+                subject = "數學B"
+            else:
+                subject = "數學"
+
+        # 5. 判斷考試類型與標籤 (mock_tag)
         exam_type = "MOCK"
         mock_tag = ""
-        
+
         is_ast = any(k in filename_clean for k in ["指考", "指定科目", "分科"])
         is_gsat = any(k in filename_clean for k in ["學測", "學科能力"])
-        is_school = "school_exam_papers_only" in rel_dir_path or any(k in filename_clean for k in ["定期考", "段考", "期中考", "期末考", "月考", "定期次考"])
+        is_school = "school_exam_papers_only" in rel_dir_path or any(k in combined_path_text for k in ["定期考", "段考", "期中考", "期末考", "月考", "定期次考"])
         is_mock_kw = any(k in filename_clean for k in ["模擬", "模考", "全模", "北模", "中模", "南模", "竹模", "全區", "中區", "台中區", "台北區", "北區", "南區", "詮達", "全華", "翰林", "南一", "文昌", "漢樺", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"])
 
         if is_ast and not is_mock_kw:
@@ -3964,31 +4082,25 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         elif is_school and not is_mock_kw:
             exam_type = "SCHOOL"
             school_match = re.search(r'((?:第[一二三四五六七八九十0-9]+次?)?(?:定期考|段考|期中考|期末考|月考))', filename_clean)
-            if school_match:
-                mock_tag = f"_{school_match.group(1)}"
-            else:
-                mock_tag = "_定期考"
+            exam_name = school_match.group(1) if school_match else "段考"
+            
+            # 將 年級 + 文理組 + 段考名稱 拼合成獨立標籤，防止文理組同名覆蓋！
+            tag_parts = [p for p in [grade_str, stream_str, exam_name] if p]
+            mock_tag = f"_{'_'.join(tag_parts)}" if tag_parts else "_段考"
         else:
             exam_type = "MOCK"
             org_match = re.search(r'(北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|台北區|臺北區|北區|南區|北北基|新北基|高雄區|翰林|南一|文昌|漢樺|詮達|全華)', filename_clean)
             org_str = org_match.group(1) if org_match else ""
             times_match = re.search(r'(第[一二三四五六七八九十0-9]+次|\d+模|E\d+|第[0-9]+次)', filename_clean)
-            times_str = times_match.group(1) if times_match else ""
+            times_str = times_match.group(1) if times_str else ""
 
-            if org_str or times_str:
-                mock_tag = f"_{org_str}{times_str}".strip("_")
-                mock_tag = f"_{mock_tag}"
+            tag_parts = [p for p in [grade_str, stream_str, org_str, times_str] if p]
+            if tag_parts:
+                mock_tag = f"_{'_'.join(tag_parts)}"
             else:
                 mock_tag = "_模擬考"
 
-        # 4. 判斷科目
-        subject = "未知科目"
-        for official_name, aliases in SUBJECT_MAPPING.items():
-            if any(alias in filename_clean for alias in aliases):
-                subject = official_name
-                break
-                
-        # 5. 判斷文件角色
+        # 6. 判斷文件角色 (Role)
         combined_keywords = ["與詳解", "與解析", "含解析", "含詳解", "含解答", "+解析", "&解答", "暨詳解", "暨答案", "題目+解析", "試題與解析", "試題加詳解", "試題暨詳解", "考科暨答案"]
         has_combined_kw = any(k in filename_clean for k in combined_keywords)
 
@@ -3997,13 +4109,13 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
 
         if has_combined_kw or (has_question_kw and has_answer_kw):
             role = "combined"  # 題目與解析二合一 PDF
-        elif any(k in filename_clean for k in ["非選", "評分", "原則", "標準"]):
+        elif any(k in filename_clean for k in ["記者會說明", "說明資料", "非選評分", "非選擇題評分", "非選", "評分", "原則", "標準"]):
             role = "rubric"     # 評分標準
         elif has_answer_kw:
             role = "answer"    # 純解答檔
         else:
             role = "question"  # 純題目檔
-            
+
         return {
             "year": year,
             "exam_type": exam_type,
@@ -4012,7 +4124,7 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             "subject": subject,
             "role": role
         }
-
+        
     for base_dir in directories:
         if not os.path.exists(base_dir):
             continue
@@ -4054,6 +4166,12 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 # 尋找解答檔
                 a_candidates = [filename for filename, meta in grouped_files if meta["role"] == "answer"]
                 if a_candidates:
+                    # 優先選擇含有「選擇題」、「定稿」、「參考答案」等精確字眼的 PDF 檔
+                    a_candidates.sort(key=lambda x: (
+                        0 if any(k in x for k in ["選擇題", "選擇", "定稿"]) else 1,
+                        0 if "記者會" not in x else 1,
+                        x
+                    ))
                     final_a_file = os.path.join(root, a_candidates[0])
                 elif any(meta["role"] == "combined" for filename, meta in grouped_files if filename == final_q_file):
                     final_a_file = os.path.join(root, final_q_file)
@@ -4154,13 +4272,12 @@ if __name__ == "__main__":
         for future in as_completed(futures):
             try:
                 future.result()
-            except RPDExhaustedException as ree:
-                logging.critical(f"🛑 [全域安全退出] 偵測到所有金鑰已達 RPD 限制！已安全保存所有考卷的中斷點進度。程式即將退出...")
+            except (RPDExhaustedException, TimeoutSafetyException) as exit_exc:
+                logging.critical(f"🛑 [全域安全退出] 觸發安全保護 ({exit_exc})！已保存中斷點進度，準備交由 GHA 上傳雲端...")
                 rpd_shutdown = True
             except Exception as e:
                 logging.error(f"❌ 處理考卷時發生嚴重錯誤: {e}")
                 
         if rpd_shutdown:
-            logging.critical("🛑 [中斷點退出] 安全終止所有背景考卷任務，系統退出。")
-            import os
-            os._exit(0) # 快速且安全地結束整個處理程序，確保 GitHub Actions 正常關閉
+            logging.critical("🛑 [中斷點退出] 安全終止任務，正常結束 Python 程序 (Exit 0)。")
+            sys.exit(0)
