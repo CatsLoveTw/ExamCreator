@@ -21,6 +21,16 @@ from groq import RateLimitError
 import queue
 import uuid
 import datetime
+import signal
+
+def handle_system_shutdown(signum, frame):
+    logging.critical("🛑 [系統緊急訊號] 收到終止訊號 (SIGTERM/SIGINT)！正在強制將記憶體進度刷新至硬碟...")
+    # 可以在此處將全域已完成題目進行緊急寫檔
+    sys.exit(0)
+
+# 註冊監聽器
+signal.signal(signal.SIGTERM, handle_system_shutdown)
+signal.signal(signal.SIGINT, handle_system_shutdown)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -337,6 +347,26 @@ def pre_validate_format(q_data: dict, sol_data: dict):
         if expected_count > 0 and len(raw_ans) == expected_count:
             q_data["answer"] = ",".join(list(raw_ans))
 
+def save_partial_progress_immediately(partial_json_path: str, questions_list: list):
+    """每當有題目成功通過驗證，立刻將記憶體中的最新進度安全寫入硬碟"""
+    try:
+        # 過濾出有效詳解並清洗路徑
+        valid_qs = [q for q in questions_list if is_valid_solution(q.get("detailed_solution"))]
+        
+        # 深拷貝並剔除不可序列化的 PIL 影像物件
+        clean_qs = []
+        for q in valid_qs:
+            q_copy = dict(q)
+            q_copy.pop('_cropped_pil_images', None)
+            clean_qs.append(q_copy)
+            
+        # 寫入實體暫存檔
+        with open(partial_json_path, "w", encoding="utf-8") as f:
+            json.dump(clean_qs, f, ensure_ascii=False, indent=4)
+        logging.info(f"💾 [即時落盤] 已自動將當前 {len(clean_qs)} 題最新進度寫入實體暫存檔：{os.path.basename(partial_json_path)}")
+    except Exception as e:
+        logging.error(f"⚠️ 即時存檔失敗: {e}")
+        
 def load_invalid_key_patterns(summary_path):
     """從 key_errors_summary.txt 中，透過遮罩的前後綴精準恢復並提取所有已失效 (401/403) 的金鑰特徵"""
     if not os.path.exists(summary_path):
@@ -3874,7 +3904,8 @@ class ExamParser:
                                 update_subject_taxonomy(q_data.get("sub_subject", subject), q_data)
                                 all_final_questions.append(q_data)
                             completed_indices.add(idx) # 🆕 標記此題目在當前批次中已成功處理，避免重複寫入
-                            logging.info(f"  -> 🎉 {paper_tag} 題號 {q_data['question_number']} 通過驗證，成功收錄。")
+                            save_partial_progress_immediately(partial_json_path, all_final_questions)
+                            logging.info(f"  -> 🎉 {paper_tag} 題號 {q_data['question_number']} 通過驗證，成功收錄Partial。")
                         else:
                             item["retry_count"] += 1
                             item["critique"] = error_critique if error_critique else "推導邏輯不連貫或瑕疵。"
