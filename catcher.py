@@ -41,6 +41,19 @@ class TimeoutSafetyException(Exception):
     """自定義異常：當執行時間接近 GitHub Actions 上限時觸發安全保存與退出"""
     pass
 
+def check_global_timeout():
+    """檢查是否超過 5 小時，超時立刻拋出安全例外"""
+    if time.time() - GLOBAL_START_TIME > MAX_EXECUTION_TIME_SECONDS:
+        logging.critical("[全域時間預警] 已達 5 小時執行上限！強制中斷任務並準備安全上傳...")
+        raise TimeoutSafetyException("已達 5 小時安全時間上限。")
+
+def smart_sleep(seconds: float):
+    """可被全域超時中斷的智慧睡眠函式（每 2 秒檢查一次時間，絕不死睡）"""
+    start = time.time()
+    while time.time() - start < seconds:
+        check_global_timeout()  # 睡眠中依然即時監控時間！
+        smart_sleep(min(2.0, seconds - (time.time() - start)))
+
 class RPDExhaustedException(Exception):
     """自定義異常：當所有可用 API 金鑰的每日限制 (RPD) 皆耗盡時觸發"""
     pass
@@ -1133,7 +1146,7 @@ class GeminiFreeTierManager:
                         sleep_time = 1.0
                     logging.info(f"⏳ [限速調度] 所有可用金鑰皆在冷卻中。等待 {sleep_time:.1f} 秒...")
                     
-            time.sleep(sleep_time)
+            smart_sleep(sleep_time)
 
     def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
         with self.lock:
@@ -1188,7 +1201,7 @@ class GeminiFreeTierManager:
             try:
                 # 🚨 核心修改：加大請求平滑間隔 (8~15秒)，有效避開 Google TPM 限流峰值
                 import random
-                time.sleep(random.uniform(8.0, 15.0))
+                smart_sleep(random.uniform(8.0, 15.0))
 
                 desc_str = f" {task_desc}" if task_desc else ""
                 print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
@@ -1210,7 +1223,7 @@ class GeminiFreeTierManager:
                 if not response:
                     logging.warning("⚠️ API 回傳完全為空 (None)，可能發生網路瞬斷，準備重試...")
                     attempts += 1
-                    time.sleep(2)
+                    smart_sleep(2)
                     continue
 
                 if not hasattr(response, 'text'):
@@ -1323,7 +1336,7 @@ class GeminiFreeTierManager:
                 err_str = str(e).lower()
                 if e.code == 503 or "unavailable" in err_str or e.code == 504 or "gateway timeout" in err_str:
                     logging.warning(f"⚠️ [503 伺服器忙碌] 遇到臨時性服務過載，將於 3 秒後自動重試（不計入失敗次數）...")
-                    time.sleep(3)
+                    smart_sleep(3)
                     continue
                 
                 # 🚨 新增：401 Unauthorized 錯誤處理（無效/過期金鑰）
@@ -1351,12 +1364,12 @@ class GeminiFreeTierManager:
                     # 指數退避：隨次數增加等待時間 5s, 10s, 20s, 40s... 並加上 random 抖動
                     backoff_time = (2 ** attempts) * 5 + random.uniform(1, 5)
                     logging.warning(f"⚠️ [觸發 429 限流] 等待 {backoff_time:.1f} 秒後進行第 {attempts + 1} 次指數退避重試...")
-                    time.sleep(backoff_time)
+                    smart_sleep(backoff_time)
                     self.handle_rate_limit_error(key_obj, err_str)
                     attempts += 1
                     continue
                 else:
-                    time.sleep(2)
+                    smart_sleep(2)
             except Exception as e:
                 attempts += 1
                 err_msg = str(e).lower()
@@ -1366,7 +1379,7 @@ class GeminiFreeTierManager:
                         key_obj.request_times.extend([time.time()] * 5)
                 else:
                     logging.exception(f"發生未預期錯誤（嘗試第 {attempts} 次）: {e}")
-                time.sleep(2)
+                smart_sleep(2)
         return None, "請求失敗"
 
     def _generate_with_groq(self, contents, response_schema, temperature, max_attempts, preferred_model, task_desc):
@@ -1422,7 +1435,7 @@ class GeminiFreeTierManager:
             try:
                 import random
                 # 🚨 突破 TPM 限制的核心：加入隨機抖動 (Jitter)，錯開多執行緒的併發請求
-                time.sleep(random.uniform(2.5, 6.0))
+                smart_sleep(random.uniform(2.5, 6.0))
                 
                 desc_str = f" {task_desc}" if task_desc else ""
                 
@@ -1482,11 +1495,11 @@ class GeminiFreeTierManager:
                 # Groq 的免費版在分鐘級 TPM 滿了時會擋，需要冷卻
                 wait_time = random.uniform(10.0, 15.0)
                 logging.warning(f"⚠️ [Groq 限速] 觸發 TPM/RPM 限制，冷卻 {wait_time:.1f} 秒... (第 {attempts} 次嘗試)")
-                time.sleep(wait_time)
+                smart_sleep(wait_time)
             except Exception as e:
                 attempts += 1
                 logging.warning(f"⚠️ [Groq API 錯誤] {e} (第 {attempts} 次嘗試)")
-                time.sleep(3)
+                smart_sleep(3)
                 
         return None, "groq_api_error"
     
@@ -1837,7 +1850,7 @@ class ExamParser:
             pix.save(img_path)
 
             if not os.path.exists(img_path):
-                time.sleep(0.5) 
+                smart_sleep(0.5) 
                 if not os.path.exists(img_path):
                     continue
             
@@ -2364,6 +2377,7 @@ class ExamParser:
             page_batch_size = 2 if is_stem else 3
 
             for b_idx in range(0, len(pages), page_batch_size):
+            	check_global_timeout()  # 🚨 新增：每掃描幾頁前，先檢查一次全域時間！
                 batch_pages = pages[b_idx : b_idx + page_batch_size]
                 logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
 
@@ -4376,7 +4390,7 @@ if __name__ == "__main__":
     # 2. 自動尋找所有要處理的試卷
     exam_tasks = auto_find_exam_sets(TARGET_DIRECTORIES)
     logging.info(f"🔍 總共在目錄中找到了 {len(exam_tasks)} 份試卷需要處理。")  # ⚠️ 建議設 3 即可，因為單張考卷內部還有高達 25 個子執行緒
-    max_exam_workers = 2
+    max_exam_workers = 1
     logging.info(f"🚀 開始多張考卷並行處理 (Max Workers: {max_exam_workers})")
 
     with ThreadPoolExecutor(max_workers=max_exam_workers) as exam_executor:
