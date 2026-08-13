@@ -52,7 +52,7 @@ def smart_sleep(seconds: float):
     start = time.time()
     while time.time() - start < seconds:
         check_global_timeout()  # 睡眠中依然即時監控時間！
-        smart_sleep(min(2.0, seconds - (time.time() - start)))
+        time.sleep(min(2.0, seconds - (time.time() - start)))
 
 class RPDExhaustedException(Exception):
     """自定義異常：當所有可用 API 金鑰的每日限制 (RPD) 皆耗盡時觸發"""
@@ -2377,7 +2377,8 @@ class ExamParser:
             page_batch_size = 2 if is_stem else 3
 
             for b_idx in range(0, len(pages), page_batch_size):
-            	check_global_timeout()  # 🚨 新增：每掃描幾頁前，先檢查一次全域時間！
+
+                check_global_timeout() # 🚨 新增：每掃描幾頁前，先檢查一次全域時間！
                 batch_pages = pages[b_idx : b_idx + page_batch_size]
                 logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
 
