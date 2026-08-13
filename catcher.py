@@ -360,6 +360,13 @@ def pre_validate_format(q_data: dict, sol_data: dict):
         if expected_count > 0 and len(raw_ans) == expected_count:
             q_data["answer"] = ",".join(list(raw_ans))
 
+def is_valid_solution(sol_text: str) -> bool:
+    """判定詳解文字是否為有效解答（非錯誤、超時或崩潰訊息）"""
+    if not sol_text or not isinstance(sol_text, str) or len(sol_text.strip()) < 15:
+        return False
+    invalid_keywords = ["超時或失敗", "系統提示", "引發系統內部", "無法生成", "未完成", "崩潰"]
+    return not any(kw in sol_text for kw in invalid_keywords)
+    
 def save_partial_progress_immediately(partial_json_path: str, questions_list: list):
     """每當有題目成功通過驗證，立刻將記憶體中的最新進度安全寫入硬碟"""
     try:
@@ -3235,12 +3242,7 @@ class ExamParser:
         all_final_questions = []
         queue_lock = threading.Lock() # 保護寫入共用陣列的鎖
 
-        # 🚨 定義有效詳解檢查器：只要包含「超時」、「失敗」、「系統提示」等字樣，一律判定為無效！
-        def is_valid_solution(sol_text: str) -> bool:
-            if not sol_text or not isinstance(sol_text, str) or len(sol_text.strip()) < 15:
-                return False
-            invalid_keywords = ["超時或失敗", "系統提示", "引發系統內部", "無法生成", "未完成", "崩潰"]
-            return not any(kw in sol_text for kw in invalid_keywords)
+        
 
         # 💡 將已加載的【有效詳解】建立成對位索引表（自動剔除先前超時或失敗的無效詳解，強制重跑）
         partial_map = {q.get("question_number"): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
