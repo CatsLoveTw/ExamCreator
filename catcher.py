@@ -4419,8 +4419,13 @@ if __name__ == "__main__":
             try:
                 future.result()
             except (RPDExhaustedException, TimeoutSafetyException) as exit_exc:
-                logging.critical(f"🛑 [全域安全退出] 觸發安全保護 ({exit_exc})！已保存中斷點進度，準備交由 GHA 上傳雲端...")
-                rpd_shutdown = True
+                logging.critical(f"🛑 [全域安全退出] 觸發安全保護 ({exit_exc})！正在安全終止 Python...")
+                # 🚨 強制取消所有還沒執行的考卷任務
+                for f in futures:
+                    f.cancel()
+                
+                logging.info("🎉 已保存當前所有完成進度，正常結束 Python 程序 (Exit 0)。")
+                sys.exit(0)  # 🚨 關鍵：立刻以 Exit Code 0 結束 Python，讓 YML 接手進行上傳！
             except Exception as e:
                 logging.error(f"❌ 處理考卷時發生嚴重錯誤: {e}")
                 
