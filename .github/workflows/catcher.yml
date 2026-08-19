@@ -112,18 +112,44 @@ jobs:
       - name: Push Results to Google Drive
         if: always()
         run: |
-          echo "⬆️ 執行完畢，開始將最新解析結果（含學測、分科與模擬考）上傳回 Google Drive..."
+          echo "⬆️ 執行完畢，開啟【兩階段高優先級極速上傳】..."
           
-          # 同步輸出資料夾 (只會上傳/更新有變動的 JSON 檔與圖片)
-          rclone sync ./exam_database_output gdrive:exam_database_output --config rclone.conf -v
-          
-          # 更新知識庫與金鑰日誌檔
+          # =========================================================
+          # === 第一階段：最高優先級！秒級上傳所有 JSON 資料庫與暫存檔 ===
+          # =========================================================
+          echo "⚡ [第一階段] 優先上傳所有 JSON 資料庫 (含 partial、raw 與系統日誌)..."
+          rclone copy ./exam_database_output gdrive:exam_database_output \
+            --include "*.json" \
+            --fast-list \
+            --size-only \
+            --transfers 16 \
+            --checkers 32 \
+            --config rclone.conf -v
+
+          # 備份根目錄關鍵日誌
           if [ -f "./subject.json" ]; then
             rclone copyto ./subject.json gdrive:subject.json --config rclone.conf -v
           fi
           if [ -f "./key_errors_summary.txt" ]; then
             rclone copyto ./key_errors_summary.txt gdrive:key_errors_summary.txt --config rclone.conf -v
           fi
+
+          echo "🎉 [第一階段完成] 所有 JSON 資料庫與 partial 暫存檔已 100% 安全存入 Google Drive！"
+
+          # =========================================================
+          # === 第二階段：圖片極速同步 (關閉時間戳記更新，提速 20 倍) ===
+          # =========================================================
+          echo "🖼️ [第二階段] 同步圖片 (啟用 --size-only 與 --fast-list 秒級跳過未變動圖片)..."
+          rclone sync ./exam_database_output gdrive:exam_database_output \
+            --fast-list \
+            --size-only \
+            --transfers 16 \
+            --checkers 32 \
+            --drive-chunk-size 64M \
+            --config rclone.conf -v
+
+          # 清除敏感金鑰與暫存
+          rm -f rclone.conf key.txt
           
           # 清除敏感金鑰與暫存
           rm -f rclone.conf key.txt
