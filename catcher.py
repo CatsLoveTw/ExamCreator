@@ -209,44 +209,36 @@ def normalize_and_merge_subject_taxonomy(taxonomy: dict) -> dict:
     return new_taxonomy
 
 def sanitize_latex_syntax(text: str) -> str:
-    """具備區塊保護的高階 LaTeX 語法修復器（防止將 $$ 內部拆碎）"""
+    """具備區塊保護的高階 LaTeX 語法修復器（防範 \i 正則語法錯誤）"""
     if not isinstance(text, str) or not text:
         return text
 
-    # 1. 第一步：先保護並清洗所有的 $$ ... $$ 大公式區塊
+    # 1. 保護並清洗所有的 $$ ... $$ 大公式區塊
     def clean_display_block(m):
         content = m.group(1)
-        # 強制移除大公式內部的所有 $ 符號，防止 Toggle 錯亂
         content = content.replace('$', '')
-        # 修正矩陣與 cases 環境內的單斜線換行
-        content = re.sub(r'(\\(?:begin|end)\{(?:cases|pmatrix|matrix|bmatrix)\}.*?)', lambda x: x.group(1), content)
         content = re.sub(r'(?<=[\w\)\}])\s*\\\s+(?=[\w\(\{])', r' \\\\ ', content)
         return f"$${content.strip()}$$"
 
     text = re.sub(r'\$\$(.*?)\$\$', clean_display_block, text, flags=re.DOTALL)
 
-    # 2. 第二步：縫合碎裂的 $...$ 區塊（例如：$\frac{a}{b}$ = $\frac{c}{d}$ \implies ...）
-    text = re.sub(r'\$([^$]+)\$\s*([=\+\-\*\/\:\implies\le\ge\rightarrow]+|\\[a-zA-Z]+)\s*\$([^$]+)\$', r'$\1 \2 \3$', text)
+    # 2. 🚨 修正正則語法（修復 bad escape \i at position 27 錯誤）
+    text = re.sub(r'\$([^$]+)\$\s*([=\+\-\*/:]|\\implies|\\le|\\ge|\\rightarrow|\\[a-zA-Z]+)\s*\$([^$]+)\$', r'$\1 \2 \3$', text)
 
-    # 3. 第三步：只對「完全不在 $ 或 $$ 內部」的裸露關鍵字補 $，且忽略已在公式內的內容
+    # 3. 補全裸露指令
     def wrap_bare_latex(m):
         cmd = m.group(0)
         return f" ${cmd}$ "
 
     bare_pattern = r'(?<![\$\w\\])(\\(?:Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|alpha|beta|gamma|delta|epsilon|theta|iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|phi|chi|psi|omega|frac\{[^}]+\}\{[^}]+\}|sqrt\{[^}]+\}))(?![\$\w])'
 
-    # 分割出公式內與公式外
     parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
     for i in range(len(parts)):
-        # 奇數索引是公式內部 ($...$ 或 $$...$$)，偶數索引是純文字區塊
-        if i % 2 == 0:
+        if i % 2 == 0:  # 偶數索引為純文字區塊
             parts[i] = re.sub(bare_pattern, wrap_bare_latex, parts[i])
-            # 將偶數區塊內的 \textbf{...} 轉為 Markdown **...**
             parts[i] = re.sub(r'\\textbf\{([^}]+)\}', r'**\1**', parts[i])
 
     text = "".join(parts)
-
-    # 4. 清除重複空格與無效空符號
     text = re.sub(r' +', ' ', text)
     return text.strip()
 
