@@ -1165,13 +1165,12 @@ class GeminiFreeTierManager:
                 key.request_times.extend([time.time() + 30] * 15)
                 logging.info(f"⏳ [RPM 短暫鎖定] 金鑰 {key.api_key[:8]}... 觸發 429 限流，進入 90 秒冷卻。")
 
-    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=5, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
+    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=10, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
         if provider == "groq":
             return self._generate_with_groq(contents, response_schema, temperature, max_attempts, preferred_model, task_desc)
 
         # === 🚨 建立動態模型降級梯隊 (Model Fallback Cascade) ===
-        # 首選 preferred_model，若失敗則按順序自動降級試用其餘模型
         candidate_models = []
         if preferred_model and preferred_model in self.models:
             candidate_models.append(preferred_model)
@@ -1181,22 +1180,27 @@ class GeminiFreeTierManager:
 
         estimated_tokens = self.estimate_tokens(contents)
         attempts = 0
+        
+        # 🚨 設定每個模型梯隊的重試容忍次數：
+        # 同一個模型先換金鑰重試 6 次；若仍持續 429 則自動平滑降級至下一梯隊模型！
+        RETRIES_PER_MODEL = 6
+
         while attempts < max_attempts:
-            # 每次重試若失敗，自動輪替切換至下一位備用模型！
-            target_model = candidate_models[attempts % len(candidate_models)]
+            # 計算當前應使用的模型梯隊索引
+            model_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
+            target_model = candidate_models[model_tier_idx]
 
             # 取得可用資源與目前目標模型
             client, model, key_obj = self.get_current_resource(preferred_model=target_model, estimated_tokens=estimated_tokens)
             self.last_model_used = model
             
             thinking_config = None
-            # 支援 3.6, 3.5, 3.0, 2.5 系列模型啟用 Thinking 深度思考
-            if any(m in model for m in ["gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
+            # 支援 3.7, 3.6, 3.5, 3.0, 2.5 系列模型啟用 Thinking 深度思考
+            if any(m in model for m in ["gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
                 if enable_thinking:
                     thinking_config = types.ThinkingConfig(thinking_level='HIGH')
                 else:
                     thinking_config = types.ThinkingConfig(thinking_level="MINIMAL")
-                
             try:
                 # 🚨 核心修改：加大請求平滑間隔 (8~15秒)，有效避開 Google TPM 限流峰值
                 import random
@@ -1360,12 +1364,18 @@ class GeminiFreeTierManager:
                 
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
-                    # 指數退避：隨次數增加等待時間 5s, 10s, 20s, 40s... 並加上 random 抖動
-                    backoff_time = (2 ** attempts) * 5 + random.uniform(1, 5)
-                    logging.warning(f"⚠️ [觸發 429 限流] 等待 {backoff_time:.1f} 秒後進行第 {attempts + 1} 次指數退避重試...")
+                    # 預測下一次嘗試將使用的模型梯隊
+                    next_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
+                    next_model = candidate_models[next_tier_idx]
+                    
+                    if next_model != target_model:
+                        logging.warning(f"📉 [模型自動降級] 模型 {target_model} 遇到 429 限流已達 {RETRIES_PER_MODEL} 次，自動降級至下一梯隊模型: {next_model}")
+                    
+                    # 平滑指數退避：加入隨機抖動避免所有執行緒同時撞車
+                    backoff_time = min(45.0, (2 ** (attempts % RETRIES_PER_MODEL)) * 4.0 + random.uniform(2.0, 5.0))
+                    logging.warning(f"⏳ [429 限流退避] 等待 {backoff_time:.1f} 秒後進行第 {attempts + 1} 次重試 (目標模型: {next_model})...")
                     smart_sleep(backoff_time)
                     self.handle_rate_limit_error(key_obj, err_str)
-                    attempts += 1
                     continue
                 else:
                     smart_sleep(2)
@@ -2215,10 +2225,10 @@ class ExamParser:
         subjects_stem = ["數學", "數A", "數B", "數學乙", "數學甲", "數甲", "數乙", "物理", "化學", "生物", "地球科學", "自然"]
         is_stem = any(t in subject for t in subjects_stem)
 
-        # Stage 1 用 Flash-Lite 極速掃描；Stage 2/3 用 3.6-Flash 深度推理
+        # Stage 1 用 Flash-Lite 極速掃描；Stage 2/3 優先採用 3.7-Flash（遇 429 自動階梯降級）
         stage_1_model = "gemini-3.5-flash-lite"   # 第一階段：巨量頁面快速 OCR 與圖框標記
-        stage_2_model = "gemini-3.6-flash"        # 第二階段：名師級深度解題 (開啟 Thinking 思考鏈)
-        validator_model = "gemini-3.6-flash"      # 第三階段：嚴謹閱卷審查與代數驗算
+        stage_2_model = "gemini-3.7-flash"        # 第二階段：名師級深度解題 (首選 3.7-flash)
+        validator_model = "gemini-3.7-flash"      # 第三階段：嚴謹閱卷審查與代數驗算 (首選 3.7-flash)
         # stage_2_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         # validator_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         
@@ -3351,7 +3361,7 @@ class ExamParser:
                         contents=batch_contents, 
                         response_schema=QuestionSolutionBatch,
                         temperature=0.3,
-                        preferred_model="gemini-3.6-flash", 
+                        preferred_model=stage_2_model,  
                         provider="google",
                         enable_thinking=True,
                         task_desc=f"{paper_tag} [Gemini 深度解題]"
@@ -3739,7 +3749,7 @@ class ExamParser:
                         contents=[validator_batch_prompt], 
                         response_schema=SolutionValidatorBatch,
                         temperature=0.0, 
-                        preferred_model="gemini-3.6-flash", 
+                        preferred_model=validator_model, 
                         provider="google", 
                         enable_thinking=True,
                         task_desc=f"{paper_tag} [Gemini 審查]"
@@ -4377,6 +4387,7 @@ if __name__ == "__main__":
         print(f"打散後最後一組: {API_KEYS[-1][:15]}...")
     # 推薦使用 flash 模型處理多模態 (Vision) 任務，速度快且便宜
     MODELS = [
+        "gemini-3.7-flash",
         "gemini-3.6-flash",         
         "gemini-3.5-flash",         
         "gemini-3-flash",           
