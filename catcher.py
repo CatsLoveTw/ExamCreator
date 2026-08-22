@@ -2183,6 +2183,11 @@ class ExamParser:
         return cleaned_questions
 
     def process_exam_paper(self, subject: str, year: str, exam_type: str, mock_tag: str, q_pdf: str, a_pdf: Optional[str], rubric_pdf: Optional[str], output_dir: str, skip_cover: bool = False, school_name: str = ""):
+        check_global_timeout()
+    
+        # 🚨 1. 關鍵修復：在函式最開頭初始化 doc 為 None，防止未賦值錯誤
+        doc = None
+        
         # 🚨 函數最頂層初始化審查紀錄變數與鎖，確保最後收尾存檔時 100% 可存取
         validation_records = []
         val_log_lock = threading.Lock()
@@ -3116,7 +3121,7 @@ class ExamParser:
             except Exception as e:
                 logging.error(f"寫入 Stage 1 快取失敗: {e}")
 
-            doc.close()
+            # doc.close()
             # === 第一階段 結束點 ===
 
         math_scope_instruction = ""
@@ -4092,7 +4097,12 @@ class ExamParser:
         
         logging.info(f"✅ [{year} {subject}] 處理完成！共擷取 {len(all_final_questions)} 題，已儲存至 {json_path}")
         # 🚨 關閉 PDF 文件手把
-        doc.close()
+        if doc is not None:
+            try:
+                if not doc.is_closed:
+                    doc.close()
+            except Exception:
+                pass
 
 # 4. 自動尋找檔案腳本 (自動化遍歷)
 # ==========================================
