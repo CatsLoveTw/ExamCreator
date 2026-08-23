@@ -1150,20 +1150,15 @@ class GeminiFreeTierManager:
     def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
         with self.lock:
             msg = error_msg.lower()
-            is_quota = any(k in msg for k in ["quota", "resource_exhausted", "free_tier", "limit_exceeded"])
-            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd"])
+            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd", "day limit"])
             
-            if is_rpd or (is_quota and "day" in msg):
+            if is_rpd:
                 key.mark_rpd_exhausted()
                 logging.warning(f"🚨 [RPD 每日上限] 金鑰 {key.api_key[:8]}... 已達每日總配額上限，轉入每日冷卻。")
-            elif is_quota:
-                # 觸發 TPM / Quota 限制：強制鎖定該金鑰 300 秒 (5分鐘)，切斷無意義的死循環
-                key.request_times.extend([time.time() + 240] * 20)
-                logging.warning(f"⏳ [TPM/配額深層鎖定] 金鑰 {key.api_key[:8]}... 觸發配額上限，進入 300 秒深層冷卻。")
             else:
-                # 普通 RPM 限流：鎖定 90 秒
-                key.request_times.extend([time.time() + 30] * 15)
-                logging.info(f"⏳ [RPM 短暫鎖定] 金鑰 {key.api_key[:8]}... 觸發 429 限流，進入 90 秒冷卻。")
+                # 🚀 優化：429 多數只是 1 秒內的微突發或短期 TPM 滿，短暫冷卻 5~8 秒即可，不要鎖定數分鐘
+                key.request_times.extend([time.time() + 6] * 3)
+                logging.info(f"⏳ [429 快速切換] 金鑰 {key.api_key[:8]}... 觸發短暫限流，冷卻 6 秒並切換其他金鑰。")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=10, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
@@ -1202,9 +1197,9 @@ class GeminiFreeTierManager:
                 else:
                     thinking_config = types.ThinkingConfig(thinking_level="MINIMAL")
             try:
-                # 🚨 核心修改：加大請求平滑間隔 (8~15秒)，有效避開 Google TPM 限流峰值
+                # 🚀 優化：移除 8~15 秒強制睡眠，改為極短隨機微抖動（0.1~0.4秒），避免多線程同時撞擊同一毫秒
                 import random
-                smart_sleep(random.uniform(8.0, 15.0))
+                smart_sleep(random.uniform(0.1, 0.4))
 
                 desc_str = f" {task_desc}" if task_desc else ""
                 print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
@@ -1337,9 +1332,20 @@ class GeminiFreeTierManager:
                 raise ree
             except APIError as e:
                 err_str = str(e).lower()
+                
+                # 🚀 優化 1：遇到 503/504 伺服器過載，退避 1~2 秒並立即換 Key/換模型，不浪費時間
                 if e.code == 503 or "unavailable" in err_str or e.code == 504 or "gateway timeout" in err_str:
-                    logging.warning(f"⚠️ [503 伺服器忙碌] 遇到臨時性服務過載，將於 3 秒後自動重試（不計入失敗次數）...")
-                    smart_sleep(3)
+                    logging.warning(f"⚠️ [503 伺服器忙碌] Google 伺服器過載，立即切換金鑰/模型重試...")
+                    smart_sleep(1.5)
+                    attempts += 1
+                    continue
+                
+                # 🚀 優化 2：處理 400 Bad Request（防止因 Thinking 參數或 Token 溢出導致重複崩潰）
+                if e.code == 400 or "invalid_argument" in err_str:
+                    logging.warning(f"⚠️ [400 參數不相容] 模型 {model} 發生 400 錯誤: {e}，自動關閉 Thinking 並降級重試...")
+                    enable_thinking = False
+                    attempts += 1
+                    smart_sleep(1.0)
                     continue
                 
                 # 🚨 新增：401 Unauthorized 錯誤處理（無效/過期金鑰）
@@ -3998,7 +4004,8 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = min(len(API_KEYS), 4) # 根據 Key 數量決定並發量
+        # 🚀 優化：提高線程數上限至 Key 數量的 2 倍（最多 16 條），徹底跑滿可用額度
+        max_workers = max(2, min(len(API_KEYS) * 2, 16))
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
