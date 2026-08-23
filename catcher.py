@@ -2269,20 +2269,42 @@ class ExamParser:
         raw_extracted_json_path = json_path.replace("_database.json", "_raw_extracted.json") # 🆕 第一階段題目快取檔路徑
         
         if os.path.exists(json_path):
-            # 🚨 核心優化：在跳過已存在的 Database 之前，先加載並檢查該檔案中是否含有簡體字，若有則自動轉為繁體並覆寫
             try:
                 with open(json_path, "r", encoding="utf-8") as f:
-                    old_data = json.load(f)
-                new_data = s2t_recursive(old_data)
-                if old_data != new_data:
-                    logging.info(f"🔄 [歷史資料庫轉換] 偵測到已存在資料庫 {json_path} 中含有簡體字，已自動對其進行繁體標準化轉換並覆寫！")
-                    with open(json_path, "w", encoding="utf-8") as f:
-                        json.dump(new_data, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                logging.error(f"讀取、修復或轉換現有資料庫 {json_path} 時發生未預期錯誤: {e}")
+                    existing_data = json.load(f)
                 
-            logging.info(f"⏭️  {json_path} 已存在，自動跳過。")
-            return
+                # 1. 繁簡轉換檢查
+                existing_data = s2t_recursive(existing_data)
+                
+                # 2. 🚨 核心品質巡檢：檢查現有 Database 是否包含「超時失敗」或「無效詳解」
+                has_corrupted_solution = False
+                valid_items = []
+                
+                for q_item in existing_data:
+                    sol_text = str(q_item.get("detailed_solution", ""))
+                    if is_valid_solution(sol_text):
+                        valid_items.append(q_item)
+                    else:
+                        has_corrupted_solution = True
+                        logging.warning(f"🔍 [發現殘損題目] {json_path} 中的題號 {q_item.get('question_number')} 詳解為超時或無效狀態！")
+
+                # 若所有題目都是高品質完美解答，安全跳過
+                if not has_corrupted_solution and len(valid_items) == len(existing_data):
+                    logging.info(f"⏭️  {json_path} 已存在且品質 100% 完美，自動跳過。")
+                    return
+                else:
+                    # 發現有瑕疵/超時題目！自動降級為 partial 暫存檔，並刪除無效的 database.json 觸發重新修復
+                    logging.warning(f"⚠️ [觸發自動修復重算] {json_path} 發現含有未完成或超時的題目，自動降級為 partial 檔案並重新解題！")
+                    with open(partial_json_path, "w", encoding="utf-8") as f_part:
+                        json.dump(valid_items, f_part, ensure_ascii=False, indent=4)
+                    
+                    try:
+                        os.remove(json_path)
+                    except Exception:
+                        pass
+                        
+            except Exception as e:
+                logging.error(f"讀取現有資料庫 {json_path} 進行品質巡檢失敗: {e}")
             
         # 4. 建立這份試卷專屬的圖片資料夾
         img_dir = os.path.join(output_dir, type_folder, "images", spec_name)
