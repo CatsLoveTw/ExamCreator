@@ -106,9 +106,12 @@ def s2t_recursive(obj):
     return obj
 
 def natural_sort_key(s):
-    """用於題號自然排序（數值大小），防範字元排序 Bug（如 '10' 排在 '2' 前面）"""
-    import re
-    parts = re.split(r'(\d+)', str(s))
+    """用於題號高精度自然排序（支援阿拉伯數字、中文數字『一、二、三』、子題號『(1)、(2)』及破折號）"""
+    cn_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+    s_str = str(s).strip()
+    for cn, num in cn_map.items():
+        s_str = s_str.replace(cn, f"{num:02d}")
+    parts = re.split(r'(\d+)', s_str)
     return [int(text) if text.isdigit() else text.lower() for text in parts]
 
 def clean_ocr_answer_format(ans_str: str) -> str:
@@ -359,25 +362,28 @@ def is_valid_solution(sol_text: str) -> bool:
     invalid_keywords = ["超時或失敗", "系統提示", "引發系統內部", "無法生成", "未完成", "崩潰"]
     return not any(kw in sol_text for kw in invalid_keywords)
     
+PARTIAL_SAVE_LOCK = threading.Lock()
+
 def save_partial_progress_immediately(partial_json_path: str, questions_list: list):
-    """每當有題目成功通過驗證，立刻將記憶體中的最新進度安全寫入硬碟"""
-    try:
-        # 過濾出有效詳解並清洗路徑
-        valid_qs = [q for q in questions_list if is_valid_solution(q.get("detailed_solution"))]
-        
-        # 深拷貝並剔除不可序列化的 PIL 影像物件
-        clean_qs = []
-        for q in valid_qs:
-            q_copy = dict(q)
-            q_copy.pop('_cropped_pil_images', None)
-            clean_qs.append(q_copy)
+    """每當有題目成功通過驗證，立刻將記憶體中的最新進度安全寫入硬碟（具備全域執行緒安全鎖）"""
+    with PARTIAL_SAVE_LOCK:
+        try:
+            # 過濾出有效詳解並清洗路徑
+            valid_qs = [q for q in questions_list if is_valid_solution(q.get("detailed_solution"))]
             
-        # 寫入實體暫存檔
-        with open(partial_json_path, "w", encoding="utf-8") as f:
-            json.dump(clean_qs, f, ensure_ascii=False, indent=4)
-        logging.info(f"💾 [即時落盤] 已自動將當前 {len(clean_qs)} 題最新進度寫入實體暫存檔：{os.path.basename(partial_json_path)}")
-    except Exception as e:
-        logging.error(f"⚠️ 即時存檔失敗: {e}")
+            # 深拷貝並剔除不可序列化的 PIL 影像物件
+            clean_qs = []
+            for q in valid_qs:
+                q_copy = dict(q)
+                q_copy.pop('_cropped_pil_images', None)
+                clean_qs.append(q_copy)
+                
+            # 寫入實體暫存檔
+            with open(partial_json_path, "w", encoding="utf-8") as f:
+                json.dump(clean_qs, f, ensure_ascii=False, indent=4)
+            logging.info(f"💾 [即時落盤] 已自動將當前 {len(clean_qs)} 題最新進度寫入實體暫存檔：{os.path.basename(partial_json_path)}")
+        except Exception as e:
+            logging.error(f"⚠️ 即時存檔失敗: {e}")
         
 def load_invalid_key_patterns(summary_path):
     """從 key_errors_summary.txt 中，透過遮罩的前後綴精準恢復並提取所有已失效 (401/403) 的金鑰特徵"""
@@ -939,6 +945,33 @@ class GeminiFreeTierManager:
         self.groq_keys = [k.strip() for k in groq_keys_env.split(",") if k.strip()]
         self.groq_key_idx = 0
         self.groq_lock = threading.Lock() # 保護多執行緒切換金鑰的安全
+        
+        # 🧠 讀取或初始化模型 Token 上限記憶庫
+        self.model_limits_file = "model_limits.json"
+        self.model_token_limits = self.load_model_token_limits()
+
+    def load_model_token_limits(self) -> dict:
+        """從本地 model_limits.json 讀取已被記錄的模型 Token 上限"""
+        if os.path.exists(self.model_limits_file):
+            try:
+                with open(self.model_limits_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    logging.info(f"🧠 [模型上限記憶庫] 成功載入現有模型 Token 配置: {data}")
+                    return data
+            except Exception as e:
+                logging.warning(f"讀取 {self.model_limits_file} 失敗: {e}")
+        return {}
+
+    def update_and_save_model_limit(self, model: str, limit: int):
+        """動態更新並持久化記錄該模型的 Token 上限"""
+        with self.lock:
+            self.model_token_limits[model] = limit
+            try:
+                with open(self.model_limits_file, "w", encoding="utf-8") as f:
+                    json.dump(self.model_token_limits, f, ensure_ascii=False, indent=4)
+                logging.info(f"💾 [上限記憶保存] 已將模型 {model} 的最大輸出 Token 上限記錄為 {limit}！")
+            except Exception as e:
+                logging.error(f"無法寫入 {self.model_limits_file}: {e}")
 
 
     def log_key_error(self, key_str, error_code, error_message):
@@ -1150,20 +1183,15 @@ class GeminiFreeTierManager:
     def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
         with self.lock:
             msg = error_msg.lower()
-            is_quota = any(k in msg for k in ["quota", "resource_exhausted", "free_tier", "limit_exceeded"])
-            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd"])
+            is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd", "day limit"])
             
-            if is_rpd or (is_quota and "day" in msg):
+            if is_rpd:
                 key.mark_rpd_exhausted()
                 logging.warning(f"🚨 [RPD 每日上限] 金鑰 {key.api_key[:8]}... 已達每日總配額上限，轉入每日冷卻。")
-            elif is_quota:
-                # 觸發 TPM / Quota 限制：強制鎖定該金鑰 300 秒 (5分鐘)，切斷無意義的死循環
-                key.request_times.extend([time.time() + 240] * 20)
-                logging.warning(f"⏳ [TPM/配額深層鎖定] 金鑰 {key.api_key[:8]}... 觸發配額上限，進入 300 秒深層冷卻。")
             else:
-                # 普通 RPM 限流：鎖定 90 秒
-                key.request_times.extend([time.time() + 30] * 15)
-                logging.info(f"⏳ [RPM 短暫鎖定] 金鑰 {key.api_key[:8]}... 觸發 429 限流，進入 90 秒冷卻。")
+                # 🚀 優化：429 限流只鎖定該 Key 6 秒並快速換其他 Key 請求，不再鎖定 300 秒
+                key.request_times.extend([time.time() + 6] * 3)
+                logging.info(f"⏳ [429 快速切換] 金鑰 {key.api_key[:8]}... 短暫冷卻 6 秒並切換其他金鑰。")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=10, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
@@ -1202,25 +1230,32 @@ class GeminiFreeTierManager:
                 else:
                     thinking_config = types.ThinkingConfig(thinking_level="MINIMAL")
             try:
-                # 🚨 核心修改：加大請求平滑間隔 (8~15秒)，有效避開 Google TPM 限流峰值
+                # 🚀 優化：移除 8~15 秒強制等待，改為 0.1~0.3 秒微抖動防多線程撞車
                 import random
-                smart_sleep(random.uniform(8.0, 15.0))
+                smart_sleep(random.uniform(0.1, 0.3))
 
                 desc_str = f" {task_desc}" if task_desc else ""
-                print(f"🔹{desc_str} 嘗試使用模型 {model} 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
+                
+                # 🚀 動態載入該模型專屬的 Token 上限（若無記錄則預設先從最高 65536 開始嘗試）
+                model_max_tokens = self.model_token_limits.get(model, 65536)
+                
+                print(f"🔹{desc_str} 嘗試使用模型 {model} (Max Tokens: {model_max_tokens}) 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
                 # 每次執行時顯示金鑰狀態
                 self.print_keys_status()
+
+                gen_config = types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    max_output_tokens=model_max_tokens,
+                    response_schema=response_schema,
+                    temperature=temperature,
+                )
+                if thinking_config:
+                    gen_config.thinking_config = thinking_config
 
                 response = client.models.generate_content(
                     model=model,
                     contents=contents,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        max_output_tokens=65535,
-                        response_schema=response_schema,
-                        temperature=temperature,
-                        thinking_config=thinking_config
-                    ),
+                    config=gen_config,
                 )
 
                 if not response:
@@ -1337,31 +1372,70 @@ class GeminiFreeTierManager:
                 raise ree
             except APIError as e:
                 err_str = str(e).lower()
-                if e.code == 503 or "unavailable" in err_str or e.code == 504 or "gateway timeout" in err_str:
-                    logging.warning(f"⚠️ [503 伺服器忙碌] 遇到臨時性服務過載，將於 3 秒後自動重試（不計入失敗次數）...")
-                    smart_sleep(3)
-                    continue
                 
-                # 🚨 新增：401 Unauthorized 錯誤處理（無效/過期金鑰）
+                # 🚀 404 模型不存在：直接跳過該模型，不浪費 6 次重試
+                if e.code == 404 or "not found" in err_str or "is not found for api version" in err_str:
+                    logging.warning(f"⏭️ [404 模型無效] 專案不支援模型 {target_model}，立即剔除並切換下一梯隊模型...")
+                    if target_model in candidate_models:
+                        candidate_models.remove(target_model)
+                    smart_sleep(0.5)
+                    continue
+
+                if e.code == 503 or "unavailable" in err_str or e.code == 504 or "gateway timeout" in err_str:
+                    logging.warning(f"⚠️ [503 伺服器過載] 立即換金鑰/換模型重試...")
+                    smart_sleep(1.0)
+                    attempts += 1
+                    continue
+
+                # 🚨 401 Unauthorized 錯誤處理（無效/過期金鑰）
                 if e.code == 401 or "unauthorized" in err_str or "api key not valid" in err_str:
                     with self.lock:
                         key_obj.is_disabled = True
                         key_obj.disable_reason = "401_Unauthorized"
                     self.log_key_error(key_obj.api_key, 401, "金鑰無效、過期或拼寫錯誤")
-                    logging.warning(f"⚠️ [401 金鑰無效] 金鑰 {key_obj.api_key[:8]}... 被判定為無效，已將其永久停用，並記錄至 key_errors_summary.txt。")
-                    # 不計入當前內容的嘗試次數，直接換下一組金鑰重試
+                    logging.warning(f"⚠️ [401 金鑰無效] 金鑰 {key_obj.api_key[:8]}... 被判定為無效，已永久停用。")
                     continue
 
-                # 🚨 新增：403 Forbidden 錯誤處理（地區拒絕、未開通 API 或帳單欠費）
+                # 🚨 403 Forbidden 錯誤處理（地區拒絕、未開通 API 或帳單欠費）
                 if e.code == 403 or "forbidden" in err_str or "permission denied" in err_str or "restricted" in err_str:
                     with self.lock:
                         key_obj.is_disabled = True
                         key_obj.disable_reason = "403_Forbidden"
-                    self.log_key_error(key_obj.api_key, 403, "存取被拒(未開通API、地區限制或帳單餘額欠費)")
-                    logging.warning(f"⚠️ [403 權限拒絕] 金鑰 {key_obj.api_key[:8]}... 存取被拒，已將其永久停用，並記錄至 key_errors_summary.txt。")
-                    # 不計入當前內容的嘗試次數，直接換下一組金鑰重試
+                    self.log_key_error(key_obj.api_key, 403, "存取被拒(未開通API、地區限制或帳單欠費)")
+                    logging.warning(f"⚠️ [403 權限拒絕] 金鑰 {key_obj.api_key[:8]}... 存取被拒，已永久停用。")
                     continue
-                
+
+                # 🚀 400 參數錯誤智慧嗅探：動態學習並降低該模型的 max_output_tokens 上限
+                if e.code == 400 or "invalid_argument" in err_str:
+                    current_limit = self.model_token_limits.get(model, 65536)
+                    new_limit = current_limit
+                    
+                    # 1. 嘗試從 Google 回傳的錯誤字串中精確提取最高上限數字 (例如: 'must be <= 8192' 或 'between 1 and 8192')
+                    match = re.search(r'(?:<=|between \d+ and|less than or equal to|maximum allowed|limit of)\s*(\d{4,5})', err_str)
+                    if match:
+                        new_limit = int(match.group(1))
+                        logging.warning(f"🎯 [精準嗅探] 從 Google 報錯中識別到模型 {model} 的真實上限為 {new_limit} tokens！")
+                    else:
+                        # 2. 若錯誤訊息沒有標明具體數字，依梯隊階梯式降級
+                        if current_limit > 32768:
+                            new_limit = 32768
+                        elif current_limit > 16384:
+                            new_limit = 16384
+                        elif current_limit > 8192:
+                            new_limit = 8192
+                        else:
+                            new_limit = 4096
+                        logging.warning(f"📉 [階梯降級] 模型 {model} 發生 400 錯誤，Token 上限自動從 {current_limit} 調降至 {new_limit}")
+                    
+                    # 3. 儲存至本地 json 記憶庫，下次同一模型直接使用此上限！
+                    self.update_and_save_model_limit(model, new_limit)
+                    
+                    # 4. 同時關閉可能不相容的 Thinking 設定
+                    enable_thinking = False
+                    attempts += 1
+                    smart_sleep(1.0)
+                    continue
+
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
                     # 預測下一次嘗試將使用的模型梯隊
@@ -1519,44 +1593,94 @@ class GeminiFreeTierManager:
 
 SUBJECT_FILE_LOCK = threading.Lock() # 在檔案頂端定義
 
-def clean_python_code_block(py_code: str) -> str:
-    """清理 Markdown 標記並修復常見的 Python 字串換行未閉合問題"""
+class DiagramResponse(BaseModel):
+    need_diagram: bool = Field(description="是否需要幾何圖形、函數波形、物理受力分析、生物演化/機制圖或化學相圖來輔助學生理解本題。")
+    python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
+
+def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
+    """清理 Markdown 標記，並使用 AST 語法編譯器在記憶體中精準定位並修復 unterminated string literal 語法錯誤與 LaTeX 渲染錯誤"""
+    import ast
     if not py_code:
         return ""
+    
+    # 1. 剝除 Markdown 代碼塊包裝
     py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
     
-    # 智慧修復：將字串中的字面量換行展開
-    py_code = py_code.replace('\\r\\n', '\n').replace('\\n', '\n').replace('\\t', '\t')
+    # 2. 自動清理重複的 matplotlib 後端設定
+    py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
     
-    # 🚨 強制在頂部注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文防亂碼設定
+    # 2.5 🚨 自動將包含 LaTeX 公式符號 ($ 或 \) 的單引號/雙引號字串加上 r 前綴，防範 Matplotlib 轉義崩潰
+    def wrap_raw_string(m):
+        prefix = m.group(1) or ""
+        quote = m.group(2)
+        content = m.group(3)
+        if ("$" in content or "\\" in content) and "r" not in prefix.lower():
+            return f'r{quote}{content}{quote}'
+        return m.group(0)
+        
+    py_code = re.sub(r'''(?<!\w)([frbFRB]*)(['"])((?:(?!(?<!\\)\2).)*)\2''', wrap_raw_string, py_code)
+    
+    # 3. 強制注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文字型配置
+    norm_target_path = target_filepath.replace("\\", "/")
     headless_header = """import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import numpy as np
 import os
 
-# 全局字型備選清單（覆蓋 Linux, GitHub Actions, Windows, macOS）
 plt.rcParams['font.sans-serif'] = [
     'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans TC', 
     'Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'DejaVu Sans', 'sans-serif'
 ]
 plt.rcParams['axes.unicode_minus'] = False
 """
-    # 移除重複的 import matplotlib.use
-    py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
-    return headless_header + "\n" + py_code
+    # 4. 確保結尾包含 savefig
+    if "plt.savefig" not in py_code:
+        py_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close()\n'
+        
+    full_code = headless_header + "\n" + py_code
+
+    # 5. 🚨 核心演算法：使用 ast.parse 精準定位未閉合字串的行號並修復
+    for _ in range(5):
+        try:
+            ast.parse(full_code)
+            break
+        except SyntaxError as e:
+            err_msg = str(e).lower()
+            if "unterminated" in err_msg or "eol while scanning" in err_msg:
+                lines = full_code.splitlines()
+                err_idx = (e.lineno - 1) if e.lineno and e.lineno <= len(lines) else -1
+                if 0 <= err_idx < len(lines) - 1:
+                    # 發現此行字串未閉合！將下一行接續併入本行，以 \\n 轉義替代實體換行
+                    lines[err_idx] = lines[err_idx] + r"\n" + lines[err_idx + 1].strip()
+                    lines.pop(err_idx + 1)
+                    full_code = "\n".join(lines)
+                    continue
+                elif 0 <= err_idx < len(lines):
+                    # 若在最後一行，補上閉合引號
+                    lines[err_idx] = lines[err_idx] + "')"
+                    full_code = "\n".join(lines)
+                    continue
+            break
+
+    return full_code
 
 def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, diagram_filepath: str, safe_q_num: str, task_tag: str = "", max_attempts: int = 2) -> bool:
-    """執行繪圖腳本，若遇到 SyntaxError 或執行失敗，自動將錯誤反饋給 AI 進行重試修復"""
+    """執行繪圖腳本，內建記憶體 AST 語法預檢，若執行失敗自動將錯誤反饋給 AI 重試修復"""
     import subprocess
     import uuid
-    # 確保父層資料夾存在，防止 savefig 拋 FileNotFoundError
-    os.makedirs(os.path.dirname(os.path.abspath(diagram_filepath)), exist_ok=True)
+    import ast
+    
+    norm_diagram_path = os.path.abspath(diagram_filepath).replace("\\", "/")
+    os.makedirs(os.path.dirname(norm_diagram_path), exist_ok=True)
     
     task_id = uuid.uuid4().hex[:6]
-    script_path = os.path.abspath(f"temp_draw_{safe_filename(str(safe_q_num))}_{task_id}.py")
+    # 使用純英數字元防止 Windows/Linux 路徑相容問題
+    clean_q_tag = re.sub(r'\W+', '_', str(safe_q_num))
+    script_path = os.path.abspath(f"temp_draw_{clean_q_tag}_{task_id}.py")
     current_prompt = initial_prompt
     
     for attempt in range(1, max_attempts + 1):
@@ -1573,34 +1697,47 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
             if not res or not res.get('need_diagram') or not res.get('python_code'):
                 return False
                 
-            py_code = clean_python_code_block(res['python_code'])
+            py_code = clean_and_repair_python_code(res['python_code'], norm_diagram_path)
             if not py_code:
                 return False
+                
+            # 🚨 記憶體層語法預檢：若 AST 解析出錯，不浪費時間開 subprocess
+            try:
+                ast.parse(py_code)
+            except SyntaxError as syn_err:
+                logging.warning(f"⚠️ [記憶體語法攔截] 題號 {safe_q_num} 第 {attempt} 次生成的 Python 語法有誤 ({syn_err})，直接要求 AI 修正...")
+                current_prompt = f"""
+                你生成的 Python 繪圖代碼存在語法錯誤 (SyntaxError: {syn_err})。
+                特別注意：所有在 ax.annotate() 或 plt.text() 中的字串必須寫在同一行內，換行請一律使用 '\\n'，嚴禁直接在單引號中斷行！
+                
+                請修正後重新輸出完整代碼，儲存至：
+                `{norm_diagram_path}`
+                """
+                continue
                 
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(py_code)
                 
-            # 🚨 關鍵修復：使用 sys.executable 保證與當前虛擬環境完全對齊
+            # 使用 sys.executable 保證虛擬環境一致
             result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=25)
             
-            if result.returncode == 0 and os.path.exists(diagram_filepath) and os.path.getsize(diagram_filepath) > 0:
-                logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(diagram_filepath)}")
+            if result.returncode == 0 and os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0:
+                logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(norm_diagram_path)}")
                 return True
             else:
                 err_msg = result.stderr.strip()
                 logging.warning(f"⚠️ [繪圖失敗 - 準備修復重試] 題號 {safe_q_num} (第 {attempt} 次嘗試): {err_msg[:140]}...")
-                # 將 Python 報錯反饋給 AI，要求其修正語法錯誤
                 current_prompt = f"""
-                你先前撰寫的 Python 繪圖程式碼在執行時發生了以下錯誤：
+                你先前撰寫的 Python 繪圖程式碼在執行時發生錯誤：
                 >>> {err_msg} <<<
                 
-                發生的程式碼片段如下：
+                錯誤程式碼：
                 ```python
                 {py_code}
                 ```
                 
-                請修正上述錯誤（特別注意單引號/雙引號跨行未閉合、字元轉義或變數名稱錯誤），重新輸出一段 100% 可成功執行的完整 Python 繪圖程式碼，並儲存至：
-                `{diagram_filepath}`
+                請修正語法（特別注意單引號/雙引號不可跨行斷開，字串內換行請使用 \\n），重新輸出 100% 可執行的程式碼，儲存至：
+                `{norm_diagram_path}`
                 """
         except subprocess.TimeoutExpired:
             logging.warning(f"⚠️ 題號 {safe_q_num} 繪圖腳本執行超時 (第 {attempt} 次嘗試)")
@@ -1611,7 +1748,7 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 try: os.remove(script_path)
                 except Exception: pass
                 
-    return os.path.exists(diagram_filepath) and os.path.getsize(diagram_filepath) > 0
+    return os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0
 def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
     """動態比對 AI 新增的考點與解題技巧，即時更新並覆寫至 subject.json"""
     global SUBJECT_TAXONOMY
@@ -2388,15 +2525,10 @@ class ExamParser:
                     missing_diagram_count = 0
                     base_dir = os.path.dirname(json_path)
                     
-                    class MissingDiagramResponse(BaseModel):
-                        need_diagram: bool = Field(description="是否需要繪製此圖。")
-                        python_code: str = Field(description="完整的 Python matplotlib 繪圖程式碼。")
-
                     for q_item in existing_data:
                         detailed_text = str(q_item.get("detailed_solution", ""))
                         safe_q_num = safe_filename(str(q_item.get('question_number', 'X')).replace(" ", ""))
                         
-                        # 搜尋所有引用的圖片路徑
                         # 🔍 支援 ./images/..., images/..., Windows 反斜線等多種路徑匹配
                         img_matches = re.findall(r'!\[.*?\]\((?:\./)?((?:images/|images\\)?[^)]*?diagram_[^)]+?\.png)\)', detailed_text, re.IGNORECASE)
                         for raw_img_path in img_matches:
@@ -2423,13 +2555,13 @@ class ExamParser:
                                 請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 繪製該圖形，並儲存至：
                                 `{full_img_path}`
                                 
-                                【規範】：
-                                1. 字串一律使用原始字串 r'...' 或加上完整閉合引號，防止 SyntaxError。
+                                【繪圖剛性要求】：
+                                1. 所有字串（特別是 ax.annotate / plt.text 中的文字）必須寫在同一行內，換行請使用 '\\n'，嚴禁直接斷行！
                                 2. 使用 plt.axis('equal') 保持幾何比例。
                                 3. 程式碼最後必須包含 `plt.savefig(r"{full_img_path}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。
                                 """
                                 
-                                if execute_and_fix_diagram_script(self.ai_manager, redraw_prompt, MissingDiagramResponse, full_img_path, safe_q_num, task_tag=f"[{spec_name} 補繪]"):
+                                if execute_and_fix_diagram_script(self.ai_manager, redraw_prompt, DiagramResponse, full_img_path, safe_q_num, task_tag=f"[{spec_name} 補繪]"):
                                     missing_diagram_count += 1
                                     
                     if missing_diagram_count > 0:
@@ -3658,17 +3790,13 @@ class ExamParser:
                                 valid_batch[idx]["_derived_ans"] = derived_ans
                                 logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
 
-                    # === 2026 架構：步驟四 - 自動幾何/函數圖解生成 (多圖內文掃描與自適應繪製) ===
-                    class DiagramResponse(BaseModel):
-                        need_diagram: bool = Field(description="是否需要幾何圖形、函數波形、物理受力分析或化學相圖來輔助學生理解本題。")
-                        python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
-
+                    # === 2026 架構：步驟四 - 自動幾何/函數/科學圖解生成 ===
                     for idx, sol in enumerate(salvaged_solutions):
                         q_data = valid_batch[idx]["q_data"]
                         q_sub = q_data.get("sub_subject", "")
                         
-                        # 僅針對數學、物理等理科啟動圖解生成
-                        if any(s in q_sub for s in ["數學", "物理", "化學", "自然"]):
+                        # 🚨 完整支援所有理科（數學、物理、化學、生物、地球科學、自然）
+                        if any(s in q_sub for s in ["數學", "物理", "化學", "生物", "地球科學", "自然"]):
                             safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
                             detailed_sol_text = sol.get('detailed_solution', '')
                             
@@ -3739,25 +3867,20 @@ class ExamParser:
                                 diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
                                 
                                 qwen_prompt = f"""
-                                你是一位頂尖的 Python 數學繪圖專家。以下是一道高中理科題目的題幹與詳細解答：
+                                你是一位在台灣大考教學界享有盛譽的 Python 高中科學圖解繪製專家。以下是一道高中理科題目的題幹與詳細解答：
                                 
                                 【題幹】：{q_data.get('question_text', '')}
                                 【詳細解答】：{detailed_sol_text}
                                 
-                                請評估這題是否需要「幾何圖形」、「函數波形」、「物理受力分析」或「化學相圖」來輔助學生理解。
-                                如果需要，請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 來繪製該圖形，並將圖片儲存至以下絕對路徑：
+                                請評估本題是否需要專業圖解輔助（如：幾何輔助線圖、函數極值與切線圖、物理受力自由體圖 Free-body Diagram、光路圖、電路圖、化學相圖/反應曲線、生物適應輻射/演化機制流程圖）。
+                                如果需要，請撰寫一段完整、美觀、高對比且符合出版水準的 Python 繪圖程式碼，並儲存至：
                                 `{diagram_filepath}`
                                 
-                                【繪圖剛性要求】：
-                                1. 圖片標示「允許且鼓勵使用繁體中文說明」。
-                                2. 必須在程式碼開會加入以下繁體中文與負號支援設定：
-                                   ```python
-                                   import matplotlib.pyplot as plt
-                                   plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'Noto Sans CJK TC', 'sans-serif']
-                                   plt.rcParams['axes.unicode_minus'] = False
-                                   ```
-                                3. 使用 plt.axis('equal') 保持幾何比例。
-                                4. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
+                                【出版級繪圖規範】：
+                                1. 允許且鼓勵使用繁體中文進行標註（如：點 $A$、外接圓、合力方向、基因頻率變化）。
+                                2. 所有文字標籤與註解（如 ax.annotate, plt.text）**必須寫在同一行內**，換行一律使用 '\\n'，嚴禁直接斷行。
+                                3. 2D 幾何請使用 `plt.axis('equal')` 保持真實比例；3D 空間請使用 `Axes3D`。
+                                4. 程式碼必須能獨立執行，最末尾必須包含 `plt.savefig(r"{diagram_filepath}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。
                                 """
                                 
                                 # 🚀 優化：使用具備語法自動修復與錯誤重試的執行器
@@ -3969,17 +4092,27 @@ class ExamParser:
                                         if recheck_dict.get('found_new_images') and recheck_dict.get('new_image_bboxes'):
                                             logging.info(f"🔍 {paper_tag} [發現新圖] 第 {q_data['question_number']} 題正在補裁切...")
                                             try:
+                                                # 🚨 防禦性初始化：確保字典中必定存在 image_paths 與 _cropped_pil_images
+                                                if 'image_paths' not in q_data:
+                                                    q_data['image_paths'] = []
+                                                if '_cropped_pil_images' not in q_data:
+                                                    q_data['_cropped_pil_images'] = []
+
                                                 with fitz.open(q_data['question_pdf_path']) as temp_doc:
                                                     cat = temp_doc.pdf_catalog()
                                                     if cat > 0: temp_doc.xref_set_key(cat, "StructTreeRoot", "null")
-                                                    target_page = temp_doc[q_data['page_number'] - 1]
+                                                    
+                                                    # 防止 page_number 索引越界
+                                                    page_idx = max(0, min(q_data.get('page_number', 1) - 1, len(temp_doc) - 1))
+                                                    target_page = temp_doc[page_idx]
                                                     
                                                     new_img_paths = self.execute_crop(target_page, recheck_dict['new_image_bboxes'], img_dir, f"Q{q_data['question_number']}_Extra")
                                                     
                                                     for path in new_img_paths:
                                                         if path not in q_data['image_paths']:
                                                             q_data['image_paths'].append(path)
-                                                            q_data['_cropped_pil_images'].append(Image.open(path))
+                                                            if os.path.exists(path):
+                                                                q_data['_cropped_pil_images'].append(Image.open(path))
                                                             q_data['has_image'] = True
                                             except Exception as e:
                                                 logging.error(f"補裁切失敗: {e}")
