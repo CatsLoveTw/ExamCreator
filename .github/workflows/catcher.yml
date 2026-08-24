@@ -21,18 +21,17 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install system dependencies & rclone
         run: |
-          # 安裝 Noto Sans 繁體中文字型以支援 Linux 雲端背景繪圖
-          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Install rclone (官方原生安裝)
-        run: |
-          sudo apt-get update && sudo apt-get install -y curl unzip
+          # 一次性安裝中文字型、curl 與 unzip，避免重複 apt-get update
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk curl unzip
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Configure rclone
         env:
@@ -98,9 +97,10 @@ jobs:
             cp -r ./gdrive_workspace/exam_database_output/* ./exam_database_output/ || true
           fi
           
-          # 複製知識庫與錯誤日誌
+          # 複製知識庫、金鑰錯誤日誌與【模型 Token 上限記憶庫】
           cp ./gdrive_workspace/subject.json ./subject.json 2>/dev/null || true
           cp ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
+          cp ./gdrive_workspace/model_limits.json ./model_limits.json 2>/dev/null || true
 
       - name: Run parser script
         timeout-minutes: 320 # 給予腳本最多 5.3 小時，超時將主動切斷並跳至下一步上傳進度
@@ -126,12 +126,18 @@ jobs:
             --checkers 32 \
             --config rclone.conf -v
 
-          # 備份根目錄關鍵日誌
+          # 備份根目錄關鍵日誌、金鑰儀表板與【模型 Token 上限記憶庫】
           if [ -f "./subject.json" ]; then
             rclone copyto ./subject.json gdrive:subject.json --config rclone.conf -v
           fi
           if [ -f "./key_errors_summary.txt" ]; then
             rclone copyto ./key_errors_summary.txt gdrive:key_errors_summary.txt --config rclone.conf -v
+          fi
+          if [ -f "./model_limits.json" ]; then
+            rclone copyto ./model_limits.json gdrive:model_limits.json --config rclone.conf -v
+          fi
+          if [ -f "./key_status.txt" ]; then
+            rclone copyto ./key_status.txt gdrive:key_status.txt --config rclone.conf -v
           fi
 
           echo "🎉 [第一階段完成] 所有 JSON 資料庫與 partial 暫存檔已 100% 安全存入 Google Drive！"
@@ -148,8 +154,5 @@ jobs:
             --drive-chunk-size 64M \
             --config rclone.conf -v
 
-          # 清除敏感金鑰與暫存
-          rm -f rclone.conf key.txt
-          
           # 清除敏感金鑰與暫存
           rm -f rclone.conf key.txt
