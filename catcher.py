@@ -1529,12 +1529,34 @@ def clean_python_code_block(py_code: str) -> str:
     
     # 智慧修復：將字串中的字面量換行展開
     py_code = py_code.replace('\\r\\n', '\n').replace('\\n', '\n').replace('\\t', '\t')
-    return py_code
+    
+    # 🚨 強制在頂部注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文防亂碼設定
+    headless_header = """import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import os
+
+# 全局字型備選清單（覆蓋 Linux, GitHub Actions, Windows, macOS）
+plt.rcParams['font.sans-serif'] = [
+    'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans TC', 
+    'Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'DejaVu Sans', 'sans-serif'
+]
+plt.rcParams['axes.unicode_minus'] = False
+"""
+    # 移除重複的 import matplotlib.use
+    py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
+    return headless_header + "\n" + py_code
 
 def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, diagram_filepath: str, safe_q_num: str, task_tag: str = "", max_attempts: int = 2) -> bool:
     """執行繪圖腳本，若遇到 SyntaxError 或執行失敗，自動將錯誤反饋給 AI 進行重試修復"""
     import subprocess
-    script_path = os.path.abspath(f"temp_draw_{safe_q_num}_{int(time.time()*1000)}.py")
+    import uuid
+    # 確保父層資料夾存在，防止 savefig 拋 FileNotFoundError
+    os.makedirs(os.path.dirname(os.path.abspath(diagram_filepath)), exist_ok=True)
+    
+    task_id = uuid.uuid4().hex[:6]
+    script_path = os.path.abspath(f"temp_draw_{safe_filename(str(safe_q_num))}_{task_id}.py")
     current_prompt = initial_prompt
     
     for attempt in range(1, max_attempts + 1):
@@ -1558,14 +1580,15 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(py_code)
                 
-            result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=20)
+            # 🚨 關鍵修復：使用 sys.executable 保證與當前虛擬環境完全對齊
+            result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=25)
             
             if result.returncode == 0 and os.path.exists(diagram_filepath) and os.path.getsize(diagram_filepath) > 0:
                 logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(diagram_filepath)}")
                 return True
             else:
                 err_msg = result.stderr.strip()
-                logging.warning(f"⚠️ [繪圖失敗 - 準備修復重試] 題號 {safe_q_num} (第 {attempt} 次嘗試): {err_msg[:120]}...")
+                logging.warning(f"⚠️ [繪圖失敗 - 準備修復重試] 題號 {safe_q_num} (第 {attempt} 次嘗試): {err_msg[:140]}...")
                 # 將 Python 報錯反饋給 AI，要求其修正語法錯誤
                 current_prompt = f"""
                 你先前撰寫的 Python 繪圖程式碼在執行時發生了以下錯誤：
@@ -1579,6 +1602,8 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 請修正上述錯誤（特別注意單引號/雙引號跨行未閉合、字元轉義或變數名稱錯誤），重新輸出一段 100% 可成功執行的完整 Python 繪圖程式碼，並儲存至：
                 `{diagram_filepath}`
                 """
+        except subprocess.TimeoutExpired:
+            logging.warning(f"⚠️ 題號 {safe_q_num} 繪圖腳本執行超時 (第 {attempt} 次嘗試)")
         except Exception as e:
             logging.error(f"❌ 繪圖嘗試發生例外 (題號 {safe_q_num}): {e}")
         finally:
@@ -1587,7 +1612,6 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 except Exception: pass
                 
     return os.path.exists(diagram_filepath) and os.path.getsize(diagram_filepath) > 0
-
 def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
     """動態比對 AI 新增的考點與解題技巧，即時更新並覆寫至 subject.json"""
     global SUBJECT_TAXONOMY
@@ -2373,10 +2397,16 @@ class ExamParser:
                         safe_q_num = safe_filename(str(q_item.get('question_number', 'X')).replace(" ", ""))
                         
                         # 搜尋所有引用的圖片路徑
-                        img_matches = re.findall(r'!\[.*?\]\((images/[^)]+)\)', detailed_text)
-                        for rel_img_path in img_matches:
+                        # 🔍 支援 ./images/..., images/..., Windows 反斜線等多種路徑匹配
+                        img_matches = re.findall(r'!\[.*?\]\((?:\./)?((?:images/|images\\)?[^)]*?diagram_[^)]+?\.png)\)', detailed_text, re.IGNORECASE)
+                        for raw_img_path in img_matches:
+                            # 正規化斜線
+                            clean_rel_path = raw_img_path.replace("\\", "/").lstrip("./")
+                            if not clean_rel_path.startswith("images/"):
+                                clean_rel_path = f"images/{spec_name}/{os.path.basename(clean_rel_path)}"
+                            
                             # 拼接成真實的硬碟檔案路徑
-                            full_img_path = os.path.abspath(os.path.join(base_dir, rel_img_path)).replace("\\", "/")
+                            full_img_path = os.path.abspath(os.path.join(base_dir, clean_rel_path)).replace("\\", "/")
                             
                             # 若發現詳解裡有寫圖片標記，但實體檔案不存在或大小為 0，立即啟動補繪！
                             if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
