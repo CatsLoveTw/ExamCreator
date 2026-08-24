@@ -1518,6 +1518,76 @@ class GeminiFreeTierManager:
 
 
 SUBJECT_FILE_LOCK = threading.Lock() # 在檔案頂端定義
+
+def clean_python_code_block(py_code: str) -> str:
+    """清理 Markdown 標記並修復常見的 Python 字串換行未閉合問題"""
+    if not py_code:
+        return ""
+    py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
+    py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
+    py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
+    
+    # 智慧修復：將字串中的字面量換行展開
+    py_code = py_code.replace('\\r\\n', '\n').replace('\\n', '\n').replace('\\t', '\t')
+    return py_code
+
+def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, diagram_filepath: str, safe_q_num: str, task_tag: str = "", max_attempts: int = 2) -> bool:
+    """執行繪圖腳本，若遇到 SyntaxError 或執行失敗，自動將錯誤反饋給 AI 進行重試修復"""
+    import subprocess
+    script_path = os.path.abspath(f"temp_draw_{safe_q_num}_{int(time.time()*1000)}.py")
+    current_prompt = initial_prompt
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            res, _ = ai_manager.generate_with_retry(
+                contents=[current_prompt],
+                response_schema=response_schema,
+                temperature=0.1,
+                preferred_model="gemini-3.5-flash-lite",
+                enable_thinking=False,
+                task_desc=f"{task_tag} (繪圖嘗試 {attempt}/{max_attempts})"
+            )
+            
+            if not res or not res.get('need_diagram') or not res.get('python_code'):
+                return False
+                
+            py_code = clean_python_code_block(res['python_code'])
+            if not py_code:
+                return False
+                
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(py_code)
+                
+            result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=20)
+            
+            if result.returncode == 0 and os.path.exists(diagram_filepath) and os.path.getsize(diagram_filepath) > 0:
+                logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(diagram_filepath)}")
+                return True
+            else:
+                err_msg = result.stderr.strip()
+                logging.warning(f"⚠️ [繪圖失敗 - 準備修復重試] 題號 {safe_q_num} (第 {attempt} 次嘗試): {err_msg[:120]}...")
+                # 將 Python 報錯反饋給 AI，要求其修正語法錯誤
+                current_prompt = f"""
+                你先前撰寫的 Python 繪圖程式碼在執行時發生了以下錯誤：
+                >>> {err_msg} <<<
+                
+                發生的程式碼片段如下：
+                ```python
+                {py_code}
+                ```
+                
+                請修正上述錯誤（特別注意單引號/雙引號跨行未閉合、字元轉義或變數名稱錯誤），重新輸出一段 100% 可成功執行的完整 Python 繪圖程式碼，並儲存至：
+                `{diagram_filepath}`
+                """
+        except Exception as e:
+            logging.error(f"❌ 繪圖嘗試發生例外 (題號 {safe_q_num}): {e}")
+        finally:
+            if os.path.exists(script_path):
+                try: os.remove(script_path)
+                except Exception: pass
+                
+    return os.path.exists(diagram_filepath) and os.path.getsize(diagram_filepath) > 0
+
 def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
     """動態比對 AI 新增的考點與解題技巧，即時更新並覆寫至 subject.json"""
     global SUBJECT_TAXONOMY
@@ -2288,9 +2358,54 @@ class ExamParser:
                         has_corrupted_solution = True
                         logging.warning(f"🔍 [發現殘損題目] {json_path} 中的題號 {q_item.get('question_number')} 詳解為超時或無效狀態！")
 
-                # 若所有題目都是高品質完美解答，安全跳過
+                # 若所有題目都是高品質解答，檢查是否有「詳解有引用但實體圖片丟失」的情況
                 if not has_corrupted_solution and len(valid_items) == len(existing_data):
-                    logging.info(f"⏭️  {json_path} 已存在且品質 100% 完美，自動跳過。")
+                    # 🔍 啟動圖片完整性巡檢 (Diagram Integrity Check)
+                    missing_diagram_count = 0
+                    base_dir = os.path.dirname(json_path)
+                    
+                    class MissingDiagramResponse(BaseModel):
+                        need_diagram: bool = Field(description="是否需要繪製此圖。")
+                        python_code: str = Field(description="完整的 Python matplotlib 繪圖程式碼。")
+
+                    for q_item in existing_data:
+                        detailed_text = str(q_item.get("detailed_solution", ""))
+                        safe_q_num = safe_filename(str(q_item.get('question_number', 'X')).replace(" ", ""))
+                        
+                        # 搜尋所有引用的圖片路徑
+                        img_matches = re.findall(r'!\[.*?\]\((images/[^)]+)\)', detailed_text)
+                        for rel_img_path in img_matches:
+                            # 拼接成真實的硬碟檔案路徑
+                            full_img_path = os.path.abspath(os.path.join(base_dir, rel_img_path)).replace("\\", "/")
+                            
+                            # 若發現詳解裡有寫圖片標記，但實體檔案不存在或大小為 0，立即啟動補繪！
+                            if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
+                                os.makedirs(os.path.dirname(full_img_path), exist_ok=True)
+                                logging.warning(f"🛠️ [遺失圖片補繪] 偵測到 {spec_name} 題號 {safe_q_num} 缺少圖片：{os.path.basename(full_img_path)}，正在啟動 AI 補繪...")
+                                
+                                redraw_prompt = f"""
+                                你是一位頂尖的 Python 數學與科學繪圖專家。
+                                以下題目在詳解中引用了圖表，但實體檔案遺失，需要請你重新繪製：
+                                
+                                【題幹】：{q_item.get('question_text', '')}
+                                【詳細解答】：{detailed_text}
+                                
+                                請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 繪製該圖形，並儲存至：
+                                `{full_img_path}`
+                                
+                                【規範】：
+                                1. 字串一律使用原始字串 r'...' 或加上完整閉合引號，防止 SyntaxError。
+                                2. 使用 plt.axis('equal') 保持幾何比例。
+                                3. 程式碼最後必須包含 `plt.savefig(r"{full_img_path}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。
+                                """
+                                
+                                if execute_and_fix_diagram_script(self.ai_manager, redraw_prompt, MissingDiagramResponse, full_img_path, safe_q_num, task_tag=f"[{spec_name} 補繪]"):
+                                    missing_diagram_count += 1
+                                    
+                    if missing_diagram_count > 0:
+                        logging.info(f"🎉 [補繪完成] 已成功為 {spec_name} 補齊了 {missing_diagram_count} 張遺失的圖表！")
+
+                    logging.info(f"⏭️  {json_path} 已存在且題意與圖表 100% 完整，自動跳過。")
                     return
                 else:
                     # 發現有瑕疵/超時題目！自動降級為 partial 暫存檔，並刪除無效的 database.json 觸發重新修復
@@ -3578,52 +3693,15 @@ class ExamParser:
                                     5. 程式碼必須能獨立執行，最末尾必須包含 `plt.savefig(r"{diagram_filepath}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。輸出純 Python 程式碼，不要包含 ```python 標籤。
                                     """
                                     
-                                    script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_{img_num}.py")
-                                    try:
-                                        res, err = self.ai_manager.generate_with_retry(
-                                            contents=[qwen_prompt],
-                                            response_schema=DiagramResponse,
-                                            temperature=0.1,
-                                            preferred_model="gemini-3.5-flash-lite",
-                                            enable_thinking=False,
-                                            task_desc=f"{paper_tag} [繪製 圖{img_num}]"
-                                        )
-                                        
-                                        if res and res.get('need_diagram') and res.get('python_code'):
-                                            py_code = res['python_code'].strip()
-                                            # 🚨 清理 Markdown 程式碼區塊標記
-                                            py_code = re.sub(r'^```python\s*', '', py_code)
-                                            py_code = re.sub(r'\s*```$', '', py_code).strip()
-                                            
-                                            # 智慧修復：若整段程式碼被壓縮在單一行且包含 '\n' 字面量，自動展平為多行
-                                            py_code = py_code.replace('\\n', '\n').replace('\\t', '\t')
-                                            py_code = py_code.replace('\r\n', '\n')
-
-                                            # 再次確保 Markdown 標記被乾淨剔除
-                                            py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
-                                            py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
-                                            py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
-                                            
-                                            with open(script_path, "w", encoding="utf-8") as f:
-                                                f.write(py_code)
-                                                
-                                            logging.info(f"🎨 正在背景執行 Gemini 繪圖腳本 (題號 {safe_q_num} 的圖 {img_num})...")
-                                            import subprocess
-                                            result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=30)
-                                            
-                                            if result.returncode == 0 and os.path.exists(diagram_filepath):
-                                                logging.info(f"✅ 題號 {safe_q_num} 的圖 {img_num} 自動圖解生成並儲存成功！")
-                                            else:
-                                                logging.warning(f"⚠️ 題號 {safe_q_num} 的圖 {img_num} 腳本執行失敗: {result.stderr}")
-                                    except Exception as e:
-                                        logging.error(f"自動幾何圖解模組發生錯誤 (題號 {safe_q_num} 圖 {img_num}): {e}")
-                                    finally:
-                                        # 💡 不論執行成功、發生異常、或超時中斷，100% 執行清理
-                                        if script_path and os.path.exists(script_path):
-                                            try:
-                                                os.remove(script_path)
-                                            except Exception as cleanup_err:
-                                                logging.warning(f"⚠️ 無法刪除暫存檔 {script_path}: {cleanup_err}")
+                                    # 🚀 優化：使用具備語法自動修復與錯誤重試的執行器
+                                    execute_and_fix_diagram_script(
+                                        self.ai_manager, 
+                                        qwen_prompt, 
+                                        DiagramResponse, 
+                                        diagram_filepath, 
+                                        safe_q_num=f"{safe_q_num}_{img_num}", 
+                                        task_tag=f"{paper_tag} [繪製 圖{img_num}]"
+                                    )
                             
                             # 狀況 B：保底機制（如果 AI 忘記在內文嵌入圖片標籤，我們自動在最下方補上一張預設的「圖 1」）
                             else:
@@ -3652,55 +3730,17 @@ class ExamParser:
                                 4. 程式碼必須能獨立執行，最末尾必須包含將圖片儲存至 `{diagram_filepath}` 的指令，且不需要任何 Markdown 標記或 ```python 格式。
                                 """
                                 
-                                script_path = os.path.abspath(f"temp_draw_Q{safe_q_num}_1.py")
-                                try:
-                                    res, err = self.ai_manager.generate_with_retry(
-                                        contents=[qwen_prompt],
-                                        response_schema=DiagramResponse,
-                                        temperature=0.1,
-                                        preferred_model="gemini-3.5-flash-lite",
-                                        enable_thinking=False,
-                                        task_desc=f"{paper_tag} [保底繪圖]"
-                                    )
-                                    
-                                    if res and res.get('need_diagram') and res.get('python_code'):
-                                        py_code = res['python_code'].strip()
-                                        # 🚨 清理 Markdown 程式碼區塊標記
-                                        py_code = re.sub(r'^```python\s*', '', py_code)
-                                        py_code = re.sub(r'\s*```$', '', py_code).strip()
-                                        
-                                        # 智慧修復：若整段程式碼被壓縮在單一行且包含 '\n' 字面量，自動展平為多行
-                                        py_code = py_code.replace('\\n', '\n').replace('\\t', '\t')
-                                        py_code = py_code.replace('\r\n', '\n')
-
-                                        # 再次確保 Markdown 標記被乾淨剔除
-                                        py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
-                                        py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
-                                        py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
-                                        
-                                        with open(script_path, "w", encoding="utf-8") as f:
-                                            f.write(py_code)
-                                            
-                                        logging.info(f"🎨 正在背景執行 Gemini 保底繪圖腳本 (題號 {safe_q_num})...")
-                                        import subprocess
-                                        result = subprocess.run(["python", script_path], capture_output=True, text=True, timeout=15)
-                                        
-                                        if result.returncode == 0 and os.path.exists(diagram_filepath):
-                                            # 自動將圖片標記附加至詳解的最下方
-                                            rel_path = f"images/{os.path.basename(img_dir)}/{diagram_filename}"
-                                            sol['detailed_solution'] += f"\n\n### 【AI 幾何解析圖】\n![圖 1]({rel_path})"
-                                            logging.info(f"✅ 題號 {safe_q_num} 保底圖解生成與附加成功！")
-                                        else:
-                                            logging.warning(f"⚠️ 題號 {safe_q_num} 保底腳本執行失敗: {result.stderr}")
-                                except Exception as e:
-                                    logging.error(f"自動幾何圖解保底模組發生錯誤 (題號 {safe_q_num}): {e}")
-                                finally:
-                                    # 💡 確保不論執行結果如何，皆落實暫存檔回收
-                                    if script_path and os.path.exists(script_path):
-                                        try:
-                                            os.remove(script_path)
-                                        except Exception as cleanup_err:
-                                            logging.warning(f"⚠️ 無法刪除暫存檔 {script_path}: {cleanup_err}")
+                                # 🚀 優化：使用具備語法自動修復與錯誤重試的執行器
+                                if execute_and_fix_diagram_script(
+                                    self.ai_manager, 
+                                    qwen_prompt, 
+                                    DiagramResponse, 
+                                    diagram_filepath, 
+                                    safe_q_num=f"{safe_q_num}_1", 
+                                    task_tag=f"{paper_tag} [保底繪圖]"
+                                ):
+                                    rel_path = f"images/{os.path.basename(img_dir)}/{diagram_filename}"
+                                    sol['detailed_solution'] += f"\n\n### 【AI 幾何解析圖】\n![圖 1]({rel_path})"
 
                     # 執行原有的 Markdown 格式化轉換
                     for sol in salvaged_solutions:
