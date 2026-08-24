@@ -3998,7 +3998,7 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = min(len(API_KEYS), 4) # 根據 Key 數量決定並發量
+        max_workers = max(2, min(len(API_KEYS) * 2, 16))
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
