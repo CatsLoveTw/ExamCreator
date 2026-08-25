@@ -1598,29 +1598,17 @@ class DiagramResponse(BaseModel):
     python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
 
 def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
-    """清理 Markdown 標記，並使用 AST 語法編譯器在記憶體中精準定位並修復 unterminated string literal 語法錯誤與 LaTeX 渲染錯誤"""
-    import ast
+    """清理 Markdown 標記並安全注入 Headless 與中文字型配置（絕不人為竄改字串內容，避免破壞語法）"""
     if not py_code:
         return ""
     
-    # 1. 剝除 Markdown 代碼塊包裝
+    # 1. 剝除 Markdown 代碼塊標記
     py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
     
-    # 2. 自動清理重複的 matplotlib 後端設定
+    # 2. 清理重複的後端設定
     py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
-    
-    # 2.5 🚨 自動將包含 LaTeX 公式符號 ($ 或 \) 的單引號/雙引號字串加上 r 前綴，防範 Matplotlib 轉義崩潰
-    def wrap_raw_string(m):
-        prefix = m.group(1) or ""
-        quote = m.group(2)
-        content = m.group(3)
-        if ("$" in content or "\\" in content) and "r" not in prefix.lower():
-            return f'r{quote}{content}{quote}'
-        return m.group(0)
-        
-    py_code = re.sub(r'''(?<!\w)([frbFRB]*)(['"])((?:(?!(?<!\\)\2).)*)\2''', wrap_raw_string, py_code)
     
     # 3. 強制注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文字型配置
     norm_target_path = target_filepath.replace("\\", "/")
@@ -1637,50 +1625,25 @@ plt.rcParams['font.sans-serif'] = [
 ]
 plt.rcParams['axes.unicode_minus'] = False
 """
-    # 4. 確保結尾包含 savefig
-    if "plt.savefig" not in py_code:
-        py_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close()\n'
-        
     full_code = headless_header + "\n" + py_code
 
-    # 5. 🚨 核心演算法：使用 ast.parse 精準定位未閉合字串的行號並修復
-    for _ in range(5):
-        try:
-            ast.parse(full_code)
-            break
-        except SyntaxError as e:
-            err_msg = str(e).lower()
-            if "unterminated" in err_msg or "eol while scanning" in err_msg:
-                lines = full_code.splitlines()
-                err_idx = (e.lineno - 1) if e.lineno and e.lineno <= len(lines) else -1
-                if 0 <= err_idx < len(lines) - 1:
-                    # 發現此行字串未閉合！將下一行接續併入本行，以 \\n 轉義替代實體換行
-                    lines[err_idx] = lines[err_idx] + r"\n" + lines[err_idx + 1].strip()
-                    lines.pop(err_idx + 1)
-                    full_code = "\n".join(lines)
-                    continue
-                elif 0 <= err_idx < len(lines):
-                    # 若在最後一行，補上閉合引號
-                    lines[err_idx] = lines[err_idx] + "')"
-                    full_code = "\n".join(lines)
-                    continue
-            break
-
+    # 4. 確保尾部包含 savefig 與 close
+    if "plt.savefig" not in full_code:
+        full_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close()\n'
+        
     return full_code
 
 def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, diagram_filepath: str, safe_q_num: str, task_tag: str = "", max_attempts: int = 2) -> bool:
-    """執行繪圖腳本，內建記憶體 AST 語法預檢，若執行失敗自動將錯誤反饋給 AI 重試修復"""
+    """執行繪圖腳本，內建記憶體 AST 語法預檢，出錯直接反饋給 AI 重生（不阻塞主線流程）"""
     import subprocess
-    import uuid
     import ast
     
     norm_diagram_path = os.path.abspath(diagram_filepath).replace("\\", "/")
     os.makedirs(os.path.dirname(norm_diagram_path), exist_ok=True)
     
-    task_id = uuid.uuid4().hex[:6]
-    # 使用純英數字元防止 Windows/Linux 路徑相容問題
-    clean_q_tag = re.sub(r'\W+', '_', str(safe_q_num))
-    script_path = os.path.abspath(f"temp_draw_{clean_q_tag}_{task_id}.py")
+    # 使用時間戳記生成乾淨的純英數檔名
+    clean_q_tag = re.sub(r'[^a-zA-Z0-9_]', '_', str(safe_q_num))
+    script_path = os.path.abspath(f"temp_draw_{clean_q_tag}_{int(time.time()*1000)}.py")
     current_prompt = initial_prompt
     
     for attempt in range(1, max_attempts + 1):
@@ -1701,16 +1664,19 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
             if not py_code:
                 return False
                 
-            # 🚨 記憶體層語法預檢：若 AST 解析出錯，不浪費時間開 subprocess
+            # 🚨 記憶體 AST 預檢：若語法錯誤，直接將報錯訊息回傳 AI 要求其重寫
             try:
                 ast.parse(py_code)
             except SyntaxError as syn_err:
-                logging.warning(f"⚠️ [記憶體語法攔截] 題號 {safe_q_num} 第 {attempt} 次生成的 Python 語法有誤 ({syn_err})，直接要求 AI 修正...")
+                logging.warning(f"⚠️ [語法攔截] 題號 {safe_q_num} 第 {attempt} 次語法有誤 ({syn_err})，要求 AI 重寫...")
                 current_prompt = f"""
                 你生成的 Python 繪圖代碼存在語法錯誤 (SyntaxError: {syn_err})。
-                特別注意：所有在 ax.annotate() 或 plt.text() 中的字串必須寫在同一行內，換行請一律使用 '\\n'，嚴禁直接在單引號中斷行！
                 
-                請修正後重新輸出完整代碼，儲存至：
+                【必須遵守的剛性規則】：
+                1. 所有在 ax.annotate()、ax.text()、plt.title() 中的文字必須寫在「同一行內」，換行請使用 '\\n'，絕對嚴禁跨行斷開字串！
+                2. 數學公式一律寫成 r'$...$'，字串結尾絕對不可為單個反斜線 '\\'！
+                
+                請重新輸出 100% 可執行的完整 Python 程式碼，儲存至：
                 `{norm_diagram_path}`
                 """
                 continue
@@ -1718,31 +1684,25 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(py_code)
                 
-            # 使用 sys.executable 保證虛擬環境一致
-            result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=25)
+            result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, timeout=20)
             
             if result.returncode == 0 and os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0:
                 logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(norm_diagram_path)}")
                 return True
             else:
                 err_msg = result.stderr.strip()
-                logging.warning(f"⚠️ [繪圖失敗 - 準備修復重試] 題號 {safe_q_num} (第 {attempt} 次嘗試): {err_msg[:140]}...")
+                logging.warning(f"⚠️ [繪圖執行失敗] 題號 {safe_q_num} (第 {attempt} 次): {err_msg[:120]}...")
                 current_prompt = f"""
-                你先前撰寫的 Python 繪圖程式碼在執行時發生錯誤：
+                你先前撰寫的 Python 繪圖腳本在執行時發生錯誤：
                 >>> {err_msg} <<<
                 
-                錯誤程式碼：
-                ```python
-                {py_code}
-                ```
-                
-                請修正語法（特別注意單引號/雙引號不可跨行斷開，字串內換行請使用 \\n），重新輸出 100% 可執行的程式碼，儲存至：
+                請修正上述錯誤，重新輸出一段 100% 可成功執行的完整 Python 程式碼，並儲存至：
                 `{norm_diagram_path}`
                 """
         except subprocess.TimeoutExpired:
-            logging.warning(f"⚠️ 題號 {safe_q_num} 繪圖腳本執行超時 (第 {attempt} 次嘗試)")
+            logging.warning(f"⚠️ 題號 {safe_q_num} 繪圖腳本執行超時 (第 {attempt} 次)")
         except Exception as e:
-            logging.error(f"❌ 繪圖嘗試發生例外 (題號 {safe_q_num}): {e}")
+            logging.warning(f"⚠️ 題號 {safe_q_num} 繪圖發生例外: {e}")
         finally:
             if os.path.exists(script_path):
                 try: os.remove(script_path)
@@ -3805,6 +3765,7 @@ class ExamParser:
                             matches = re.findall(pattern, detailed_sol_text)
                             
                             # 狀況 A：如果 AI 在詳解內文中，主動嵌入了圖片
+                            # 狀況 A：如果 AI 在詳解內文中，主動嵌入了圖片
                             if matches:
                                 logging.info(f"🔍 偵測到題號 {safe_q_num} 的詳解內文主動嵌入了 {len(matches)} 張自定義圖表：{matches}")
                                 for img_num in matches:
@@ -3812,47 +3773,20 @@ class ExamParser:
                                     diagram_filepath = os.path.abspath(os.path.join(img_dir, diagram_filename)).replace("\\", "/")
                                     
                                     qwen_prompt = f"""
-                                    你是一位頂尖的 Python 數學與 3D/2D 繪圖專家。以下是一道高中理科題目的題幹與詳細解答：
+                                    你是一位頂尖的 Python 科學繪圖專家。以下是一道題目的題幹與詳細解答：
                                     
                                     【題幹】：{q_data.get('question_text', '')}
                                     【詳細解答】：{detailed_sol_text}
                                     
-                                    請針對解答中提到的「圖 {img_num}」（圖片儲存路徑為 `{diagram_filepath}`），撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib, numpy 與 mpl_toolkits.mplot3d 繪製該圖表並儲存。
+                                    請針對解答中提到的「圖 {img_num}」（儲存路徑 `{diagram_filepath}`），撰寫一段簡潔、美觀且能成功執行的 Python 繪圖程式碼。
                                     
-                                    【繪圖剛性要求與 Linux 字型完全相容設定】：
-                                    1. 允許且鼓勵使用繁體中文標示（如：點 A, 外接圓, 平面 ADH）。
-                                    2. 必須在程式碼最開頭**原封不動**加入以下字型與 3D 庫導入設定：
-                                       ```python
-                                       import matplotlib
-                                       matplotlib.use('Agg')
-                                       import matplotlib.pyplot as plt
-                                       import matplotlib.font_manager as fm
-                                       import numpy as np
-                                       import os
-                                       from mpl_toolkits.mplot3d import Axes3D
-
-                                       font_candidates = [
-                                           '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-                                           '/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc',
-                                           '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
-                                           'C:/Windows/Fonts/msjh.ttc'
-                                       ]
-                                       font_prop = None
-                                       for fp in font_candidates:
-                                           if os.path.exists(fp):
-                                               fm.fontManager.addfont(fp)
-                                               font_prop = fm.FontProperties(fname=fp)
-                                               plt.rcParams['font.family'] = font_prop.get_name()
-                                               break
-                                       plt.rcParams['axes.unicode_minus'] = False
-                                       ```
-                                    3. 若為 3D 空間圖形（如正立方體、空間平面、向量），請使用 `fig.add_subplot(111, projection='3d')` 繪製！
-                                    4. 若為 2D 圖形，請使用 `plt.axis('equal')` 保持正比例。
-                                    5. 程式碼必須能獨立執行，最末尾必須包含 `plt.savefig(r"{diagram_filepath}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。輸出純 Python 程式碼，不要包含 ```python 標籤。
+                                    【規範】：
+                                    1. 所有標籤字串必須寫在同一行，換行請使用 '\\n'，嚴禁直接斷行！
+                                    2. 2D 圖形請使用 `plt.axis('equal')`；3D 空間請使用 `Axes3D`。
+                                    3. 最末尾必須包含 `plt.savefig(r"{diagram_filepath}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。
                                     """
                                     
-                                    # 🚀 優化：使用具備語法自動修復與錯誤重試的執行器
-                                    execute_and_fix_diagram_script(
+                                    draw_ok = execute_and_fix_diagram_script(
                                         self.ai_manager, 
                                         qwen_prompt, 
                                         DiagramResponse, 
@@ -3860,6 +3794,11 @@ class ExamParser:
                                         safe_q_num=f"{safe_q_num}_{img_num}", 
                                         task_tag=f"{paper_tag} [繪製 圖{img_num}]"
                                     )
+                                    
+                                    # 🛡️ 容錯保底：若繪圖失敗，將詳解中未生成的圖片標記安全清除，防止審查判為死圖
+                                    if not draw_ok:
+                                        bad_tag_pattern = rf'!\[圖\s*{img_num}\]\([^)]*?diagram_Q{re.escape(safe_q_num)}_{img_num}\.png\)'
+                                        sol['detailed_solution'] = re.sub(bad_tag_pattern, '', sol['detailed_solution'])
                             
                             # 狀況 B：保底機制（如果 AI 忘記在內文嵌入圖片標籤，我們自動在最下方補上一張預設的「圖 1」）
                             else:
