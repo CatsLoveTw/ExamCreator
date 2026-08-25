@@ -1284,7 +1284,6 @@ class GeminiFreeTierManager:
                     continue
 
                 try:
-                    import re
                     raw_text = response.text
                     
                     # 🚨 1. 修正 LaTeX 結尾反斜線誤轉義 JSON 邊界引號的問題
@@ -1598,11 +1597,11 @@ class DiagramResponse(BaseModel):
     python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
 
 def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
-    """清理 Markdown 標記並安全注入 Headless 與中文字型配置（絕不人為竄改字串內容，避免破壞語法）"""
+    """清理 Markdown 標記、清除行尾非法續行符並安全注入 Headless 與中文字型配置"""
     if not py_code:
         return ""
     
-    # 1. 剝除 Markdown 代碼塊標記
+    # 1. 剝除 Markdown 代碼塊標記與兩端空白
     py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
@@ -1610,7 +1609,15 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
     # 2. 清理重複的後端設定
     py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
     
-    # 3. 強制注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文字型配置
+    # 3. 🚨 核心修復：清理每一行末尾非法的續行符反斜線與多餘空格（徹底解決 Line 14 報錯）
+    cleaned_lines = []
+    for line in py_code.splitlines():
+        # 若行尾反斜線後面夾帶了空格或不是合法的字串內部，移除多餘的尾部反斜線與空格
+        clean_l = re.sub(r'\\+\s*$', '', line) if not (line.strip().startswith(('"', "'")) and line.strip().endswith(('"', "'"))) else line
+        cleaned_lines.append(clean_l)
+    py_code = "\n".join(cleaned_lines)
+
+    # 4. 強制注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文字型配置
     norm_target_path = target_filepath.replace("\\", "/")
     headless_header = """import matplotlib
 matplotlib.use('Agg')
@@ -1627,7 +1634,7 @@ plt.rcParams['axes.unicode_minus'] = False
 """
     full_code = headless_header + "\n" + py_code
 
-    # 4. 確保尾部包含 savefig 與 close
+    # 5. 確保尾部包含 savefig 與 close
     if "plt.savefig" not in full_code:
         full_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close()\n'
         
@@ -1648,10 +1655,12 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
     
     for attempt in range(1, max_attempts + 1):
         try:
+            # 🚀 繪圖專用：最多只重試 3 次，且不使用耗資源的大模型
             res, _ = ai_manager.generate_with_retry(
                 contents=[current_prompt],
                 response_schema=response_schema,
                 temperature=0.1,
+                max_attempts=3,
                 preferred_model="gemini-3.5-flash-lite",
                 enable_thinking=False,
                 task_desc=f"{task_tag} (繪圖嘗試 {attempt}/{max_attempts})"
@@ -2500,10 +2509,14 @@ class ExamParser:
                             # 拼接成真實的硬碟檔案路徑
                             full_img_path = os.path.abspath(os.path.join(base_dir, clean_rel_path)).replace("\\", "/")
                             
-                            # 若發現詳解裡有寫圖片標記，但實體檔案不存在或大小為 0，立即啟動補繪！
-                            if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
+                            # 🚀 升級：支援環境變數 REFRESH_DIAGRAMS 強制覆寫舊圖
+                            force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
+                            
+                            # 當圖片不存在、檔案損毀(0 byte)，或開啟強制重繪開關時觸發
+                            if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0 or force_refresh:
                                 os.makedirs(os.path.dirname(full_img_path), exist_ok=True)
-                                logging.warning(f"🛠️ [遺失圖片補繪] 偵測到 {spec_name} 題號 {safe_q_num} 缺少圖片：{os.path.basename(full_img_path)}，正在啟動 AI 補繪...")
+                                log_action = "重新繪製 (修復舊圖)" if force_refresh else "遺失圖片補繪"
+                                logging.info(f"🎨 [{log_action}] 正在使用新版中文字型處理 {spec_name} 題號 {safe_q_num}：{os.path.basename(full_img_path)}...")
                                 
                                 redraw_prompt = f"""
                                 你是一位頂尖的 Python 數學與科學繪圖專家。

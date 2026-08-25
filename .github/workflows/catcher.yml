@@ -5,6 +5,12 @@ on:
     # 每天 07:00 與 19:00 各執行一次（台灣時間下午3點與凌晨3點）
     - cron: '0 7,19 * * *'
   workflow_dispatch: # 手動強制執行
+    inputs:
+      refresh_diagrams:
+        description: '🔄 是否強制重繪所有 AI 圖解 (修復舊版中文豆腐塊與細長條變形)'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   run-parser:
@@ -107,6 +113,7 @@ jobs:
         continue-on-error: true
         env:
             GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+            REFRESH_DIAGRAMS: ${{ inputs.refresh_diagrams || 'true' }}
         run: python catcher.py
 
       - name: Push Results to Google Drive
