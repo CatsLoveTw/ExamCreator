@@ -1597,46 +1597,46 @@ class DiagramResponse(BaseModel):
     python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
 
 def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
-    """清理 Markdown 標記、清除行尾非法續行符並安全注入 Headless 與中文字型配置"""
+    """清理 Markdown 標記、清除所有行尾無效反斜線並修復 LaTeX 轉義語法"""
     if not py_code:
         return ""
     
-    # 1. 剝除 Markdown 代碼塊標記與兩端空白
+    # 1. 剝除 Markdown 代碼塊標記
     py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
     
-    # 2. 清理重複的後端設定
+    # 2. 移除重複的 import 與 GUI 設定
     py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
     
-    # 3. 🚨 核心修復：清理每一行末尾非法的續行符反斜線與多餘空格（徹底解決 Line 14 報錯）
+    # 3. 🚨 徹底解決 Line 14 反斜線報錯：
+    # (a) 將所有文字註解中的孤立反斜線轉義為雙反斜線
+    # (b) 將行尾無意義的反斜線一律清除
     cleaned_lines = []
     for line in py_code.splitlines():
-        # 若行尾反斜線後面夾帶了空格或不是合法的字串內部，移除多餘的尾部反斜線與空格
-        clean_l = re.sub(r'\\+\s*$', '', line) if not (line.strip().startswith(('"', "'")) and line.strip().endswith(('"', "'"))) else line
-        cleaned_lines.append(clean_l)
+        # 如果這一行以反斜線結尾但不是在 multiline string 內，強制拔除行尾反斜線與空白
+        line_clean = re.sub(r'(?<!\\)\\+\s*$', '', line)
+        # 修復未加 r 前綴的 LaTeX 字串 (如 '\alpha' 轉成 '\\alpha' 防止 Python 語法解析崩潰)
+        line_clean = re.sub(r'(?<!r)(["\'])(.*?\$[^\$]+\$.*?)\1', r'r\1\2\1', line_clean)
+        cleaned_lines.append(line_clean)
     py_code = "\n".join(cleaned_lines)
 
-    # 4. 強制注入無 GUI (Headless Agg) 與 Linux/GHA 跨平台中文字型配置
+    # 4. 強制注入無 GUI (Headless Agg) 與跨平台中文字型配置
     norm_target_path = target_filepath.replace("\\", "/")
-    headless_header = """import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-import numpy as np
-import os
-
-plt.rcParams['font.sans-serif'] = [
-    'Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans TC', 
-    'Microsoft JhengHei', 'PingFang TC', 'Heiti TC', 'DejaVu Sans', 'sans-serif'
-]
-plt.rcParams['axes.unicode_minus'] = False
-"""
+    headless_header = (
+        "import matplotlib\n"
+        "matplotlib.use('Agg')\n"
+        "import matplotlib.pyplot as plt\n"
+        "import numpy as np\n"
+        "import os\n\n"
+        "plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Noto Sans TC', 'Microsoft JhengHei', 'DejaVu Sans', 'sans-serif']\n"
+        "plt.rcParams['axes.unicode_minus'] = False\n"
+    )
     full_code = headless_header + "\n" + py_code
 
-    # 5. 確保尾部包含 savefig 與 close
+    # 5. 確保結尾具備存檔與關閉圖表
     if "plt.savefig" not in full_code:
-        full_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close()\n'
+        full_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close("all")\n'
         
     return full_code
 
@@ -1655,13 +1655,13 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
     
     for attempt in range(1, max_attempts + 1):
         try:
-            # 🚀 繪圖專用：最多只重試 3 次，且不使用耗資源的大模型
+            # 🚀 繪圖專用：改用主力 flash 模型，防止 flash-lite 輸出 Python 長代碼時 JSON 截斷
             res, _ = ai_manager.generate_with_retry(
                 contents=[current_prompt],
                 response_schema=response_schema,
                 temperature=0.1,
                 max_attempts=3,
-                preferred_model="gemini-3.5-flash-lite",
+                preferred_model="gemini-3.5-flash",
                 enable_thinking=False,
                 task_desc=f"{task_tag} (繪圖嘗試 {attempt}/{max_attempts})"
             )
