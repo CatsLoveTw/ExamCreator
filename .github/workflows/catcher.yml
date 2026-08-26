@@ -92,7 +92,7 @@ jobs:
         timeout-minutes: 320 # 給予腳本最多 5.3 小時
         env:
             GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-            # 🚨 修正 4：排程執行時預設為 false，手動執行時才依勾選狀態傳入
+            OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
             REFRESH_DIAGRAMS: ${{ github.event.inputs.refresh_diagrams == 'true' && 'true' || 'false' }}
         run: python catcher.py
 

@@ -17,6 +17,11 @@ from google.genai import types
 from google.genai.errors import APIError
 from groq import Groq
 from groq import RateLimitError
+try:
+    from openai import OpenAI
+    HAS_OPENAI_SDK = True
+except ImportError:
+    HAS_OPENAI_SDK = False
 
 import queue
 import uuid
@@ -944,11 +949,69 @@ class GeminiFreeTierManager:
         groq_keys_env = os.environ.get("GROQ_API_KEY", "")
         self.groq_keys = [k.strip() for k in groq_keys_env.split(",") if k.strip()]
         self.groq_key_idx = 0
-        self.groq_lock = threading.Lock() # 保護多執行緒切換金鑰的安全
+        self.groq_lock = threading.Lock()
+
+        # 🚀 支援 OpenRouter (提供 ChatGPT / 頂級免費通道，支援大 Token 與純 JSON 輸出)
+        self.openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+        self.openrouter_client = None
+        if HAS_OPENAI_SDK and self.openrouter_key:
+            self.openrouter_client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=self.openrouter_key
+            )
+            logging.info("🌟 [備援端點啟動] OpenRouter 備援大模型通道已就緒！")
         
         # 🧠 讀取或初始化模型 Token 上限記憶庫
         self.model_limits_file = "model_limits.json"
         self.model_token_limits = self.load_model_token_limits()
+
+    def _generate_with_openrouter(self, contents, response_schema, temperature=0.1, preferred_model="openrouter/free", task_desc=""):
+        """透過 OpenRouter 執行長詳解備援生成（0成本預設用 'openrouter/free'，付費可用 'openai/gpt-4o-mini'）"""
+        if not self.openrouter_client:
+            return None, "openrouter_client_not_configured"
+            
+        try:
+            text_prompts = [str(c) for c in contents if isinstance(c, str)]
+            combined_prompt = "\n\n".join(text_prompts)
+            schema_json = response_schema.model_json_schema()
+            
+            system_msg = (
+                "You are an expert Taiwanese high school exam tutor. "
+                "You MUST output 100% strictly valid JSON matching this schema: "
+                f"{json.dumps(schema_json)}. Output ONLY the raw JSON object, without markdown codeblock."
+            )
+            
+            desc_str = f" {task_desc}" if task_desc else ""
+            logging.info(f"⚡{desc_str} 觸發備援機制：切換至 OpenRouter ({preferred_model})...")
+            
+            response = self.openrouter_client.chat.completions.create(
+                model=preferred_model,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user", "content": combined_prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=temperature,
+                max_tokens=8192
+            )
+            
+            msg = response.choices[0].message
+            # 🚨 思考模型容錯：若 content 為 None 則自動讀取 reasoning 思考區塊
+            raw_text = msg.content or getattr(msg, "reasoning", "") or getattr(msg, "reasoning_content", "") or ""
+            raw_text = str(raw_text).strip()
+            
+            if raw_text.startswith("```json"): raw_text = raw_text[7:]
+            if raw_text.startswith("```"): raw_text = raw_text[3:]
+            if raw_text.endswith("```"): raw_text = raw_text[:-3]
+            raw_text = raw_text.strip()
+            
+            raw_text = s2t(raw_text)
+            parsed_json = json.loads(raw_text)
+            parsed_json = self.repair_dict_latex(parsed_json)
+            return parsed_json, None
+        except Exception as e:
+            logging.warning(f"⚠️ [OpenRouter 備援失敗] {e}")
+            return None, str(e)
 
     def load_model_token_limits(self) -> dict:
         """從本地 model_limits.json 讀取已被記錄的模型 Token 上限"""
@@ -1372,18 +1435,25 @@ class GeminiFreeTierManager:
             except APIError as e:
                 err_str = str(e).lower()
                 
-                # 🚀 404 模型不存在：直接跳過該模型，不浪費 6 次重試
+                # 🚀 檢測本題是否包含 PIL 圖片（若無圖片，則可安全切換至第三方大模型備援）
+                has_pil_images = any(isinstance(c, Image.Image) for c in contents) if isinstance(contents, list) else False
+                
+                # 🚀 404 模型不存在：直接跳過該模型
                 if e.code == 404 or "not found" in err_str or "is not found for api version" in err_str:
-                    logging.warning(f"⏭️ [404 模型無效] 專案不支援模型 {target_model}，立即剔除並切換下一梯隊模型...")
+                    logging.warning(f"⏭️ [404 模型無效] 專案不支援模型 {target_model}，立即切換下一梯隊...")
                     if target_model in candidate_models:
                         candidate_models.remove(target_model)
                     smart_sleep(0.5)
                     continue
 
-                if e.code == 503 or "unavailable" in err_str or e.code == 504 or "gateway timeout" in err_str:
-                    logging.warning(f"⚠️ [503 伺服器過載] 立即換金鑰/換模型重試...")
-                    smart_sleep(1.0)
+                # 🚨 503 / 504 伺服器過載或超時：嘗試 2 次後自動切換至 OpenRouter 備援
+                if e.code in [503, 504] or "unavailable" in err_str or "gateway timeout" in err_str:
                     attempts += 1
+                    if attempts >= 2 and not has_pil_images and self.openrouter_client:
+                        res_or, _ = self._generate_with_openrouter(contents, response_schema, temperature, task_desc=f"{task_desc} [503自動切換]")
+                        if res_or: return res_or, None
+                    logging.warning(f"⚠️ [503/504 伺服器過載] 第 {attempts} 次重試...")
+                    smart_sleep(1.0)
                     continue
 
                 # 🚨 401 Unauthorized 錯誤處理（無效/過期金鑰）
@@ -1437,16 +1507,18 @@ class GeminiFreeTierManager:
 
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
-                    # 預測下一次嘗試將使用的模型梯隊
+                    # 🚨 智慧切換：若 Gemini 連續遇到 429 且本題為純文字，立刻切換至 OpenRouter 解救，絕不硬等！
+                    if attempts >= 2 and not has_pil_images and self.openrouter_client:
+                        logging.info(f"🔄 [429 智慧避險] Gemini 遇到限流，無縫切換至 OpenRouter 備援模型處理...")
+                        res_or, _ = self._generate_with_openrouter(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
+                        if res_or:
+                            return res_or, None
+
                     next_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
                     next_model = candidate_models[next_tier_idx]
                     
-                    if next_model != target_model:
-                        logging.warning(f"📉 [模型自動降級] 模型 {target_model} 遇到 429 限流已達 {RETRIES_PER_MODEL} 次，自動降級至下一梯隊模型: {next_model}")
-                    
-                    # 平滑指數退避：加入隨機抖動避免所有執行緒同時撞車
-                    backoff_time = min(45.0, (2 ** (attempts % RETRIES_PER_MODEL)) * 4.0 + random.uniform(2.0, 5.0))
-                    logging.warning(f"⏳ [429 限流退避] 等待 {backoff_time:.1f} 秒後進行第 {attempts + 1} 次重試 (目標模型: {next_model})...")
+                    backoff_time = min(30.0, (2 ** (attempts % RETRIES_PER_MODEL)) * 3.0 + random.uniform(1.0, 3.0))
+                    logging.warning(f"⏳ [429 限流冷卻] 金鑰降溫中，等待 {backoff_time:.1f} 秒...")
                     smart_sleep(backoff_time)
                     self.handle_rate_limit_error(key_obj, err_str)
                     continue

@@ -3,5 +3,7 @@ pillow
 google-genai
 pydantic
 groq
+openai
+opencc-python-reimplemented
 matplotlib
 numpy
