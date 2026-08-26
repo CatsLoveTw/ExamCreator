@@ -10,7 +10,7 @@ on:
         description: '🔄 是否強制重繪所有 AI 圖解 (修復舊版中文豆腐塊與細長條變形)'
         required: false
         type: boolean
-        default: true
+        default: false # 🚨 修正 1：預設改為 false，只有手動勾選時才重繪
 
 jobs:
   run-parser:
@@ -29,7 +29,6 @@ jobs:
 
       - name: Install system dependencies & rclone
         run: |
-          # 一次性安裝中文字型、curl 與 unzip，避免重複 apt-get update
           sudo apt-get update && sudo apt-get install -y fonts-noto-cjk curl unzip
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
@@ -43,7 +42,6 @@ jobs:
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: |
           printf "%s" "$GEMINI_API_KEYS_ENV" > key.txt
           
@@ -61,72 +59,55 @@ jobs:
           mkdir -p gdrive_workspace
           rclone sync gdrive: ./gdrive_workspace --config rclone.conf -v
 
-          # 1. 解壓縮一般題庫 exams.zip (若存在)
-          if [ -f "./gdrive_workspace/exams.zip" ]; then
-            echo "📦 找到 exams.zip，正在解壓縮..."
-            unzip -q -o ./gdrive_workspace/exams.zip -d ./
-          else
-            echo "ℹ️ 提示：未在 Google Drive 找到 exams.zip"
-          fi
+          # 1. 解壓縮題庫檔案 (exams.zip, mock.zip, full.zip, school.zip)
+          for zipfile in exams.zip mock.zip full.zip school.zip; do
+            if [ -f "./gdrive_workspace/$zipfile" ]; then
+              echo "📦 找到 $zipfile，正在解壓縮..."
+              unzip -q -o "./gdrive_workspace/$zipfile" -d ./
+            fi
+          done
 
-          # 2. 解壓縮模擬考題庫 mock.zip (若存在，內含 mock_exam_papers_only)
-          if [ -f "./gdrive_workspace/mock.zip" ]; then
-            echo "📦 找到 mock.zip，正在解壓縮模擬考題庫..."
-            unzip -q -o ./gdrive_workspace/mock.zip -d ./
-          else
-            echo "ℹ️ 提示：未在 Google Drive 找到 mock.zip"
-          fi
-
-          # 3. 🆕 解壓縮全套題庫 full.zip (若存在，內含 gsat_exam_papers_only 與 ast_exam_papers_only)
-          if [ -f "./gdrive_workspace/full.zip" ]; then
-            echo "📦 找到 full.zip，正在解壓縮全套題庫..."
-            unzip -q -o ./gdrive_workspace/full.zip -d ./
-          else
-            echo "ℹ️ 提示：未在 Google Drive 找到 full.zip"
-          fi
-
-          # 4. 解壓縮學校段考題庫 school.zip (若存在，內含 school_exam_papers_only)
-          if [ -f "./gdrive_workspace/school.zip" ]; then
-            echo "📦 找到 school.zip，正在解壓縮學校定期考題庫..."
-            unzip -q -o ./gdrive_workspace/school.zip -d ./
-          else
-            echo "ℹ️ 提示：未在 Google Drive 找到 school.zip"
-          fi
-
-          # 4. 列出當前環境中所有已準備就緒的題庫資料夾
+          # 2. 檢查解壓後的題庫資料夾列表
           echo "🔍 檢查解壓後的題庫資料夾列表："
           ls -d *_exam_papers_only 2>/dev/null || echo "⚠️ 警告：未找到任何 *_exam_papers_only 題庫資料夾"
 
-          # 將雲端的歷史解析結果複製過來，讓 catcher.py 能進行重複判定與斷點續傳
+          # 3. 🚨 修正 2：完整複製歷史解析結果（含 .done 與 .failed 標記檔）
           mkdir -p exam_database_output
           if [ -d "./gdrive_workspace/exam_database_output" ]; then
-            cp -r ./gdrive_workspace/exam_database_output/* ./exam_database_output/ || true
+            cp -a ./gdrive_workspace/exam_database_output/. ./exam_database_output/ 2>/dev/null || true
           fi
           
-          # 複製知識庫、金鑰錯誤日誌與【模型 Token 上限記憶庫】
-          cp ./gdrive_workspace/subject.json ./subject.json 2>/dev/null || true
-          cp ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
-          cp ./gdrive_workspace/model_limits.json ./model_limits.json 2>/dev/null || true
+          # 4. 🚨 修正 3：精準還原知識庫、金鑰錯誤日誌與【模型 Token 上限記憶庫】
+          cp -f ./gdrive_workspace/subject.json ./subject.json 2>/dev/null || true
+          cp -f ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
+          cp -f ./gdrive_workspace/model_limits.json ./model_limits.json 2>/dev/null || true
+          cp -f ./gdrive_workspace/key_status.txt ./key_status.txt 2>/dev/null || true
+
+          # 若雲端尚無 model_limits.json，則初始化一個空 JSON，確保後續必能上傳
+          if [ ! -f "./model_limits.json" ]; then
+            echo "{}" > ./model_limits.json
+          fi
 
       - name: Run parser script
-        timeout-minutes: 320 # 給予腳本最多 5.3 小時，超時將主動切斷並跳至下一步上傳進度
-        continue-on-error: true
+        timeout-minutes: 320 # 給予腳本最多 5.3 小時
         env:
             GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-            REFRESH_DIAGRAMS: ${{ inputs.refresh_diagrams || 'true' }}
+            # 🚨 修正 4：排程執行時預設為 false，手動執行時才依勾選狀態傳入
+            REFRESH_DIAGRAMS: ${{ github.event.inputs.refresh_diagrams == 'true' && 'true' || 'false' }}
         run: python catcher.py
 
       - name: Push Results to Google Drive
-        if: always()
+        if: always() # 🚨 保證即使 Python 超時被終止，也必定執行上傳！
         run: |
           echo "⬆️ 執行完畢，開啟【兩階段高優先級極速上傳】..."
           
           # =========================================================
-          # === 第一階段：最高優先級！秒級上傳所有 JSON 資料庫與暫存檔 ===
+          # === 第一階段：最高優先級！上傳所有 JSON、文字日誌與記憶檔 ===
           # =========================================================
-          echo "⚡ [第一階段] 優先上傳所有 JSON 資料庫 (含 partial、raw 與系統日誌)..."
+          echo "⚡ [第一階段] 優先上傳 JSON 資料庫與狀態檔案..."
           rclone copy ./exam_database_output gdrive:exam_database_output \
             --include "*.json" \
+            --include "*_validator_log.txt" \
             --fast-list \
             --size-only \
             --transfers 16 \
@@ -134,26 +115,20 @@ jobs:
             --config rclone.conf -v
 
           # 備份根目錄關鍵日誌、金鑰儀表板與【模型 Token 上限記憶庫】
-          if [ -f "./subject.json" ]; then
-            rclone copyto ./subject.json gdrive:subject.json --config rclone.conf -v
-          fi
-          if [ -f "./key_errors_summary.txt" ]; then
-            rclone copyto ./key_errors_summary.txt gdrive:key_errors_summary.txt --config rclone.conf -v
-          fi
-          if [ -f "./model_limits.json" ]; then
-            rclone copyto ./model_limits.json gdrive:model_limits.json --config rclone.conf -v
-          fi
-          if [ -f "./key_status.txt" ]; then
-            rclone copyto ./key_status.txt gdrive:key_status.txt --config rclone.conf -v
-          fi
+          for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt; do
+            if [ -f "./$state_file" ]; then
+              rclone copyto "./$state_file" "gdrive:$state_file" --config rclone.conf -v
+              echo "✅ $state_file 已成功備份至雲端！"
+            fi
+          done
 
-          echo "🎉 [第一階段完成] 所有 JSON 資料庫與 partial 暫存檔已 100% 安全存入 Google Drive！"
+          echo "🎉 [第一階段完成] 所有 JSON 資料庫與狀態檔已 100% 安全存入 Google Drive！"
 
           # =========================================================
-          # === 第二階段：圖片極速同步 (關閉時間戳記更新，提速 20 倍) ===
+          # === 第二階段：圖片與繪圖標記檔 (.done / .failed) 極速同步 ===
           # =========================================================
-          echo "🖼️ [第二階段] 同步圖片 (啟用 --size-only 與 --fast-list 秒級跳過未變動圖片)..."
-          rclone sync ./exam_database_output gdrive:exam_database_output \
+          echo "🖼️ [第二階段] 同步圖片與標記檔..."
+          rclone copy ./exam_database_output gdrive:exam_database_output \
             --fast-list \
             --size-only \
             --transfers 16 \
