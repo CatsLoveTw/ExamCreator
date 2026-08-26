@@ -2498,29 +2498,49 @@ class ExamParser:
                         detailed_text = str(q_item.get("detailed_solution", ""))
                         safe_q_num = safe_filename(str(q_item.get('question_number', 'X')).replace(" ", ""))
                         
-                        # 🔍 支援 ./images/..., images/..., Windows 反斜線等多種路徑匹配
+                        # 🚨 剛性約束：僅匹配檔名以 diagram_ 開頭的圖片，排除所有題目原卷裁切圖
                         img_matches = re.findall(r'!\[.*?\]\((?:\./)?((?:images/|images\\)?[^)]*?diagram_[^)]+?\.png)\)', detailed_text, re.IGNORECASE)
                         for raw_img_path in img_matches:
-                            # 正規化斜線
+                            file_name = os.path.basename(raw_img_path)
+                            
+                            # 1. 安全防護：非 diagram_ 開頭的圖片直接跳過
+                            if not file_name.startswith("diagram_"):
+                                continue
+                                
                             clean_rel_path = raw_img_path.replace("\\", "/").lstrip("./")
                             if not clean_rel_path.startswith("images/"):
-                                clean_rel_path = f"images/{spec_name}/{os.path.basename(clean_rel_path)}"
+                                clean_rel_path = f"images/{spec_name}/{file_name}"
                             
-                            # 拼接成真實的硬碟檔案路徑
                             full_img_path = os.path.abspath(os.path.join(base_dir, clean_rel_path)).replace("\\", "/")
                             
-                            # 🚀 升級：支援環境變數 REFRESH_DIAGRAMS 強制覆寫舊圖
-                            force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
+                            # 2. 標記檔案路徑
+                            done_marker = f"{full_img_path}.done"
+                            fail_marker = f"{full_img_path}.failed"
                             
-                            # 當圖片不存在、檔案損毀(0 byte)，或開啟強制重繪開關時觸發
-                            if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0 or force_refresh:
+                            # 如果之前已經重試失敗過，直接略過，避免每次啟動都重複打 API 消耗配額
+                            if os.path.exists(fail_marker):
+                                continue
+
+                            force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
+                            needs_draw = False
+
+                            if force_refresh:
+                                # 開啟強制重繪時：只有「尚未完成標記 (.done)」的圖片才執行重繪
+                                if not os.path.exists(done_marker):
+                                    needs_draw = True
+                            else:
+                                # 一般模式：實體檔案不存在或檔案大小為 0 時才補繪
+                                if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
+                                    needs_draw = True
+
+                            if needs_draw:
                                 os.makedirs(os.path.dirname(full_img_path), exist_ok=True)
                                 log_action = "重新繪製 (修復舊圖)" if force_refresh else "遺失圖片補繪"
-                                logging.info(f"🎨 [{log_action}] 正在使用新版中文字型處理 {spec_name} 題號 {safe_q_num}：{os.path.basename(full_img_path)}...")
+                                logging.info(f"🎨 [{log_action}] 正在處理 {spec_name} 題號 {safe_q_num}：{file_name}...")
                                 
                                 redraw_prompt = f"""
                                 你是一位頂尖的 Python 數學與科學繪圖專家。
-                                以下題目在詳解中引用了圖表，但實體檔案遺失，需要請你重新繪製：
+                                以下題目在詳解中引用了圖表，需要請你繪製圖形：
                                 
                                 【題幹】：{q_item.get('question_text', '')}
                                 【詳細解答】：{detailed_text}
@@ -2529,13 +2549,35 @@ class ExamParser:
                                 `{full_img_path}`
                                 
                                 【繪圖剛性要求】：
-                                1. 所有字串（特別是 ax.annotate / plt.text 中的文字）必須寫在同一行內，換行請使用 '\\n'，嚴禁直接斷行！
+                                1. 所有字串標籤（特別是 ax.annotate / plt.text / plt.title）必須寫在同一行內，換行請使用 '\\n'，嚴禁直接斷行！
                                 2. 使用 plt.axis('equal') 保持幾何比例。
-                                3. 程式碼最後必須包含 `plt.savefig(r"{full_img_path}", dpi=200, bbox_inches='tight')` 與 `plt.close()`。
+                                3. 程式碼最後必須包含 `plt.savefig(r"{full_img_path}", dpi=200, bbox_inches='tight')` 與 `plt.close("all")`。
                                 """
                                 
-                                if execute_and_fix_diagram_script(self.ai_manager, redraw_prompt, DiagramResponse, full_img_path, safe_q_num, task_tag=f"[{spec_name} 補繪]"):
+                                draw_success = execute_and_fix_diagram_script(
+                                    self.ai_manager, 
+                                    redraw_prompt, 
+                                    DiagramResponse, 
+                                    full_img_path, 
+                                    safe_q_num, 
+                                    task_tag=f"[{spec_name} 補繪]"
+                                )
+                                
+                                if draw_success:
                                     missing_diagram_count += 1
+                                    # 建立完成標記，確保下次啟動即使 REFRESH_DIAGRAMS=true 也不會重複生成
+                                    try:
+                                        with open(done_marker, "w", encoding="utf-8") as f_mk:
+                                            f_mk.write(f"done_at: {time.time()}\n")
+                                    except Exception:
+                                        pass
+                                else:
+                                    # 若繪製失敗，建立 failed 標記，避免重複死循環
+                                    try:
+                                        with open(fail_marker, "w", encoding="utf-8") as f_mk:
+                                            f_mk.write(f"failed_at: {time.time()}\n")
+                                    except Exception:
+                                        pass
                                     
                     if missing_diagram_count > 0:
                         logging.info(f"🎉 [補繪完成] 已成功為 {spec_name} 補齊了 {missing_diagram_count} 張遺失的圖表！")
