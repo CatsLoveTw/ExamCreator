@@ -1341,94 +1341,33 @@ class GeminiFreeTierManager:
                             key_obj.token_usage[-1] = (key_obj.token_usage[-1][0], actual_tokens)
 
                 raw_text = response.text
-                if not raw_text or raw_text.strip() == "":
+                if not raw_text or not raw_text.strip():
                     logging.warning("⚠️ API 回傳了空字串，準備重試...")
                     attempts += 1
                     continue
 
-                try:
-                    raw_text = response.text
-                    
-                    # 🚨 1. 修正 LaTeX 結尾反斜線誤轉義 JSON 邊界引號的問題
-                    raw_text = re.sub(r'\\"(?=\s*[,}\]])', r'\\\\"', raw_text)
-                    
-                    # 🚨 2. 優先將 LaTeX 指令的單反斜線轉義（防止被誤讀為 JSON 換行符）
-                    raw_text = self.escape_latex_backslashes(raw_text)
-                    
-                    # 🚨 3. 修正字串內不慎夾帶的「實體換行符」
-                    def escape_literal_newlines(match):
-                        return match.group(0).replace("\n", "\\n").replace("\r", "\\r")
-                    raw_text = re.sub(r'"(?:[^"\\]|\\.)*"', escape_literal_newlines, raw_text, flags=re.DOTALL)
-                    
-                    # 🚨 3.5 [終極記憶體層淨化]：在字串階段直接進行全局繁簡轉換，徹底阻絕簡體字物件化！
-                    # OpenCC 只會替換中文字元，完美避開 JSON 結構與英數 LaTeX 符號
-                    if hasattr(self, '_convert_to_t'):
-                        pass # 避免重複宣告
-                    raw_text = s2t(raw_text)
-                    
-                    # 🚨 3.6 兩岸學術名詞精確性修正 (記憶體層級暴力替換)
-                    term_replacements = {
-                        "概率": "機率", "矢量": "向量", "標量": "純量", 
-                        "宏觀": "巨觀", "微觀": "微觀", "屏幕": "螢幕",
-                        "質量數": "質量數", "方程組": "方程組", "波函數": "波函數",
-                        "解析度": "解析度", "分辨率": "解析度", "內存": "記憶體",
-                        "算法": "演算法", "數組": "陣列", "電壓表": "伏特計",
-                        "電流表": "安培計", "萬有引力常量": "萬有引力常數"
-                    }
-                    for simp_term, tw_term in term_replacements.items():
-                        raw_text = raw_text.replace(simp_term, tw_term)
+                # 繁簡轉換與兩岸名詞標準化
+                raw_text = s2t(raw_text)
+                term_replacements = {
+                    "概率": "機率", "矢量": "向量", "標量": "純量", 
+                    "宏觀": "巨觀", "微觀": "微觀", "屏幕": "螢幕",
+                    "質量數": "質量數", "方程組": "方程組", "波函數": "波函數",
+                    "解析度": "解析度", "分辨率": "解析度", "內存": "記憶體",
+                    "算法": "演算法", "數組": "陣列", "電壓表": "伏特計",
+                    "電流表": "安培計", "萬有引力常量": "萬有引力常數"
+                }
+                for simp_term, tw_term in term_replacements.items():
+                    raw_text = raw_text.replace(simp_term, tw_term)
 
-                    # 🚨 4. 安全地執行一次解析
-                    parsed_json = json.loads(raw_text)
-                    
-                    # 🚨 5. 還原控制字元
+                # 🚀 調用萬能解析救援器
+                parsed_json, parse_err = universal_robust_json_parser(raw_text, response_schema=response_schema)
+                if parsed_json:
                     parsed_json = self.repair_dict_latex(parsed_json)
-                    return parsed_json, None
-                except json.JSONDecodeError as je:
-                    raw_text = response.text
-                    logging.warning(f"⚠️ [JSON 截斷] 偵測到模型輸出被截斷 ({je})。啟動緊急救援機制 (Salvage Mode)...")
+                    return parsed_json, parse_err
                     
-                    extracted_objects = []
-                    depth = 0
-                    obj_start = -1
-                    in_string = False
-                    escape = False
-                    
-                    for i, char in enumerate(raw_text):
-                        if escape:
-                            escape = False
-                            continue
-                        if char == '\\':
-                            escape = True
-                            continue
-                        if char == '"':
-                            in_string = not in_string
-                            continue
-                            
-                        if not in_string:
-                            if char == '{':
-                                if depth == 1: 
-                                    obj_start = i
-                                depth += 1
-                            elif char == '}':
-                                depth -= 1
-                                if depth == 1 and obj_start != -1:
-                                    try:
-                                        obj_str = raw_text[obj_start:i+1]
-                                        obj = json.loads(obj_str, strict=False)
-                                        if any(k in obj for k in ["detailed_solution", "is_valid", "question_text"]):
-                                            extracted_objects.append(obj)
-                                    except:
-                                        pass
-                    
-                    if extracted_objects:
-                        logging.info(f"🦸‍♂️ [救援成功] 成功從損毀的 JSON 中救回 {len(extracted_objects)} 題的完整數據！")
-                        if "solutions" in str(response_schema):
-                            return {"solutions": extracted_objects}, "partial_success"
-                        elif "validators" in str(response_schema):
-                            return {"validators": extracted_objects}, "partial_success"
-                    
-                    return None, "json_decode_error"
+                attempts += 1
+                smart_sleep(1.0)
+                continue
                 
             except RPDExhaustedException as ree:
                 raise ree
@@ -1474,33 +1413,27 @@ class GeminiFreeTierManager:
                     logging.warning(f"⚠️ [403 權限拒絕] 金鑰 {key_obj.api_key[:8]}... 存取被拒，已永久停用。")
                     continue
 
-                # 🚀 400 參數錯誤智慧嗅探：動態學習並降低該模型的 max_output_tokens 上限
+                # 🚀 精準處理 400 參數錯誤：區分「Token 溢出」與「Thinking/Schema 不相容」
                 if e.code == 400 or "invalid_argument" in err_str:
-                    current_limit = self.model_token_limits.get(model, 65536)
-                    new_limit = current_limit
+                    is_token_limit_error = any(kw in err_str for kw in ["max_output_tokens", "output token", "token limit", "greater than maximum allowed"])
                     
-                    # 1. 嘗試從 Google 回傳的錯誤字串中精確提取最高上限數字 (例如: 'must be <= 8192' 或 'between 1 and 8192')
-                    match = re.search(r'(?:<=|between \d+ and|less than or equal to|maximum allowed|limit of)\s*(\d{4,5})', err_str)
-                    if match:
-                        new_limit = int(match.group(1))
-                        logging.warning(f"🎯 [精準嗅探] 從 Google 報錯中識別到模型 {model} 的真實上限為 {new_limit} tokens！")
-                    else:
-                        # 2. 若錯誤訊息沒有標明具體數字，依梯隊階梯式降級
-                        if current_limit > 32768:
-                            new_limit = 32768
-                        elif current_limit > 16384:
-                            new_limit = 16384
-                        elif current_limit > 8192:
-                            new_limit = 8192
+                    if is_token_limit_error:
+                        current_limit = self.model_token_limits.get(model, 65536)
+                        # 只有在 Google 明確指出 Token 上限時才進行精準匹配與學習
+                        match = re.search(r'(?:<=|between \d+ and|less than or equal to|maximum allowed|limit of)\s*(\d{4,5})', err_str)
+                        if match:
+                            new_limit = int(match.group(1))
+                            logging.warning(f"🎯 [Token上限學習] 模型 {model} 真實上限為 {new_limit} tokens！")
+                            self.update_and_save_model_limit(model, new_limit)
                         else:
-                            new_limit = 4096
-                        logging.warning(f"📉 [階梯降級] 模型 {model} 發生 400 錯誤，Token 上限自動從 {current_limit} 調降至 {new_limit}")
+                            new_limit = max(4096, current_limit // 2)
+                            logging.warning(f"📉 [Token階梯降級] 模型 {model} 調降上限至 {new_limit}")
+                            self.update_and_save_model_limit(model, new_limit)
+                    else:
+                        # 🚨 非 Token 錯誤（通常為 ThinkingConfig 不相容或 Schema 嵌套過深），關閉 Thinking 即可，絕不調降 Token！
+                        logging.warning(f"⚠️ [400 配置不相容] 模型 {model} 參數報錯（非 Token 問題: {err_str[:120]}），自動重置 Thinking 設定重試...")
+                        enable_thinking = False
                     
-                    # 3. 儲存至本地 json 記憶庫，下次同一模型直接使用此上限！
-                    self.update_and_save_model_limit(model, new_limit)
-                    
-                    # 4. 同時關閉可能不相容的 Thinking 設定
-                    enable_thinking = False
                     attempts += 1
                     smart_sleep(1.0)
                     continue
@@ -1603,34 +1536,11 @@ class GeminiFreeTierManager:
                 )
                 
                 raw_text = response.choices[0].message.content
-                
-                # === 🚨 核心邏輯：剝除 DeepSeek-R1 的 <think> 標籤 ===
-                if "<think>" in raw_text and "</think>" in raw_text:
-                    # R1 會把思考過程放在 <think> 標籤內，我們只需要標籤後的 JSON 結果
-                    raw_text = raw_text.split("</think>")[-1]
-                elif "</think>" in raw_text:
-                    raw_text = raw_text.split("</think>")[-1]
-                
-                raw_text = raw_text.strip()
-                
-                # 預防模型加上了 Markdown 的 ```json 標籤
-                if raw_text.startswith("```json"):
-                    raw_text = raw_text[7:]
-                if raw_text.startswith("```"):
-                    raw_text = raw_text[3:]
-                if raw_text.endswith("```"):
-                    raw_text = raw_text[:-3]
+                if not raw_text or not raw_text.strip():
+                    attempts += 1
+                    continue
                     
-                raw_text = raw_text.strip()
-
-                # === 後續 JSON 清洗與容錯邏輯（繼承你原本完美的清洗器） ===
-                raw_text = re.sub(r'\\"(?=\s*[,}\]])', r'\\\\"', raw_text)
-                raw_text = self.escape_latex_backslashes(raw_text)
-                def escape_literal_newlines(match):
-                    return match.group(0).replace("\n", "\\n").replace("\r", "\\r")
-                raw_text = re.sub(r'"(?:[^"\\]|\\.)*"', escape_literal_newlines, raw_text, flags=re.DOTALL)
-                
-                # 記憶體層級繁簡轉換
+                # 繁簡轉換與兩岸名詞標準化
                 raw_text = s2t(raw_text)
                 term_replacements = {
                     "概率": "機率", "矢量": "向量", "標量": "純量", 
@@ -1640,9 +1550,11 @@ class GeminiFreeTierManager:
                 for simp_term, tw_term in term_replacements.items():
                     raw_text = raw_text.replace(simp_term, tw_term)
 
-                parsed_json = json.loads(raw_text)
-                parsed_json = self.repair_dict_latex(parsed_json)
-                return parsed_json, None
+                # 🚀 調用萬能解析救援器（徹底解決備援模型的 Invalid \escape 與 Extra data 崩潰）
+                parsed_json, parse_err = universal_robust_json_parser(raw_text, response_schema=response_schema)
+                if parsed_json:
+                    parsed_json = self.repair_dict_latex(parsed_json)
+                    return parsed_json, parse_err
 
             except RateLimitError as e:
                 attempts += 1
@@ -1663,6 +1575,126 @@ class GeminiFreeTierManager:
 
 
 SUBJECT_FILE_LOCK = threading.Lock() # 在檔案頂端定義
+
+def universal_robust_json_parser(raw_text: str, response_schema=None) -> tuple[Optional[dict], Optional[str]]:
+    """
+    萬能工業級 JSON 清洗與救援解析器
+    徹底解決 Invalid \\escape、Extra data、JSON 截斷與字串內換行問題
+    """
+    if not raw_text or not isinstance(raw_text, str) or not raw_text.strip():
+        return None, "empty_response"
+        
+    text = raw_text.strip()
+    
+    # 1. 剝除 DeepSeek / 思考模型的 <think> 標籤
+    if "<think>" in text and "</think>" in text:
+        text = text.split("</think>")[-1].strip()
+    elif "</think>" in text:
+        text = text.split("</think>")[-1].strip()
+        
+    # 2. 剝除 Markdown ```json 區塊標記
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'```\s*$', '', text, flags=re.MULTILINE).strip()
+
+    # 3. 處理 Extra data：尋找最外層的完整 JSON 物件邊界 { ... } 或 [ ... ]
+    first_brace = text.find('{')
+    last_brace = text.rfind('}')
+    first_bracket = text.find('[')
+    last_bracket = text.rfind(']')
+    
+    if first_brace != -1 and last_brace != -1 and (first_bracket == -1 or first_brace < first_bracket):
+        text = text[first_brace:last_brace + 1]
+    elif first_bracket != -1 and last_bracket != -1:
+        text = text[first_bracket:last_bracket + 1]
+
+    def sanitize_json_text(s: str) -> str:
+        # A. 修正 LaTeX 結尾反斜線誤轉義邊界引號
+        s = re.sub(r'\\"(?=\s*[,}\]])', r'\\\\"', s)
+        
+        # B. 精準轉義所有非標準 JSON 轉義的 LaTeX 反斜線（如 \alpha, \implies, \le, \theta, \frac 等）
+        def fix_escape(match):
+            full = match.group(0)
+            if full.startswith('\\u') and len(full) == 6:
+                return full
+            char = match.group(2) if match.group(2) else match.group(1)
+            if char in ['"', '\\', '/']:
+                return full
+            if char in ['b', 'f', 'n', 'r', 't']:
+                # 若後面緊接字母則是 LaTeX 指令，強制轉義
+                end_idx = match.end()
+                if end_idx < len(s) and s[end_idx].isalpha():
+                    return "\\\\" + char
+                return full
+            return "\\\\" + char
+
+        s = re.sub(r'(\\u[0-9a-fA-F]{4})|\\(.)', fix_escape, s)
+        
+        # C. 轉義字串內的實體換行符
+        def escape_newlines(m):
+            return m.group(0).replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        s = re.sub(r'"(?:[^"\\]|\\.)*"', escape_newlines, s, flags=re.DOTALL)
+        return s
+
+    cleaned_text = sanitize_json_text(text)
+    
+    # 4. 嘗試標準解析
+    try:
+        parsed = json.loads(cleaned_text, strict=False)
+        return parsed, None
+    except json.JSONDecodeError as je:
+        logging.warning(f"⚠️ [JSON 截斷或語法異常] ({je})，啟動【深度子物件救援機制】...")
+        
+        # 5. 強化版子物件深度救援演算法 (Salvage Mode)
+        extracted_objects = []
+        depth = 0
+        obj_start = -1
+        in_string = False
+        escape = False
+        
+        for i, char in enumerate(text):
+            if escape:
+                escape = False
+                continue
+            if char == '\\':
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+                
+            if not in_string:
+                if char == '{':
+                    if depth == 0 or (depth == 1 and obj_start == -1):
+                        obj_start = i
+                    depth += 1
+                elif char == '}':
+                    depth -= 1
+                    if depth == 1 and obj_start != -1:
+                        raw_sub = text[obj_start:i+1]
+                        # 🚨 關鍵升級：子物件在 parse 前必須先經過萬能清洗，絕不裸奔！
+                        clean_sub = sanitize_json_text(raw_sub)
+                        try:
+                            obj = json.loads(clean_sub, strict=False)
+                            if any(k in obj for k in ["detailed_solution", "is_valid", "question_text", "question_analysis", "answers"]):
+                                extracted_objects.append(obj)
+                        except Exception:
+                            pass
+                        obj_start = -1
+
+        if extracted_objects:
+            logging.info(f"🦸‍♂️ [萬能救援成功] 成功從截斷的輸出中救回 {len(extracted_objects)} 題完整數據！")
+            schema_str = str(response_schema) if response_schema else ""
+            if "solutions" in schema_str or "QuestionSolution" in schema_str:
+                return {"solutions": extracted_objects}, "partial_success"
+            elif "validators" in schema_str or "SolutionValidator" in schema_str:
+                return {"validators": extracted_objects}, "partial_success"
+            elif "questions" in schema_str or "ExtractedQuestion" in schema_str:
+                return {"questions": extracted_objects}, "partial_success"
+            elif "answers" in schema_str or "AnswerKey" in schema_str:
+                return {"answers": extracted_objects}, "partial_success"
+            return extracted_objects[0] if len(extracted_objects) == 1 else {"items": extracted_objects}, "partial_success"
+            
+        return None, "json_decode_error"
 
 class DiagramResponse(BaseModel):
     need_diagram: bool = Field(description="是否需要幾何圖形、函數波形、物理受力分析、生物演化/機制圖或化學相圖來輔助學生理解本題。")
@@ -1701,8 +1733,13 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         "import matplotlib.pyplot as plt\n"
         "import numpy as np\n"
         "import os\n\n"
-        "plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Noto Sans TC', 'Microsoft JhengHei', 'DejaVu Sans', 'sans-serif']\n"
+        "# 🚨 全局字型與數學模式中文字型雙重綁定（徹底解決 \\u6b65 缺字與破圖問題）\n"
+        "plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans TC', 'Microsoft JhengHei', 'DejaVu Sans', 'sans-serif']\n"
         "plt.rcParams['axes.unicode_minus'] = False\n"
+        "plt.rcParams['mathtext.fontset'] = 'custom'\n"
+        "plt.rcParams['mathtext.rm'] = 'Noto Sans CJK TC'\n"
+        "plt.rcParams['mathtext.it'] = 'Noto Sans CJK TC'\n"
+        "plt.rcParams['mathtext.bf'] = 'Noto Sans CJK TC'\n"
     )
     full_code = headless_header + "\n" + py_code
 
@@ -2539,6 +2576,7 @@ class ExamParser:
         json_path = os.path.join(output_dir, type_folder, f"{spec_name}_database.json")
         partial_json_path = json_path.replace("_database.json", "_partial_database.json") # 🆕 暫存進度檔路徑
         raw_extracted_json_path = json_path.replace("_database.json", "_raw_extracted.json") # 🆕 第一階段題目快取檔路徑
+        validation_log_path = json_path.replace("_database.json", "_validator_log.txt") # 🚨 全域頂層初始化，保證快取命中時 100% 可存取
         
         if os.path.exists(json_path):
             try:
@@ -2717,6 +2755,15 @@ class ExamParser:
             try:
                 with open(raw_extracted_json_path, "r", encoding="utf-8") as f:
                     all_extracted_questions = json.load(f)
+                    
+                # 🚨 關鍵動態修復：重新校驗官方解答屬性，防止舊版快取遺留誤判
+                has_official_now = (a_pdf is not None and os.path.exists(a_pdf) and exam_type in ["GSAT", "AST", "MOCK"])
+                for q_cached in all_extracted_questions:
+                    if has_official_now:
+                        q_cached['has_official_answer'] = True
+                    q_cached['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else q_cached.get('question_pdf_path', '')
+                    q_cached['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else q_cached.get('answer_pdf_path', '')
+                    q_cached['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else q_cached.get('rubric_pdf_path', '')
             except Exception as e:
                 logging.error(f"讀取 Stage 1 快取失敗 ({e})，將重新進行第一階段掃描...")
                 all_extracted_questions = []
@@ -4267,11 +4314,12 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = max(2, min(len(API_KEYS) * 2, 16))
-        logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒...")
+        max_workers = max(2, min(len(API_KEYS) * 2, 12))
+        logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒 (啟用冷啟動階梯平滑調度)...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = set()
+            thread_spawn_count = 0
             while True:
                 with queue_lock:
                     # 分派任務直到線程池滿或佇列空
@@ -4279,6 +4327,12 @@ class ExamParser:
                         current_batch = task_queue[:active_batch_size]
                         task_queue = task_queue[active_batch_size:]
                         futures.add(executor.submit(process_question_chunk, current_batch, active_batch_size))
+                        
+                        # 🚀 冷啟動隨機平滑防禦：前 12 條線程的啟動間隔採用 0.3 ~ 0.8 秒隨機抖動，徹底打散請求節奏
+                        if thread_spawn_count < max_workers:
+                            thread_spawn_count += 1
+                            import random
+                            time.sleep(random.uniform(0.3, 0.8))
                 
                 if not futures: break
                 
@@ -4378,13 +4432,26 @@ class ExamParser:
                 json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
             logging.info(f"🎉 [{year} {subject}] 全部 {len(valid_solved_questions)} 題皆已 100% 高品質完成解析並儲存：{json_path}")
             
+            # 🧹 1. 本地暫存檔清除
             for tmp_path in [partial_json_path, raw_extracted_json_path]:
                 if os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)
-                        logging.info(f"🧹 [暫存清理] 已自動清除暫存檔：{tmp_path}")
+                        logging.info(f"🧹 [本機暫存清理] 已清除：{os.path.basename(tmp_path)}")
                     except Exception:
                         pass
+                        
+            # ☁️ 2. 🚨 即時清除 Google Drive 上的雲端 partial 與 raw 暫存檔
+            if os.path.exists("rclone.conf"):
+                import subprocess
+                rel_parent = type_folder.replace("\\", "/")
+                for tmp_name in [os.path.basename(partial_json_path), os.path.basename(raw_extracted_json_path)]:
+                    cloud_target = f"gdrive:exam_database_output/{rel_parent}/{tmp_name}"
+                    try:
+                        subprocess.run(["rclone", "deletefile", cloud_target, "--config", "rclone.conf"], capture_output=True, timeout=15)
+                        logging.info(f"☁️ [雲端暫存銷毀] 已同步從 Google Drive 刪除過期暫存：{cloud_target}")
+                    except Exception as rclone_del_err:
+                        logging.warning(f"⚠️ 無法刪除雲端暫存檔 {cloud_target}: {rclone_del_err}")
         
         
         # 🚨 新增：若有審查未通過的歷史紀錄，自動儲存至專屬的詳細 JSON 日誌中
