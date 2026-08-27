@@ -100,8 +100,7 @@ jobs:
             CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
             REFRESH_DIAGRAMS: ${{ github.event.inputs.refresh_diagrams == 'true' && 'true' || 'false' }}
-        # 🚨 若你的主程式檔案名稱為 catcher2.py，請確認此處指向 catcher2.py（或 catcher.py）
-        run: python catcher2.py
+        run: python catcher.py
 
       - name: Push Results to Google Drive
         if: always() # 🚨 關鍵保險：即使 Python 腳本超時退出，也必定強制上傳最新進度！
