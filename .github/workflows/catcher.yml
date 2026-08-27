@@ -2,15 +2,15 @@ name: Run Exam Parser Catcher
 
 on:
   schedule:
-    # 每天 07:00 與 19:00 各執行一次（台灣時間下午3點與凌晨3點）
+    # 每天 07:00 與 19:00 各自動執行一次（台灣時間下午3點與凌晨3點）
     - cron: '0 7,19 * * *'
-  workflow_dispatch: # 手動強制執行
+  workflow_dispatch: # 支援手動在 GitHub 網頁點擊執行
     inputs:
       refresh_diagrams:
         description: '🔄 是否強制重繪所有 AI 圖解 (修復舊版中文豆腐塊與細長條變形)'
         required: false
         type: boolean
-        default: false # 🚨 修正 1：預設改為 false，只有手動勾選時才重繪
+        default: false # 預設 false，避免排程每次都在重複繪圖
 
 jobs:
   run-parser:
@@ -29,22 +29,26 @@ jobs:
 
       - name: Install system dependencies & rclone
         run: |
-          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk curl unzip
+          # 安裝中文字型、PDF 渲染工具與 rclone
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra poppler-utils curl unzip
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install google-genai openai httpx pymupdf pillow matplotlib pydantic opencc-python-reimplemented
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Configure rclone
+      - name: Configure rclone & Gemini Keys
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
         run: |
-          printf "%s" "$GEMINI_API_KEYS_ENV" > key.txt
+          # 1. 將 Gemini 金鑰寫入本地 key.txt
+          printf "%s\n" "$GEMINI_API_KEYS_ENV" > key.txt
           
+          # 2. 自動產生 rclone 設定檔
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
@@ -59,7 +63,7 @@ jobs:
           mkdir -p gdrive_workspace
           rclone sync gdrive: ./gdrive_workspace --config rclone.conf -v
 
-          # 1. 解壓縮題庫檔案 (exams.zip, mock.zip, full.zip, school.zip)
+          # 1. 解壓縮題庫壓縮包 (exams.zip, mock.zip, full.zip, school.zip)
           for zipfile in exams.zip mock.zip full.zip school.zip; do
             if [ -f "./gdrive_workspace/$zipfile" ]; then
               echo "📦 找到 $zipfile，正在解壓縮..."
@@ -67,44 +71,47 @@ jobs:
             fi
           done
 
-          # 2. 檢查解壓後的題庫資料夾列表
+          # 2. 檢查解壓後的題庫資料夾
           echo "🔍 檢查解壓後的題庫資料夾列表："
           ls -d *_exam_papers_only 2>/dev/null || echo "⚠️ 警告：未找到任何 *_exam_papers_only 題庫資料夾"
 
-          # 3. 🚨 修正 2：完整複製歷史解析結果（含 .done 與 .failed 標記檔）
+          # 3. 完整複製歷史解析結果（含 .done 與 .failed 繪圖標記檔）
           mkdir -p exam_database_output
           if [ -d "./gdrive_workspace/exam_database_output" ]; then
             cp -a ./gdrive_workspace/exam_database_output/. ./exam_database_output/ 2>/dev/null || true
           fi
           
-          # 4. 🚨 修正 3：精準還原知識庫、金鑰錯誤日誌與【模型 Token 上限記憶庫】
+          # 4. 精準還原知識庫、金鑰錯誤日誌與【模型 Token 上限記憶庫】
           cp -f ./gdrive_workspace/subject.json ./subject.json 2>/dev/null || true
           cp -f ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
           cp -f ./gdrive_workspace/model_limits.json ./model_limits.json 2>/dev/null || true
           cp -f ./gdrive_workspace/key_status.txt ./key_status.txt 2>/dev/null || true
 
-          # 若雲端尚無 model_limits.json，則初始化一個空 JSON，確保後續必能上傳
+          # 若雲端尚無 model_limits.json，則初始化一個空 JSON，確保後續必能備份
           if [ ! -f "./model_limits.json" ]; then
             echo "{}" > ./model_limits.json
           fi
 
       - name: Run parser script
-        timeout-minutes: 320 # 給予腳本最多 5.3 小時
+        timeout-minutes: 320 # 給予腳本最多 5.3 小時，超時將優雅退出並上傳
         env:
-            GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+            # 🚨 注入 2026 現役純 0 元備援金鑰
+            CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+            CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
             REFRESH_DIAGRAMS: ${{ github.event.inputs.refresh_diagrams == 'true' && 'true' || 'false' }}
-        run: python catcher.py
+        # 🚨 若你的主程式檔案名稱為 catcher2.py，請確認此處指向 catcher2.py（或 catcher.py）
+        run: python catcher2.py
 
       - name: Push Results to Google Drive
-        if: always() # 🚨 保證即使 Python 超時被終止，也必定執行上傳！
+        if: always() # 🚨 關鍵保險：即使 Python 腳本超時退出，也必定強制上傳最新進度！
         run: |
           echo "⬆️ 執行完畢，開啟【兩階段高優先級極速上傳】..."
           
           # =========================================================
-          # === 第一階段：最高優先級！上傳所有 JSON、文字日誌與記憶檔 ===
+          # === 第一階段：最高優先級！秒級上傳所有 JSON 資料庫與狀態檔 ===
           # =========================================================
-          echo "⚡ [第一階段] 優先上傳 JSON 資料庫與狀態檔案..."
+          echo "⚡ [第一階段] 優先上傳 JSON 資料庫、日誌與記憶庫..."
           rclone copy ./exam_database_output gdrive:exam_database_output \
             --include "*.json" \
             --include "*_validator_log.txt" \
@@ -136,5 +143,5 @@ jobs:
             --drive-chunk-size 64M \
             --config rclone.conf -v
 
-          # 清除敏感金鑰與暫存
+          # 清除敏感金鑰與設定檔
           rm -f rclone.conf key.txt

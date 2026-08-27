@@ -27,6 +27,7 @@ import queue
 import uuid
 import datetime
 import signal
+import httpx
 
 def handle_system_shutdown(signum, frame):
     logging.critical("🛑 [系統緊急訊號] 收到終止訊號 (SIGTERM/SIGINT)！正在強制將記憶體進度刷新至硬碟...")
@@ -871,19 +872,20 @@ class FreeTierKey:
         self.api_key = api_key
         self.client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=900_000))
         self.rpd_exhausted = False
-        self.request_times = []  # 記錄每次請求的 UNIX 時間戳
+        self.rpd_reset_time = 0.0  # 🚨 關鍵補齊：防範 AttributeError 崩潰
+        self.request_times = []
 
-        # 本地限制追蹤 (此處預設為 Gemini 3.1-Flash-lite 等免費配額，可依需求自行微調)
+        # 本地限制追蹤 (此處預設為 Gemini Flash 等免費配額)
         self.limit_rpm = 15
-        self.limit_tpm = 250_000
-        self.limit_rpd = 500
+        self.limit_tpm = 1_000_000
+        self.limit_rpd = 1500
         
-        self.is_disabled = False # 🚨 新增：是否被永久停用（如 401, 403 權限錯誤）
-        self.disable_reason = "" # 🚨 新增：停用原因說明
+        self.is_disabled = False
+        self.disable_reason = ""
         
         # 滑動視窗計數器
-        self.request_times = []  # 記錄 RPM (60秒內的請求時間戳記)
-        self.token_usage = []    # 記錄 TPM (60秒內的 token 使用，格式：(時間戳記, Token數))
+        self.request_times = []
+        self.token_usage = []
         self.daily_request_count = 0
 
     def get_status(self) -> dict:
@@ -965,53 +967,149 @@ class GeminiFreeTierManager:
         self.model_limits_file = "model_limits.json"
         self.model_token_limits = self.load_model_token_limits()
 
-    def _generate_with_openrouter(self, contents, response_schema, temperature=0.1, preferred_model="openrouter/free", task_desc=""):
-        """透過 OpenRouter 執行長詳解備援生成（0成本預設用 'openrouter/free'，付費可用 'openai/gpt-4o-mini'）"""
-        if not self.openrouter_client:
-            return None, "openrouter_client_not_configured"
-            
-        try:
-            text_prompts = [str(c) for c in contents if isinstance(c, str)]
-            combined_prompt = "\n\n".join(text_prompts)
-            schema_json = response_schema.model_json_schema()
-            
-            system_msg = (
-                "You are an expert Taiwanese high school exam tutor. "
-                "You MUST output 100% strictly valid JSON matching this schema: "
-                f"{json.dumps(schema_json)}. Output ONLY the raw JSON object, without markdown codeblock."
-            )
-            
-            desc_str = f" {task_desc}" if task_desc else ""
-            logging.info(f"⚡{desc_str} 觸發備援機制：切換至 OpenRouter ({preferred_model})...")
-            
-            response = self.openrouter_client.chat.completions.create(
-                model=preferred_model,
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": combined_prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=temperature,
-                max_tokens=8192
-            )
-            
-            msg = response.choices[0].message
-            # 🚨 思考模型容錯：若 content 為 None 則自動讀取 reasoning 思考區塊
-            raw_text = msg.content or getattr(msg, "reasoning", "") or getattr(msg, "reasoning_content", "") or ""
-            raw_text = str(raw_text).strip()
-            
-            if raw_text.startswith("```json"): raw_text = raw_text[7:]
-            if raw_text.startswith("```"): raw_text = raw_text[3:]
-            if raw_text.endswith("```"): raw_text = raw_text[:-3]
-            raw_text = raw_text.strip()
-            
-            raw_text = s2t(raw_text)
-            parsed_json = json.loads(raw_text)
+    def _call_openai_compatible_raw(self, client, base_url, api_key, model, prompt_text, response_schema, temperature=0.1):
+        """底層通用 API 呼叫器，自帶思考模型容錯與萬能 JSON 清洗"""
+        schema_json = response_schema.model_json_schema()
+        system_msg = (
+            "You are an expert Taiwanese high school exam tutor. "
+            "You MUST output 100% strictly valid JSON matching this schema: "
+            f"{json.dumps(schema_json)}. Output ONLY the raw JSON object, without markdown codeblock."
+        )
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt_text}
+            ],
+            response_format={"type": "json_object"},
+            temperature=temperature,
+            max_tokens=4096
+        )
+        
+        msg = response.choices[0].message
+        raw_text = msg.content or getattr(msg, "reasoning", "") or getattr(msg, "reasoning_content", "") or ""
+        raw_text = str(raw_text).strip()
+        
+        raw_text = s2t(raw_text)
+        parsed_json, err = universal_robust_json_parser(raw_text, response_schema=response_schema)
+        if parsed_json:
             parsed_json = self.repair_dict_latex(parsed_json)
-            return parsed_json, None
-        except Exception as e:
-            logging.warning(f"⚠️ [OpenRouter 備援失敗] {e}")
-            return None, str(e)
+        return parsed_json, err
+
+    def _generate_with_universal_fallback(self, contents, response_schema, temperature=0.1, task_desc=""):
+        """
+        終極雙保險【分步拆解生成】備援調度器：
+        順序：Cloudflare Workers AI (Llama 3.3 70B) ──> OpenRouter (openrouter/free)
+        針對長詳解自動執行 2 階段無損組裝，徹底消除 Token 截斷與 Unterminated string 錯誤！
+        """
+        cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+        cf_url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/ai/v1" if cf_account_id else ""
+
+        fallback_pool = []
+        if cf_url and os.environ.get("CLOUDFLARE_API_TOKEN"):
+            fallback_pool.append(("Cloudflare AI", cf_url, os.environ.get("CLOUDFLARE_API_TOKEN"), "@cf/meta/llama-3.3-70b-instruct-fp8-fast"))
+        if os.environ.get("OPENROUTER_API_KEY"):
+            fallback_pool.append(("OpenRouter", "https://openrouter.ai/api/v1", os.environ.get("OPENROUTER_API_KEY"), "openrouter/free"))
+
+        if not fallback_pool:
+            return None, "no_fallback_keys_configured"
+
+        text_prompts = [str(c) for c in contents if isinstance(c, str)]
+        combined_prompt = "\n\n".join(text_prompts)
+        is_solution_batch = "QuestionSolution" in str(response_schema)
+
+        for name, base_url, key, model in fallback_pool:
+            try:
+                logging.info(f"⚡ [觸發智慧備援] 切換至 {name} ({model}) 處理 (啟用分步拆解防截斷)...")
+                http_client = httpx.Client(timeout=60.0, verify=True, trust_env=False, headers={"User-Agent": "Mozilla/5.0"})
+                client = OpenAI(base_url=base_url, api_key=key, http_client=http_client)
+
+                # 💡 情況 A：若為長詳解任務，啟動「雙階段拆解流水線」
+                if is_solution_batch:
+                    # 步驟一：核心推導（題意、突破點、標準解、選項分析）
+                    class Step1CoreSolution(BaseModel):
+                        question_analysis: str = Field(description="題意分析")
+                        solving_strategy: str = Field(description="解題思路突破點")
+                        detailed_solution: str = Field(description="【標準解法】完整正規推導")
+                        options_analysis: List[OptionAnalysisItem] = Field(description="選項獨立剖析列表")
+
+                    class Step1Batch(BaseModel):
+                        solutions: List[Step1CoreSolution]
+
+                    step1_prompt = combined_prompt + "\n\n【第一階段任務】：請先專注完成題目的『題意分析』、『解題突破點』、『標準解法』以及『選項深入剖析』。"
+                    res_step1, err1 = self._call_openai_compatible_raw(client, base_url, key, model, step1_prompt, Step1Batch, temperature)
+                    if not res_step1 or not res_step1.get("solutions"):
+                        continue
+
+                    # 步驟二：名師昇華（另解一/二/速解、概念複習、陷阱盲點、分類標籤）
+                    class Step2Pedagogy(BaseModel):
+                        alternative_solutions: str = Field(description="包含【另解一】、【另解二】或【秒殺速解】之 Markdown 內容")
+                        concept_review: str = Field(description="核心概念複習")
+                        traps_and_warnings: str = Field(description="易錯陷阱與盲點警示")
+                        advanced_supplement: str = Field(description="進階延伸補充")
+                        scoring_rubric: str = Field(description="評分標準或配分建議")
+                        difficulty_level: int = Field(description="難度評分 1-10")
+                        difficulty_reason: str = Field(description="難度理由")
+                        topic_category: str = Field(description="題型分類")
+                        techniques_used: List[str] = Field(description="使用的解題技巧列表")
+
+                    class Step2Batch(BaseModel):
+                        pedagogies: List[Step2Pedagogy]
+
+                    step1_context = json.dumps(res_step1["solutions"], ensure_ascii=False)
+                    step2_prompt = (
+                        f"原題資訊如下：\n{combined_prompt}\n\n"
+                        f"我們先前已推導出的標準解法與選項分析如下：\n{step1_context}\n\n"
+                        "【第二階段任務】：請基於上述標準解法，為本題擴展『多元另解（另解一、另解二、速解）』，並條列『核心概念複習』、『易錯陷阱』與『題型技巧分類』。"
+                    )
+                    res_step2, err2 = self._call_openai_compatible_raw(client, base_url, key, model, step2_prompt, Step2Batch, temperature)
+                    pedagogies_list = res_step2.get("pedagogies") if isinstance(res_step2, dict) else None
+                    if not pedagogies_list and isinstance(res_step2, dict):
+                        # 🚨 容錯相容救援模式回傳的 items
+                        pedagogies_list = res_step2.get("items") or res_step2.get("solutions")
+                        
+                    if not pedagogies_list:
+                        continue
+
+                    # 步驟三：記憶體無損縫合
+                    merged_solutions = []
+                    for s1, s2 in zip(res_step1["solutions"], pedagogies_list):
+                        full_sol_markdown = s1.get("detailed_solution", "")
+                        alt_markdown = s2.get("alternative_solutions", "").strip()
+                        if alt_markdown:
+                            full_sol_markdown += "\n\n" + alt_markdown
+                            
+                        merged_solutions.append({
+                            "suspects_image_mismatch": False,
+                            "question_analysis": s1.get("question_analysis", ""),
+                            "solving_strategy": s1.get("solving_strategy", ""),
+                            "detailed_solution": full_sol_markdown,
+                            "options_analysis": s1.get("options_analysis", []),
+                            "concept_review": s2.get("concept_review", ""),
+                            "traps_and_warnings": s2.get("traps_and_warnings", ""),
+                            "advanced_supplement": s2.get("advanced_supplement", "無"),
+                            "scoring_rubric": s2.get("scoring_rubric", ""),
+                            "difficulty_level": s2.get("difficulty_level", 5),
+                            "difficulty_reason": s2.get("difficulty_reason", "綜合考題"),
+                            "topic_category": s2.get("topic_category", "必修_綜合主題"),
+                            "techniques_used": s2.get("techniques_used", ["必修_解題方法"])
+                        })
+
+                    logging.info(f"🎉 [{name}] 雙階段拆解流水線成功產出 {len(merged_solutions)} 題出版級完整詳解！")
+                    return {"solutions": merged_solutions}, None
+
+                # 💡 情況 B：非長詳解（例如審查或 OCR 仲裁），單次呼叫即可
+                else:
+                    res_single, err = self._call_openai_compatible_raw(client, base_url, key, model, combined_prompt, response_schema, temperature)
+                    if res_single:
+                        return res_single, None
+
+            except Exception as e:
+                logging.warning(f"⚠️ [{name}] 嘗試失敗 ({e})，切換至下一個備援平台...")
+                continue
+
+        return None, "all_fallbacks_exhausted"
 
     def load_model_token_limits(self) -> dict:
         """從本地 model_limits.json 讀取已被記錄的模型 Token 上限"""
@@ -1385,13 +1483,14 @@ class GeminiFreeTierManager:
                     smart_sleep(0.5)
                     continue
 
-                # 🚨 503 / 504 伺服器過載或超時：嘗試 2 次後自動切換至 OpenRouter 備援
+                # 🚨 503 / 504 伺服器過載：充分輪詢手頭可用金鑰後才切換備援
                 if e.code in [503, 504] or "unavailable" in err_str or "gateway timeout" in err_str:
                     attempts += 1
-                    if attempts >= 2 and not has_pil_images and self.openrouter_client:
-                        res_or, _ = self._generate_with_openrouter(contents, response_schema, temperature, task_desc=f"{task_desc} [503自動切換]")
-                        if res_or: return res_or, None
-                    logging.warning(f"⚠️ [503/504 伺服器過載] 第 {attempts} 次重試...")
+                    fallback_threshold = max(3, min(len(self.keys), 6))
+                    if attempts >= fallback_threshold and not has_pil_images:
+                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [503備援接管]")
+                        if res_fallback: return res_fallback, None
+                    logging.warning(f"⚠️ [503/504 伺服器過載] 第 {attempts} 次重試 (切換下一把金鑰)...")
                     smart_sleep(1.0)
                     continue
 
@@ -1440,12 +1539,13 @@ class GeminiFreeTierManager:
 
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
-                    # 🚨 智慧切換：若 Gemini 連續遇到 429 且本題為純文字，立刻切換至 OpenRouter 解救，絕不硬等！
-                    if attempts >= 2 and not has_pil_images and self.openrouter_client:
-                        logging.info(f"🔄 [429 智慧避險] Gemini 遇到限流，無縫切換至 OpenRouter 備援模型處理...")
-                        res_or, _ = self._generate_with_openrouter(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
-                        if res_or:
-                            return res_or, None
+                    # 🚨 充分利用所有 Gemini 金鑰：必須嘗試完大部分 Key 後，才切換至通用備援池
+                    fallback_threshold = max(3, min(len(self.keys), 6))
+                    if attempts >= fallback_threshold and not has_pil_images:
+                        logging.info(f"🔄 [429 智慧避險] Gemini 多把金鑰皆在冷卻中，切換至備援平台處理...")
+                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
+                        if res_fallback:
+                            return res_fallback, None
 
                     next_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
                     next_model = candidate_models[next_tier_idx]
@@ -1684,8 +1784,10 @@ def universal_robust_json_parser(raw_text: str, response_schema=None) -> tuple[O
         if extracted_objects:
             logging.info(f"🦸‍♂️ [萬能救援成功] 成功從截斷的輸出中救回 {len(extracted_objects)} 題完整數據！")
             schema_str = str(response_schema) if response_schema else ""
-            if "solutions" in schema_str or "QuestionSolution" in schema_str:
+            if "solutions" in schema_str or "QuestionSolution" in schema_str or "Step1Batch" in schema_str:
                 return {"solutions": extracted_objects}, "partial_success"
+            elif "pedagogies" in schema_str or "Step2Batch" in schema_str:
+                return {"pedagogies": extracted_objects}, "partial_success"
             elif "validators" in schema_str or "SolutionValidator" in schema_str:
                 return {"validators": extracted_objects}, "partial_success"
             elif "questions" in schema_str or "ExtractedQuestion" in schema_str:
@@ -1725,7 +1827,7 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         cleaned_lines.append(line_clean)
     py_code = "\n".join(cleaned_lines)
 
-    # 4. 強制注入無 GUI (Headless Agg) 與跨平台中文字型配置
+    # 4. 🚨 終極字型修復：關閉 usetex，強制全局與數學模式綁定支援 CJK 之微軟正黑體/Noto Sans
     norm_target_path = target_filepath.replace("\\", "/")
     headless_header = (
         "import matplotlib\n"
@@ -1733,13 +1835,14 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         "import matplotlib.pyplot as plt\n"
         "import numpy as np\n"
         "import os\n\n"
-        "# 🚨 全局字型與數學模式中文字型雙重綁定（徹底解決 \\u6b65 缺字與破圖問題）\n"
-        "plt.rcParams['font.sans-serif'] = ['Noto Sans CJK TC', 'Noto Sans CJK SC', 'Noto Sans TC', 'Microsoft JhengHei', 'DejaVu Sans', 'sans-serif']\n"
+        "plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'Noto Sans CJK TC', 'Noto Sans TC', 'PingFang TC', 'DejaVu Sans', 'sans-serif']\n"
         "plt.rcParams['axes.unicode_minus'] = False\n"
+        "plt.rcParams['text.usetex'] = False\n"
         "plt.rcParams['mathtext.fontset'] = 'custom'\n"
-        "plt.rcParams['mathtext.rm'] = 'Noto Sans CJK TC'\n"
-        "plt.rcParams['mathtext.it'] = 'Noto Sans CJK TC'\n"
-        "plt.rcParams['mathtext.bf'] = 'Noto Sans CJK TC'\n"
+        "plt.rcParams['mathtext.rm'] = 'Microsoft JhengHei'\n"
+        "plt.rcParams['mathtext.it'] = 'Microsoft JhengHei'\n"
+        "plt.rcParams['mathtext.bf'] = 'Microsoft JhengHei'\n"
+        "plt.rcParams['mathtext.default'] = 'regular'\n"
     )
     full_code = headless_header + "\n" + py_code
 
@@ -2658,10 +2761,11 @@ class ExamParser:
                                 請撰寫一段完整且獨立的 Python 程式碼，使用 matplotlib 與 numpy 繪製該圖形，並儲存至：
                                 `{full_img_path}`
                                 
-                                【繪圖剛性要求】：
-                                1. 所有字串標籤（特別是 ax.annotate / plt.text / plt.title）必須寫在同一行內，換行請使用 '\\n'，嚴禁直接斷行！
-                                2. 使用 plt.axis('equal') 保持幾何比例。
-                                3. 程式碼最後必須包含 `plt.savefig(r"{full_img_path}", dpi=200, bbox_inches='tight')` 與 `plt.close("all")`。
+                                【繪圖極致剛性要求（違反將導致程式崩潰）】：
+                                1. 所有字串標籤（特別是 ax.annotate / plt.text / plt.title）**必須寫在同一行內**，字串前必須加 `r` 前綴（如 `r'點 $A$'`），嚴禁直接跨行斷開字串！
+                                2. **絕對禁止在 `$ ... $` 內部包含任何中文字元**！中文字元請寫在公式符號外面，例如寫 `r'重心 $G$'`，絕對不可寫 `r'$重心 G$'`！
+                                3. 2D 平面請使用 `plt.axis('equal')` 保持真實比例；3D 請使用 `Axes3D`。
+                                4. 程式碼最後必須包含 `plt.savefig(r"{full_img_path}", dpi=200, bbox_inches='tight')` 與 `plt.close("all")`。
                                 """
                                 
                                 draw_success = execute_and_fix_diagram_script(
@@ -4088,12 +4192,12 @@ class ExamParser:
                         q_data = item["q_data"]
                         sol_data = salvaged_solutions[idx]
                         
-                        # 🚨 核心優化：此處已在前面提速完成格式化，保留兜底檢查即可
                         if not sol_data.get("options_analysis"):
                             sol_data["options_analysis"] = "本題為非選擇題/選填題，無選項可供分析。"
                             
-                        is_valid_passed = True
-                        error_critique = ""
+                        # 🚨 安全防呆：若審查整個 API 失敗 (None)，預設重試審查而不盲目放行
+                        is_valid_passed = False if (val_dict is None or val_err) else True
+                        error_critique = "審查回傳為空或發生異常，自動排入重新審查。" if (val_dict is None or val_err) else ""
                         suspects_ocr_error = False
 
                         if val_dict and 'validators' in val_dict and idx < len(val_dict['validators']):

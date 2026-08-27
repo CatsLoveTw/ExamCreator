@@ -7,3 +7,4 @@ openai
 opencc-python-reimplemented
 matplotlib
 numpy
+cerebras_cloud_sdk
