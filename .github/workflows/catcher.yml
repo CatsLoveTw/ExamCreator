@@ -29,8 +29,10 @@ jobs:
 
       - name: Install system dependencies & rclone
         run: |
-          # 安裝中文字型、PDF 渲染工具與 rclone
-          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra poppler-utils curl unzip
+          # 一次性安裝中文字型、字型管理工具、curl 與 unzip
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fontconfig curl unzip
+          # 強制重新整理 Linux 系統字型快取
+          sudo fc-cache -fv
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
 
@@ -44,6 +46,7 @@ jobs:
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
+          GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
         run: |
           # 1. 將 Gemini 金鑰寫入本地 key.txt
           printf "%s\n" "$GEMINI_API_KEYS_ENV" > key.txt
