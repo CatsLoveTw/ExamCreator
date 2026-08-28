@@ -1900,13 +1900,15 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
     
     for attempt in range(1, max_attempts + 1):
         try:
-            # 🚀 繪圖專用：改用主力 flash 模型，防止 flash-lite 輸出 Python 長代碼時 JSON 截斷
+            # 🚀 繪圖雙階梯策略：第 1 次首選超輕量 gemini-3.5-flash-lite，第 2 次重試才使用 3.5-flash 保底
+            target_draw_model = "gemini-3.5-flash-lite" if attempt == 1 else "gemini-3.5-flash"
+            
             res, _ = ai_manager.generate_with_retry(
                 contents=[current_prompt],
                 response_schema=response_schema,
                 temperature=0.1,
-                max_attempts=3,
-                preferred_model="gemini-3.5-flash",
+                max_attempts=2,
+                preferred_model=target_draw_model,
                 enable_thinking=False,
                 task_desc=f"{task_tag} (繪圖嘗試 {attempt}/{max_attempts})"
             )
