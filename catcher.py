@@ -1333,10 +1333,14 @@ class GeminiFreeTierManager:
                     logging.warning(f"⚠️ [每日限額用盡] 偵測到所有 API 金鑰皆已達 RPD 上限。將安全保存當前已完成詳解並結束程式。")
                     raise RPDExhaustedException("所有可用的 Gemini API 金鑰已達每日限額（RPD 上限）。")
                 else:
-                    # 狀況 B：檢查是否有符合當前 RPM/TPM 限額的可用 Key
-                    for key in active_keys:
+                    # 狀況 B：🚨 核心修復：從 self.key_idx 開始循環指針輪詢，保證 34 把 Key 100% 依序均勻使用！
+                    num_active = len(active_keys)
+                    for i in range(num_active):
+                        idx = (self.key_idx + i) % num_active
+                        key = active_keys[idx]
                         if key.can_request(current_time, estimated_tokens):
                             key.add_request(current_time, estimated_tokens)
+                            self.key_idx = (idx + 1) % num_active  # 🚨 成功後立即推進指針到下一把 Key！
                             res_model = chosen_model
                             self.model_idx = (self.model_idx + 1) % len(self.models)
                             return key.client, res_model, key
@@ -1361,9 +1365,9 @@ class GeminiFreeTierManager:
                 key.mark_rpd_exhausted()
                 logging.warning(f"🚨 [RPD 每日上限] 金鑰 {key.api_key[:8]}... 已達每日總配額上限，轉入每日冷卻。")
             else:
-                # 🚀 優化：429 限流只鎖定該 Key 6 秒並快速換其他 Key 請求，不再鎖定 300 秒
-                key.request_times.extend([time.time() + 6] * 3)
-                logging.info(f"⏳ [429 快速切換] 金鑰 {key.api_key[:8]}... 短暫冷卻 6 秒並切換其他金鑰。")
+                # 🚨 確切冷卻：當前 Key 鎖定 60 秒，讓指針強制轉移給其他 33 把 Key
+                key.request_times.extend([time.time() + 60] * 15)
+                logging.info(f"⏳ [429 鎖定降溫] 金鑰 {key.api_key[:8]}... 進入 60 秒冷卻，負載全面轉移至其他金鑰。")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=10, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
@@ -1552,10 +1556,13 @@ class GeminiFreeTierManager:
 
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
-                    # 🚨 充分利用所有 Gemini 金鑰：必須嘗試完大部分 Key 後，才切換至通用備援池
-                    fallback_threshold = max(3, min(len(self.keys), 6))
+                    # 🚨 1. 立刻鎖定當前這把 Key，強制冷卻 60 秒（不再派工給它）
+                    self.handle_rate_limit_error(key_obj, err_str)
+                    
+                    # 🚨 2. 多 Key 智慧備援分流
+                    fallback_threshold = max(3, min(len(self.keys), 8))
                     if attempts >= fallback_threshold and not has_pil_images:
-                        logging.info(f"🔄 [429 智慧避險] Gemini 多把金鑰皆在冷卻中，切換至備援平台處理...")
+                        logging.info(f"🔄 [429 智慧避險] 多把金鑰皆遇限流，切換至備援平台處理...")
                         res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
                         if res_fallback:
                             return res_fallback, None
@@ -1563,10 +1570,9 @@ class GeminiFreeTierManager:
                     next_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
                     next_model = candidate_models[next_tier_idx]
                     
-                    backoff_time = min(30.0, (2 ** (attempts % RETRIES_PER_MODEL)) * 3.0 + random.uniform(1.0, 3.0))
-                    logging.warning(f"⏳ [429 限流冷卻] 金鑰降溫中，等待 {backoff_time:.1f} 秒...")
-                    smart_sleep(backoff_time)
-                    self.handle_rate_limit_error(key_obj, err_str)
+                    # 🚨 3. 核心提速：手頭有 34 把 Key 時，不需原地睡 30 秒！微抖動 0.2~0.5 秒直接抓下一把全新 Key！
+                    logging.warning(f"⏳ [429 快速切換] 金鑰 {key_obj.api_key[:8]}... 限流冷卻，立即切換下一把金鑰 (第 {attempts} 次嘗試)...")
+                    smart_sleep(random.uniform(0.2, 0.5))
                     continue
                 else:
                     smart_sleep(2)
