@@ -1840,20 +1840,41 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
     py_code = "\n".join(cleaned_lines)
 
     # 4. 🚨 終極字型修復：關閉 usetex，強制全局與數學模式綁定支援 CJK 之微軟正黑體/Noto Sans
+    # 4. 🚨 終極字型修復：以實體路徑自動註冊 Noto Sans CJK，徹底支援 Linux GHA 與 Windows
     norm_target_path = target_filepath.replace("\\", "/")
     headless_header = (
         "import matplotlib\n"
         "matplotlib.use('Agg')\n"
         "import matplotlib.pyplot as plt\n"
+        "import matplotlib.font_manager as fm\n"
         "import numpy as np\n"
         "import os\n\n"
-        "plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'Noto Sans CJK TC', 'Noto Sans TC', 'PingFang TC', 'DejaVu Sans', 'sans-serif']\n"
+        "# 跨平台實體字型路徑自動嗅探與註冊\n"
+        "_cjk_font_paths = [\n"
+        "    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',\n"
+        "    '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',\n"
+        "    '/usr/share/fonts/opentype/noto/NotoSansTC-Regular.otf',\n"
+        "    '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',\n"
+        "    'C:/Windows/Fonts/msjh.ttc',\n"
+        "    'C:/Windows/Fonts/msjh.ttf',\n"
+        "    '/System/Library/Fonts/PingFang.ttc'\n"
+        "]\n"
+        "_loaded_font_name = 'sans-serif'\n"
+        "for _fp in _cjk_font_paths:\n"
+        "    if os.path.exists(_fp):\n"
+        "        try:\n"
+        "            fm.fontManager.addfont(_fp)\n"
+        "            _loaded_font_name = fm.FontProperties(fname=_fp).get_name()\n"
+        "            break\n"
+        "        except Exception:\n"
+        "            pass\n\n"
+        "plt.rcParams['font.sans-serif'] = [_loaded_font_name, 'Noto Sans CJK TC', 'Noto Sans TC', 'Microsoft JhengHei', 'DejaVu Sans', 'sans-serif']\n"
         "plt.rcParams['axes.unicode_minus'] = False\n"
         "plt.rcParams['text.usetex'] = False\n"
         "plt.rcParams['mathtext.fontset'] = 'custom'\n"
-        "plt.rcParams['mathtext.rm'] = 'Microsoft JhengHei'\n"
-        "plt.rcParams['mathtext.it'] = 'Microsoft JhengHei'\n"
-        "plt.rcParams['mathtext.bf'] = 'Microsoft JhengHei'\n"
+        "plt.rcParams['mathtext.rm'] = _loaded_font_name\n"
+        "plt.rcParams['mathtext.it'] = _loaded_font_name\n"
+        "plt.rcParams['mathtext.bf'] = _loaded_font_name\n"
         "plt.rcParams['mathtext.default'] = 'regular'\n"
     )
     full_code = headless_header + "\n" + py_code
