@@ -956,6 +956,7 @@ class GeminiFreeTierManager:
         cf_proxy_url = os.environ.get("GEMINI_PROXY_URL", "").strip() or None
         self.keys = [FreeTierKey(k, custom_base_url=cf_proxy_url) for k in api_keys]
         self.models = models
+        self.key_idx = 0
         self.model_idx = 0
         self.lock = threading.Lock()
         self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型
