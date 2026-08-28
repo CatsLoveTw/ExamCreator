@@ -1421,7 +1421,7 @@ class GeminiFreeTierManager:
                     max_output_tokens=model_max_tokens,
                     response_schema=response_schema,
                     temperature=temperature,
-                    tools=[], # 🚨 明確聲明 tools 為空，強行關閉 AFC 自動函式呼叫機制
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 )
                 if thinking_config:
                     gen_config.thinking_config = thinking_config
