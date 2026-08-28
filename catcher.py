@@ -868,22 +868,27 @@ class SolutionValidatorBatch(BaseModel):
 # 2. Gemini API 輪詢與排程管理器
 # ==========================================
 class FreeTierKey:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, custom_base_url: Optional[str] = None):
         self.api_key = api_key
-        self.client = genai.Client(api_key=api_key, http_options=types.HttpOptions(timeout=900_000))
+        
+        # 🚀 支援自訂代理 / Cloudflare Worker 出口 IP
+        http_opts = types.HttpOptions(timeout=900_000)
+        if custom_base_url:
+            http_opts.base_url = custom_base_url
+            
+        self.client = genai.Client(api_key=api_key, http_options=http_opts)
         self.rpd_exhausted = False
-        self.rpd_reset_time = 0.0  # 🚨 關鍵補齊：防範 AttributeError 崩潰
-        self.request_times = []
+        self.rpd_reset_time = 0.0
+        self.last_request_time = 0.0 # 記錄上次請求時間
 
-        # 本地限制追蹤 (此處預設為 Gemini Flash 等免費配額)
-        self.limit_rpm = 15
-        self.limit_tpm = 1_000_000
+        # 🚨 保守安全限流：設為 12 RPM（每分鐘最多 12 次），保證不踩 15 RPM 的紅線
+        self.limit_rpm = 12
+        self.limit_tpm = 500_000
         self.limit_rpd = 1500
         
         self.is_disabled = False
         self.disable_reason = ""
         
-        # 滑動視窗計數器
         self.request_times = []
         self.token_usage = []
         self.daily_request_count = 0
@@ -917,6 +922,10 @@ class FreeTierKey:
                 self.rpd_exhausted = False
                 self.daily_request_count = 0
                 
+        # 🚨 剛性物理冷卻：同一組 Key 兩次請求之間強制間隔至少 4.8 秒（數學級保證永不超速 12.5 RPM）
+        if (current_time - self.last_request_time) < 4.8:
+            return False
+                
         # 進行時間滑動視窗清理
         self.request_times = [t for t in self.request_times if current_time - t <= 60.5]
         self.token_usage = [item for item in self.token_usage if current_time - item[0] <= 60.5]
@@ -931,6 +940,7 @@ class FreeTierKey:
         return True
 
     def add_request(self, current_time: float, estimated_tokens: int):
+        self.last_request_time = current_time
         self.request_times.append(current_time)
         self.token_usage.append((current_time, estimated_tokens))
         self.daily_request_count += 1
@@ -943,7 +953,8 @@ class FreeTierKey:
 
 class GeminiFreeTierManager:
     def __init__(self, api_keys: List[str], models: List[str]):
-        self.keys = [FreeTierKey(k) for k in api_keys]
+        cf_proxy_url = os.environ.get("GEMINI_PROXY_URL", "").strip() or None
+        self.keys = [FreeTierKey(k, custom_base_url=cf_proxy_url) for k in api_keys]
         self.models = models
         self.model_idx = 0
         self.lock = threading.Lock()
@@ -1389,7 +1400,8 @@ class GeminiFreeTierManager:
                 if enable_thinking:
                     thinking_config = types.ThinkingConfig(thinking_level='HIGH')
                 else:
-                    thinking_config = types.ThinkingConfig(thinking_level="MINIMAL")
+                    # 🚨 關鍵修復：關閉 Thinking 時必須完全為 None，絕不可傳入 MINIMAL（否則會持續觸發 400 錯誤）
+                    thinking_config = None
             try:
                 # 🚀 優化：移除 8~15 秒強制等待，改為 0.1~0.3 秒微抖動防多線程撞車
                 import random
@@ -4418,7 +4430,7 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = max(2, min(len(API_KEYS) * 2, 12))
+        max_workers = max(2, min(len(API_KEYS) * 2, 4))
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒 (啟用冷啟動階梯平滑調度)...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
