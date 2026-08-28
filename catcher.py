@@ -1816,32 +1816,26 @@ class DiagramResponse(BaseModel):
     python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
 
 def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
-    """清理 Markdown 標記、清除所有行尾無效反斜線並修復 LaTeX 轉義語法"""
+    """清理 Markdown 標記並安全注入 Linux/Windows 雙平台支援之 Noto Sans CJK 字型（絕不破壞引號語法）"""
     if not py_code:
         return ""
     
     # 1. 剝除 Markdown 代碼塊標記
-    py_code = re.sub(r'^```python\s*', '', py_code, flags=re.MULTILINE)
-    py_code = re.sub(r'^```\s*', '', py_code, flags=re.MULTILINE)
-    py_code = re.sub(r'```$', '', py_code, flags=re.MULTILINE).strip()
+    py_code = re.sub(r'^```(?:python)?\s*', '', py_code, flags=re.MULTILINE)
+    py_code = re.sub(r'```\s*$', '', py_code, flags=re.MULTILINE).strip()
     
-    # 2. 移除重複的 import 與 GUI 設定
+    # 2. 移除重複的 matplotlib 後端設定
     py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
     
-    # 3. 🚨 徹底解決 Line 14 反斜線報錯：
-    # (a) 將所有文字註解中的孤立反斜線轉義為雙反斜線
-    # (b) 將行尾無意義的反斜線一律清除
+    # 3. 🚨 安全清理：僅清除行尾續行符後面多餘的「空格/空白」，絕對不更動引號內部
     cleaned_lines = []
     for line in py_code.splitlines():
-        # 如果這一行以反斜線結尾但不是在 multiline string 內，強制拔除行尾反斜線與空白
-        line_clean = re.sub(r'(?<!\\)\\+\s*$', '', line)
-        # 修復未加 r 前綴的 LaTeX 字串 (如 '\alpha' 轉成 '\\alpha' 防止 Python 語法解析崩潰)
-        line_clean = re.sub(r'(?<!r)(["\'])(.*?\$[^\$]+\$.*?)\1', r'r\1\2\1', line_clean)
-        cleaned_lines.append(line_clean)
+        # 若行尾反斜線後夾帶空格（如 '\ '），將空格清除以符合 Python 續行語法
+        clean_l = re.sub(r'\\([ \t]+)$', r'\\', line)
+        cleaned_lines.append(clean_l)
     py_code = "\n".join(cleaned_lines)
 
-    # 4. 🚨 終極字型修復：關閉 usetex，強制全局與數學模式綁定支援 CJK 之微軟正黑體/Noto Sans
-    # 4. 🚨 終極字型修復：以實體路徑自動註冊 Noto Sans CJK，徹底支援 Linux GHA 與 Windows
+    # 4. 🚨 跨平台字型自動載入與數學模式綁定（Linux 優先使用已安裝之 Noto Sans CJK TC）
     norm_target_path = target_filepath.replace("\\", "/")
     headless_header = (
         "import matplotlib\n"
@@ -1850,15 +1844,13 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         "import matplotlib.font_manager as fm\n"
         "import numpy as np\n"
         "import os\n\n"
-        "# 跨平台實體字型路徑自動嗅探與註冊\n"
         "_cjk_font_paths = [\n"
         "    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',\n"
         "    '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',\n"
         "    '/usr/share/fonts/opentype/noto/NotoSansTC-Regular.otf',\n"
         "    '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',\n"
         "    'C:/Windows/Fonts/msjh.ttc',\n"
-        "    'C:/Windows/Fonts/msjh.ttf',\n"
-        "    '/System/Library/Fonts/PingFang.ttc'\n"
+        "    'C:/Windows/Fonts/msjh.ttf'\n"
         "]\n"
         "_loaded_font_name = 'sans-serif'\n"
         "for _fp in _cjk_font_paths:\n"
@@ -1914,10 +1906,21 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 task_desc=f"{task_tag} (繪圖嘗試 {attempt}/{max_attempts})"
             )
             
-            if not res or not res.get('need_diagram') or not res.get('python_code'):
+            # 🚀 雙重提取防禦：優先從結構化 JSON 取代碼，若被截斷則直接從文字提取
+            py_code_raw = ""
+            if isinstance(res, dict):
+                py_code_raw = res.get('python_code', '')
+                
+            if not py_code_raw and isinstance(res, str):
+                # 嘗試提取 markdown ```python ... ```
+                code_match = re.search(r'```(?:python)?\s*([\s\S]*?)```', res)
+                if code_match:
+                    py_code_raw = code_match.group(1).strip()
+
+            if not py_code_raw:
                 return False
                 
-            py_code = clean_and_repair_python_code(res['python_code'], norm_diagram_path)
+            py_code = clean_and_repair_python_code(py_code_raw, norm_diagram_path)
             if not py_code:
                 return False
                 
