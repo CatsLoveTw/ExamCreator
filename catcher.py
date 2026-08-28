@@ -1421,6 +1421,7 @@ class GeminiFreeTierManager:
                     max_output_tokens=model_max_tokens,
                     response_schema=response_schema,
                     temperature=temperature,
+                    tools=[], # 🚨 明確聲明 tools 為空，強行關閉 AFC 自動函式呼叫機制
                 )
                 if thinking_config:
                     gen_config.thinking_config = thinking_config
@@ -2188,7 +2189,7 @@ class ExamParser:
                     except Exception: pass
 
         # 3. 多執行緒同步發送 API 請求
-        max_workers = min(len(temp_images), len(self.ai_manager.keys) * 2, 16)
+        max_workers = min(len(temp_images), len(self.ai_manager.keys) * 2, 6)
         if max_workers > 0:
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 executor.map(lambda x: process_rubric_page(*x), temp_images)
@@ -4453,7 +4454,7 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = max(2, min(len(API_KEYS) * 2, 4))
+        max_workers = max(2, min(len(API_KEYS) * 2, 6))
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒 (啟用冷啟動階梯平滑調度)...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
