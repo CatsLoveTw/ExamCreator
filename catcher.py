@@ -871,7 +871,6 @@ class FreeTierKey:
     def __init__(self, api_key: str, custom_base_url: Optional[str] = None):
         self.api_key = api_key
         
-        # 🚀 支援自訂代理 / Cloudflare Worker 出口 IP
         http_opts = types.HttpOptions(timeout=900_000)
         if custom_base_url:
             http_opts.base_url = custom_base_url
@@ -879,19 +878,16 @@ class FreeTierKey:
         self.client = genai.Client(api_key=api_key, http_options=http_opts)
         self.rpd_exhausted = False
         self.rpd_reset_time = 0.0
-        self.last_request_time = 0.0 # 記錄上次請求時間
 
-        # 🚨 保守安全限流：設為 12 RPM（每分鐘最多 12 次），保證不踩 15 RPM 的紅線
-        self.limit_rpm = 12
-        self.limit_tpm = 500_000
-        self.limit_rpd = 1500
-        
-        self.is_disabled = False
-        self.disable_reason = ""
-        
-        self.request_times = []
+        # 🚨 取消連鎖反應：各模型維護獨立的冷卻時間戳記與請求紀錄！
+        self.model_cooldowns: Dict[str, float] = {}
+        self.model_last_request: Dict[str, float] = {}
+        self.model_request_times: Dict[str, List[float]] = {}
         self.token_usage = []
         self.daily_request_count = 0
+        self.limit_rpd = 1500
+        self.is_disabled = False
+        self.disable_reason = ""
 
     def get_status(self) -> dict:
         """回傳當前 Key 的 RPD/RPM/TPM 統計狀態"""
@@ -914,7 +910,8 @@ class FreeTierKey:
             "rpd_status": f"{self.daily_request_count}/{self.limit_rpd}" + (" (已耗盡，等待重置)" if self.rpd_exhausted else ""),
         }
 
-    def can_request(self, current_time: float, estimated_tokens: int) -> bool:
+    def can_request_model(self, model: str, current_time: float, estimated_tokens: int) -> bool:
+        """精準判定該 Key 是否能對【特定模型】發起請求（拒絕跨模型連坐）"""
         if self.rpd_exhausted:
             if current_time < self.rpd_reset_time:
                 return False
@@ -922,30 +919,39 @@ class FreeTierKey:
                 self.rpd_exhausted = False
                 self.daily_request_count = 0
                 
-        # 🚨 剛性物理冷卻：同一組 Key 兩次請求之間強制間隔至少 4.8 秒（數學級保證永不超速 12.5 RPM）
-        if (current_time - self.last_request_time) < 4.8:
+        # 1. 檢查該模型是否在獨立 429 冷卻中
+        if current_time < self.model_cooldowns.get(model, 0.0):
             return False
-                
-        # 進行時間滑動視窗清理
-        self.request_times = [t for t in self.request_times if current_time - t <= 60.5]
-        self.token_usage = [item for item in self.token_usage if current_time - item[0] <= 60.5]
+            
+        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 2.0秒，Flash 4.0秒）
+        min_interval = 2.0 if "lite" in model else 4.0
+        if (current_time - self.model_last_request.get(model, 0.0)) < min_interval:
+            return False
+            
+        # 3. 該模型的 60 秒滑動視窗 RPM 檢查
+        if model not in self.model_request_times:
+            self.model_request_times[model] = []
+        self.model_request_times[model] = [t for t in self.model_request_times[model] if current_time - t <= 60.5]
         
-        # 檢查 RPM 與 TPM 限制
-        if len(self.request_times) >= self.limit_rpm:
-            return False
-        current_tpm = sum(item[1] for item in self.token_usage)
-        if current_tpm + estimated_tokens > self.limit_tpm:
+        limit_rpm = 28 if "lite" in model else 14
+        if len(self.model_request_times[model]) >= limit_rpm:
             return False
             
         return True
 
-    def add_request(self, current_time: float, estimated_tokens: int):
-        self.last_request_time = current_time
-        self.request_times.append(current_time)
+    def add_request_model(self, model: str, current_time: float, estimated_tokens: int):
+        """記錄特定模型的請求時間"""
+        self.model_last_request[model] = current_time
+            self.model_request_times[model] = []
+        self.model_request_times[model].append(current_time)
         self.token_usage.append((current_time, estimated_tokens))
         self.daily_request_count += 1
         if self.daily_request_count >= self.limit_rpd:
             self.mark_rpd_exhausted()
+
+    def mark_model_rate_limited(self, model: str, cooldown_seconds: float = 45.0):
+        """🚨 精確只鎖定該模型，其他模型額度完全保留！"""
+        self.model_cooldowns[model] = time.time() + cooldown_seconds
 
     def mark_rpd_exhausted(self):
         self.rpd_exhausted = True
@@ -1309,55 +1315,30 @@ class GeminiFreeTierManager:
                 # 僅在檔案寫入失敗時在背景記錄，不干擾解析主線任務
                 logging.warning(f"無法寫入 key_status.txt 儀表板: {e}")
 
-    def get_current_resource(self, preferred_model: Optional[str] = None, estimated_tokens: int = 1000):
-        while True:
-            sleep_time = 0
-            with self.lock:
-                current_time = time.time()
-                chosen_model = self.models[self.model_idx]
-                if preferred_model and preferred_model in self.models:
-                    chosen_model = preferred_model
-                    
-                # 🚨 過濾出當前每日限額尚未用盡，且未被永久停用的有效金鑰
-                active_keys = [k for k in self.keys if not k.rpd_exhausted and not k.is_disabled]
+    def get_current_resource_for_model(self, target_model: str, estimated_tokens: int = 1000):
+        """尋找目前能執行 target_model 的金鑰；若無可用 Key 則回傳 None 以利立即降級至下一梯隊模型"""
+        with self.lock:
+            current_time = time.time()
+            active_keys = [k for k in self.keys if not k.rpd_exhausted and not k.is_disabled]
+            
+            if not self.keys:
+                logging.critical("🚨 [系統致命錯誤] 找不到任何 API 金鑰！")
+                os._exit(1)
+            if not active_keys:
+                raise RPDExhaustedException("所有 API 金鑰已達每日總配額上限。")
                 
-                # 🚨 狀況 0：主動防禦空金鑰檔案引發的非預期崩潰
-                if not self.keys:
-                    logging.critical("🚨 [系統致命錯誤] 找不到任何學術金鑰！請在 key.txt 中配置您的 Gemini API 金鑰後重新執行。")
-                    os._exit(1)
-                if not active_keys and all(k.is_disabled for k in self.keys):
-                    logging.critical("🚨 [系統致命錯誤] 偵測到所有已載入的 API 金鑰皆已因 401/403 權限錯誤被永久停用！請檢查 key_errors_summary.txt。程式將中斷執行...")
-                    os._exit(1) # 立即退出避免無限等待
-
-                # 狀況 A：如果所有未停用的 Key 的每日配額皆已用盡
-                if not active_keys:
-                    logging.warning(f"⚠️ [每日限額用盡] 偵測到所有 API 金鑰皆已達 RPD 上限。將安全保存當前已完成詳解並結束程式。")
-                    raise RPDExhaustedException("所有可用的 Gemini API 金鑰已達每日限額（RPD 上限）。")
-                else:
-                    # 狀況 B：🚨 核心修復：從 self.key_idx 開始循環指針輪詢，保證 34 把 Key 100% 依序均勻使用！
-                    num_active = len(active_keys)
-                    for i in range(num_active):
-                        idx = (self.key_idx + i) % num_active
-                        key = active_keys[idx]
-                        if key.can_request(current_time, estimated_tokens):
-                            key.add_request(current_time, estimated_tokens)
-                            self.key_idx = (idx + 1) % num_active  # 🚨 成功後立即推進指針到下一把 Key！
-                            res_model = chosen_model
-                            self.model_idx = (self.model_idx + 1) % len(self.models)
-                            return key.client, res_model, key
+            num_active = len(active_keys)
+            for i in range(num_active):
+                idx = (self.key_idx + i) % num_active
+                key = active_keys[idx]
+                if key.can_request_model(target_model, current_time, estimated_tokens):
+                    key.add_request_model(target_model, current_time, estimated_tokens)
+                    self.key_idx = (idx + 1) % num_active
+                    return key.client, target_model, key
                     
-                    # 狀況 C：所有 active key 都在冷卻中，計算最快能空出 RPM 額度的時間
-                    active_request_times = [k.request_times[0] + 60.5 for k in active_keys if k.request_times]
-                    if active_request_times:
-                        earliest_wakeup = min(active_request_times)
-                        sleep_time = max(0.5, earliest_wakeup - current_time)
-                    else:
-                        sleep_time = 1.0
-                    logging.info(f"⏳ [限速調度] 所有可用金鑰皆在冷卻中。等待 {sleep_time:.1f} 秒...")
-                    
-            smart_sleep(sleep_time)
+        return None, target_model, None
 
-    def handle_rate_limit_error(self, key: FreeTierKey, error_msg: str):
+    def handle_rate_limit_error(self, key: FreeTierKey, model: str, error_msg: str):
         with self.lock:
             msg = error_msg.lower()
             is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd", "day limit"])
@@ -1366,9 +1347,9 @@ class GeminiFreeTierManager:
                 key.mark_rpd_exhausted()
                 logging.warning(f"🚨 [RPD 每日上限] 金鑰 {key.api_key[:8]}... 已達每日總配額上限，轉入每日冷卻。")
             else:
-                # 🚨 確切冷卻：當前 Key 鎖定 60 秒，讓指針強制轉移給其他 33 把 Key
-                key.request_times.extend([time.time() + 60] * 15)
-                logging.info(f"⏳ [429 鎖定降溫] 金鑰 {key.api_key[:8]}... 進入 60 秒冷卻，負載全面轉移至其他金鑰。")
+                # 🚀 精確只鎖定該模型 40 秒，其餘 3.6/3.5/lite 模型依然暢通無阻！
+                key.mark_model_rate_limited(model, cooldown_seconds=40.0)
+                logging.info(f"⏳ [獨立模型降溫] 金鑰 {key.api_key[:8]}... 僅對模型 {model} 冷卻 40 秒，其他模型額度完全保留！")
 
     def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=10, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
@@ -1391,12 +1372,21 @@ class GeminiFreeTierManager:
         RETRIES_PER_MODEL = 6
 
         while attempts < max_attempts:
-            # 計算當前應使用的模型梯隊索引
-            model_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
-            target_model = candidate_models[model_tier_idx]
+            # 🚀 瀑布流階梯調度：優先尋找最高算力模型，若 3.7 都在冷卻中，0 秒切換至 3.6/3.5 接力！
+            client, model, key_obj = None, None, None
+            for model_cand in candidate_models:
+                cl, md, ko = self.get_current_resource_for_model(model_cand, estimated_tokens=estimated_tokens)
+                if cl is not None:
+                    client, model, key_obj = cl, md, ko
+                    break
+                    
+            if client is None:
+                # 若所有候選模型都在冷卻中，微睡 1.5 秒後再試
+                logging.info("⏳ [全梯隊滿載] 所有模型額度短暫冷卻中，等待 1.5 秒...")
+                smart_sleep(1.5)
+                attempts += 1
+                continue
 
-            # 取得可用資源與目前目標模型
-            client, model, key_obj = self.get_current_resource(preferred_model=target_model, estimated_tokens=estimated_tokens)
             self.last_model_used = model
             
             thinking_config = None
@@ -1557,8 +1547,7 @@ class GeminiFreeTierManager:
 
                 attempts += 1
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
-                    # 🚨 1. 立刻鎖定當前這把 Key，強制冷卻 60 秒（不再派工給它）
-                    self.handle_rate_limit_error(key_obj, err_str)
+                    self.handle_rate_limit_error(key_obj, model, err_str)
                     
                     # 🚨 2. 多 Key 智慧備援分流
                     fallback_threshold = max(3, min(len(self.keys), 8))
@@ -1900,8 +1889,13 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
     
     for attempt in range(1, max_attempts + 1):
         try:
-            # 🚀 繪圖雙階梯策略：第 1 次首選超輕量 gemini-3.5-flash-lite，第 2 次重試才使用 3.5-flash 保底
-            target_draw_model = "gemini-3.5-flash-lite" if attempt == 1 else "gemini-3.5-flash"
+            # 🚀 繪圖多階梯策略：首選極速 3.1-flash-lite (30 RPM)，重試依序升級 3.5-flash-lite -> 3.5-flash
+            if attempt == 1:
+                target_draw_model = "gemini-3.1-flash-lite"
+            elif attempt == 2:
+                target_draw_model = "gemini-3.5-flash-lite"
+            else:
+                target_draw_model = "gemini-3.5-flash"
             
             res, _ = ai_manager.generate_with_retry(
                 contents=[current_prompt],
@@ -2775,20 +2769,24 @@ class ExamParser:
                             # 2. 標記檔案路徑
                             done_marker = f"{full_img_path}.done"
                             fail_marker = f"{full_img_path}.failed"
-                            
-                            # 如果之前已經重試失敗過，直接略過，避免每次啟動都重複打 API 消耗配額
-                            if os.path.exists(fail_marker):
+                            force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
+
+                            # 🚨 關鍵修復：若開啟強制重繪，自動刪除舊的 .failed 標記，給予重新生成機會！
+                            if force_refresh and os.path.exists(fail_marker):
+                                try: os.remove(fail_marker)
+                                except Exception: pass
+
+                            # 在一般模式下，只有「已有實體檔案且標記失敗」才跳過；若圖檔本體缺失則一律嘗試補繪
+                            if not force_refresh and os.path.exists(fail_marker) and os.path.exists(full_img_path):
                                 continue
 
-                            force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
                             needs_draw = False
-
                             if force_refresh:
-                                # 開啟強制重繪時：只有「尚未完成標記 (.done)」的圖片才執行重繪
+                                # 強制重繪：只要未標記 .done 就重新繪製
                                 if not os.path.exists(done_marker):
                                     needs_draw = True
                             else:
-                                # 一般模式：實體檔案不存在或檔案大小為 0 時才補繪
+                                # 一般模式：實體檔案不存在、大小為 0 均執行補繪
                                 if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
                                     needs_draw = True
 
@@ -2825,14 +2823,17 @@ class ExamParser:
                                 
                                 if draw_success:
                                     missing_diagram_count += 1
-                                    # 建立完成標記，確保下次啟動即使 REFRESH_DIAGRAMS=true 也不會重複生成
+                                    # 🚨 成功後建立 .done 標記，並立即刪除 .failed 標記！
+                                    if os.path.exists(fail_marker):
+                                        try: os.remove(fail_marker)
+                                        except Exception: pass
                                     try:
                                         with open(done_marker, "w", encoding="utf-8") as f_mk:
                                             f_mk.write(f"done_at: {time.time()}\n")
                                     except Exception:
                                         pass
                                 else:
-                                    # 若繪製失敗，建立 failed 標記，避免重複死循環
+                                    # 若繪製失敗，建立 failed 標記
                                     try:
                                         with open(fail_marker, "w", encoding="utf-8") as f_mk:
                                             f_mk.write(f"failed_at: {time.time()}\n")
@@ -4897,10 +4898,10 @@ if __name__ == "__main__":
     MODELS = [
         "gemini-3.7-flash",
         "gemini-3.6-flash",         
-        "gemini-3.5-flash",         
-        "gemini-3-flash",           
+        "gemini-3.5-flash",       
         "gemini-3.5-flash-lite",    
-        "gemini-3.1-flash-lite",    
+        "gemini-3.1-flash-lite",          
+        "gemini-3-flash", 
         "gemini-2.5-flash"         
     ]
     
