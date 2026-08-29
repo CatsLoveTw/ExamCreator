@@ -890,9 +890,16 @@ class FreeTierKey:
         self.disable_reason = ""
 
     def get_status(self) -> dict:
-        """回傳當前 Key 的 RPD 統計狀態"""
+        """回傳當前 Key 的 RPM/TPM/RPD 統計狀態（支援分模型統計）"""
         current_time = time.time()
         self.token_usage = [item for item in self.token_usage if current_time - item[0] <= 60.5]
+        
+        # 統計該 Key 旗下所有模型在過去 60 秒內的總請求數 (RPM)
+        total_rpm = sum(
+            len([t for t in times if current_time - t <= 60.5])
+            for times in self.model_request_times.values()
+        )
+        current_tpm = sum(item[1] for item in self.token_usage)
         
         if self.rpd_exhausted and current_time >= self.rpd_reset_time:
             self.rpd_exhausted = False
@@ -900,6 +907,8 @@ class FreeTierKey:
             
         return {
             "key": f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else self.api_key,
+            "rpm_status": f"{total_rpm}/15",
+            "tpm_status": f"{current_tpm}/500k",
             "rpd_status": f"{self.daily_request_count}/{self.limit_rpd}" + (" (已耗盡，等待重置)" if self.rpd_exhausted else ""),
         }
 
@@ -1806,7 +1815,7 @@ class DiagramResponse(BaseModel):
     python_code: str = Field(description="完整的 Python 繪圖程式碼。必須使用 matplotlib 與 numpy，且程式碼最末端必須包含將圖片儲存至指定路徑的儲存代碼。若不需要則留空。")
 
 def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
-    """清理 Markdown 標記並安全注入 Linux/Windows 雙平台支援之 Noto Sans CJK 字型（絕不破壞引號語法）"""
+    """清理 Markdown 標記、自動將字面量 \\n 展開為真實換行，並修復 Line 35 續行符錯誤"""
     if not py_code:
         return ""
     
@@ -1814,13 +1823,20 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
     py_code = re.sub(r'^```(?:python)?\s*', '', py_code, flags=re.MULTILINE)
     py_code = re.sub(r'```\s*$', '', py_code, flags=re.MULTILINE).strip()
     
-    # 2. 移除重複的 matplotlib 後端設定
+    # 2. 🚨 核心修復：若代碼被壓在單行或夾帶字面量 '\\n'，強制展開為真正的換行符
+    if "\\n" in py_code and ("\nimport" not in py_code and "import" in py_code):
+        py_code = py_code.replace("\\n", "\n").replace("\\t", "    ").replace('\\"', '"').replace("\\'", "'")
+        
+    # 3. 清理開頭多餘的字面量 '\n' 或單獨反斜線（徹底根絕 Line 35 unexpected character 報錯）
+    py_code = re.sub(r'^\\[nrt]\s*', '', py_code)
+    py_code = py_code.lstrip('\\').strip()
+    
+    # 4. 移除重複的 matplotlib 後端設定
     py_code = re.sub(r'matplotlib\.use\(.*?\)', '', py_code)
     
-    # 3. 🚨 安全清理：僅清除行尾續行符後面多餘的「空格/空白」，絕對不更動引號內部
+    # 5. 安全清理：消除所有行尾續行符反斜線後面的非法空格
     cleaned_lines = []
     for line in py_code.splitlines():
-        # 若行尾反斜線後夾帶空格（如 '\ '），將空格清除以符合 Python 續行語法
         clean_l = re.sub(r'\\([ \t]+)$', r'\\', line)
         cleaned_lines.append(clean_l)
     py_code = "\n".join(cleaned_lines)
