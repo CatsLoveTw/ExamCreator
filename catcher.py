@@ -1354,7 +1354,7 @@ class GeminiFreeTierManager:
                 key.mark_model_rate_limited(model, cooldown_seconds=40.0)
                 logging.info(f"⏳ [獨立模型降溫] 金鑰 {key.api_key[:8]}... 僅對模型 {model} 冷卻 40 秒，其他模型額度完全保留！")
 
-    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=10, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
+    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=30, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
         if provider == "groq":
             return self._generate_with_groq(contents, response_schema, temperature, max_attempts, preferred_model, task_desc)
@@ -1370,9 +1370,10 @@ class GeminiFreeTierManager:
         estimated_tokens = self.estimate_tokens(contents)
         attempts = 0
         
-        # 🚨 設定每個模型梯隊的重試容忍次數：
-        # 同一個模型先換金鑰重試 6 次；若仍持續 429 則自動平滑降級至下一梯隊模型！
-        RETRIES_PER_MODEL = 6
+        # 🚀 動態深度：根據手頭 Key 總數動態設定容忍次數，確保 34 把 Key 能被充分輪詢！
+        num_keys = max(1, len(self.keys))
+        max_attempts = max(max_attempts, min(num_keys, 35))
+        RETRIES_PER_MODEL = max(6, num_keys // 2)
 
         while attempts < max_attempts:
             # 🚀 瀑布流階梯調度：優先尋找最高算力模型，若 3.7 都在冷卻中，0 秒切換至 3.6/3.5 接力！
@@ -1552,10 +1553,10 @@ class GeminiFreeTierManager:
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
                     self.handle_rate_limit_error(key_obj, model, err_str)
                     
-                    # 🚨 2. 多 Key 智慧備援分流
-                    fallback_threshold = max(3, min(len(self.keys), 8))
+                    # 🚀 深度輪詢：至少嘗試過 80% 的 Key（約 25~28 次）之後，才切換第三方備援！
+                    fallback_threshold = max(5, int(len(self.keys) * 0.8))
                     if attempts >= fallback_threshold and not has_pil_images:
-                        logging.info(f"🔄 [429 智慧避險] 多把金鑰皆遇限流，切換至備援平台處理...")
+                        logging.info(f"🔄 [429 智慧避險] 已充分輪詢 {attempts} 把金鑰皆遇限流，切換至備援平台處理...")
                         res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
                         if res_fallback:
                             return res_fallback, None
