@@ -879,7 +879,7 @@ class FreeTierKey:
         self.rpd_exhausted = False
         self.rpd_reset_time = 0.0
 
-        # 🚨 取消連鎖反應：各模型維護獨立的冷卻時間戳記與請求紀錄！
+        # 🚨 各模型獨立冷卻與請求紀錄字典
         self.model_cooldowns: Dict[str, float] = {}
         self.model_last_request: Dict[str, float] = {}
         self.model_request_times: Dict[str, List[float]] = {}
@@ -890,23 +890,16 @@ class FreeTierKey:
         self.disable_reason = ""
 
     def get_status(self) -> dict:
-        """回傳當前 Key 的 RPD/RPM/TPM 統計狀態"""
+        """回傳當前 Key 的 RPD 統計狀態"""
         current_time = time.time()
-        self.request_times = [t for t in self.request_times if current_time - t <= 60.5]
         self.token_usage = [item for item in self.token_usage if current_time - item[0] <= 60.5]
         
-        # 若已標記耗盡且時間已過重置點，則重新恢復
         if self.rpd_exhausted and current_time >= self.rpd_reset_time:
             self.rpd_exhausted = False
             self.daily_request_count = 0
             
-        current_rpm = len(self.request_times)
-        current_tpm = sum(item[1] for item in self.token_usage)
-        
         return {
             "key": f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else self.api_key,
-            "rpm_status": f"{current_rpm}/{self.limit_rpm}",
-            "tpm_status": f"{current_tpm}/{self.limit_tpm}",
             "rpd_status": f"{self.daily_request_count}/{self.limit_rpd}" + (" (已耗盡，等待重置)" if self.rpd_exhausted else ""),
         }
 
@@ -942,6 +935,7 @@ class FreeTierKey:
     def add_request_model(self, model: str, current_time: float, estimated_tokens: int):
         """記錄特定模型的請求時間"""
         self.model_last_request[model] = current_time
+        if model not in self.model_request_times:
             self.model_request_times[model] = []
         self.model_request_times[model].append(current_time)
         self.token_usage.append((current_time, estimated_tokens))
@@ -956,7 +950,7 @@ class FreeTierKey:
     def mark_rpd_exhausted(self):
         self.rpd_exhausted = True
         self.rpd_reset_time = get_next_rpd_reset_timestamp()
-
+        
 class GeminiFreeTierManager:
     def __init__(self, api_keys: List[str], models: List[str]):
         cf_proxy_url = os.environ.get("GEMINI_PROXY_URL", "").strip() or None
