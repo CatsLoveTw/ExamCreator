@@ -870,12 +870,10 @@ class SolutionValidatorBatch(BaseModel):
 class FreeTierKey:
     def __init__(self, api_key: str, custom_base_url: Optional[str] = None):
         self.api_key = api_key
-        
-        http_opts = types.HttpOptions(timeout=900_000)
-        if custom_base_url:
-            http_opts.base_url = custom_base_url
-            
-        self.client = genai.Client(api_key=api_key, http_options=http_opts)
+        # 🚀 核心修復：快取連線池並加上執行緒鎖，確保多線程併發存取安全
+        self.clients_cache: Dict[str, genai.Client] = {}
+        self.cache_lock = threading.Lock()
+        self.client = self.get_client(custom_base_url)
         self.rpd_exhausted = False
         self.rpd_reset_time = 0.0
 
@@ -888,6 +886,17 @@ class FreeTierKey:
         self.limit_rpd = 1500
         self.is_disabled = False
         self.disable_reason = ""
+    
+    def get_client(self, custom_base_url: Optional[str] = None) -> genai.Client:
+        """複用並快取 Client，防範長執行過程中的資源洩漏 (具備執行緒安全鎖)"""
+        proxy_key = custom_base_url or "direct"
+        with self.cache_lock:
+            if proxy_key not in self.clients_cache:
+                http_opts = types.HttpOptions(timeout=900_000)
+                if custom_base_url:
+                    http_opts.base_url = custom_base_url
+                self.clients_cache[proxy_key] = genai.Client(api_key=self.api_key, http_options=http_opts)
+            return self.clients_cache[proxy_key]
 
     def get_status(self) -> dict:
         """回傳當前 Key 的 RPM/TPM/RPD 統計狀態（支援分模型統計）"""
@@ -906,7 +915,8 @@ class FreeTierKey:
             self.daily_request_count = 0
             
         return {
-            "key": f"{self.api_key[:8]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else self.api_key,
+            # 🚀 強化金鑰隱私遮罩，只露前 6 個與後 4 個字元
+            "key": f"{self.api_key[:6]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else self.api_key,
             "rpm_status": f"{total_rpm}/15",
             "tpm_status": f"{current_tpm}/500k",
             "rpd_status": f"{self.daily_request_count}/{self.limit_rpd}" + (" (已耗盡，等待重置)" if self.rpd_exhausted else ""),
@@ -925,13 +935,13 @@ class FreeTierKey:
         if current_time < self.model_cooldowns.get(model, 0.0):
             return False
             
-        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 2.0秒，Flash 3.5秒）
-        min_interval = 2.0 if "lite" in model else 3.5
+        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 1.2秒，Flash 2.2秒，安全合規 QPS）
+        min_interval = 1.2 if "lite" in model else 2.2
         if (current_time - self.model_last_request.get(model, 0.0)) < min_interval:
             return False
             
-        # 🚨 3. 同一 Key 跨模型通用防抖動：該 Key 上一次無論發給誰，至少間隔 1.0 秒
-        if (current_time - getattr(self, "last_global_request_time", 0.0)) < 1.0:
+        # 🚨 3. 同一 Key 跨模型通用防抖動：該 Key 上一次無論發給誰，至少間隔 0.4 秒
+        if (current_time - getattr(self, "last_global_request_time", 0.0)) < 0.4:
             return False
             
         # 3. 該模型的 60 秒滑動視窗 RPM 檢查
@@ -957,23 +967,425 @@ class FreeTierKey:
         if self.daily_request_count >= self.limit_rpd:
             self.mark_rpd_exhausted()
 
-    def mark_model_rate_limited(self, model: str, cooldown_seconds: float = 45.0):
-        """🚨 精確只鎖定該模型，其他模型額度完全保留！"""
-        self.model_cooldowns[model] = time.time() + cooldown_seconds
+    def mark_model_rate_limited(self, model: str, cooldown_seconds: float = 40.0):
+        """🚨 精確鎖定模型，並加入 Jitter 避免 34 把 Key 同時解鎖造成次生 429 暴擊"""
+        import random
+        jitter = random.uniform(5.0, 25.0)  # 動態錯開 5~25 秒
+        self.model_cooldowns[model] = time.time() + cooldown_seconds + jitter
 
     def mark_rpd_exhausted(self):
         self.rpd_exhausted = True
         self.rpd_reset_time = get_next_rpd_reset_timestamp()
         
+class LiveDashboardMetrics:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.start_time = time.time()
+        self.run_start_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.current_paper = "準備就緒，等待任務..."
+        self.total_papers = 0
+        self.completed_papers = 0
+        self.total_questions = 0
+        self.completed_questions = 0
+        self.diagram_count = 0
+        self.arbitration_count = 0
+        self.http_counts = {"200": 0, "429": 0, "503": 0, "400": 0, "other": 0}
+        self.proxy_stats = {}
+        self.model_stats = {}
+        self.recent_logs = []
+
+        # 🚀 雲端跨次持久化歷史戰報紀錄
+        self.history_file = "telemetry_history.json"
+        self.history_base = self.load_history()
+        self.save_history()  # 啟動時自動記錄一次 Run
+
+    def load_history(self) -> dict:
+        """從雲端備份的 telemetry_history.json 讀取歷次執行之累積紀錄"""
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    logging.info(f"📜 [雲端歷史戰報] 成功載入歷史執行紀錄！(歷次已累積執行 {data.get('total_runs', 0)} 次，解題 {data.get('cumulative_questions', 0)} 題)")
+                    return data
+            except Exception as e:
+                logging.warning(f"無法讀取歷史紀錄 {self.history_file}: {e}")
+        return {
+            "total_runs": 0,
+            "cumulative_questions": 0,
+            "cumulative_papers": 0,
+            "cumulative_http_counts": {"200": 0, "429": 0, "503": 0, "400": 0, "other": 0},
+            "cumulative_model_stats": {},
+            "last_run_timestamp": "無"
+        }
+
+    def save_history(self):
+        """將當前執行的重點數據無損融合至歷史總戰報，並持久化寫入檔案"""
+        with self.lock:
+            try:
+                merged = dict(self.history_base)
+                # 當次 Run 計數遞增
+                merged["total_runs"] = self.history_base.get("total_runs", 0) + 1
+                merged["last_run_timestamp"] = self.run_start_str
+                
+                # 融合計算累積題目與考卷數
+                merged["cumulative_questions"] = self.history_base.get("cumulative_questions", 0) + self.completed_questions
+                merged["cumulative_papers"] = self.history_base.get("cumulative_papers", 0) + self.completed_papers
+
+                # 融合 HTTP 回傳狀態數
+                merged_http = dict(self.history_base.get("cumulative_http_counts", {}))
+                for k, v in self.http_counts.items():
+                    merged_http[k] = merged_http.get(k, 0) + v
+                merged["cumulative_http_counts"] = merged_http
+
+                # 融合各模型調度數
+                merged_model = dict(self.history_base.get("cumulative_model_stats", {}))
+                for m, stats in self.model_stats.items():
+                    if m not in merged_model: merged_model[m] = {"200": 0, "429": 0, "other": 0}
+                    merged_model[m]["200"] = merged_model[m].get("200", 0) + stats.get("200", 0)
+                    merged_model[m]["429"] = merged_model[m].get("429", 0) + stats.get("429", 0)
+                    merged_model[m]["other"] = merged_model[m].get("other", 0) + stats.get("other", 0)
+                merged["cumulative_model_stats"] = merged_model
+
+                with open(self.history_file, "w", encoding="utf-8") as f:
+                    json.dump(merged, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                logging.error(f"寫入歷史戰報 {self.history_file} 失敗: {e}")
+
+    def record_http(self, proxy_name: str, model_name: str, code: int):
+        with self.lock:
+            code_str = str(code)
+            if code_str in self.http_counts:
+                self.http_counts[code_str] += 1
+            else:
+                self.http_counts["other"] += 1
+                
+            short_p = proxy_name.split("//")[-1].split("/")[0] if "//" in proxy_name else proxy_name
+            if short_p not in self.proxy_stats:
+                self.proxy_stats[short_p] = {"200": 0, "429": 0, "other": 0}
+            if model_name not in self.model_stats:
+                self.model_stats[model_name] = {"200": 0, "429": 0, "other": 0}
+
+            if code_str == "200": 
+                self.proxy_stats[short_p]["200"] += 1
+                self.model_stats[model_name]["200"] += 1
+            elif code_str == "429": 
+                self.proxy_stats[short_p]["429"] += 1
+                self.model_stats[model_name]["429"] += 1
+            else: 
+                self.proxy_stats[short_p]["other"] += 1
+                self.model_stats[model_name]["other"] += 1
+        # 定期落盤備份歷史戰報
+        self.save_history()
+
+    def add_log(self, msg: str):
+        with self.lock:
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            self.recent_logs.insert(0, f"[{ts}] {msg}")
+            if len(self.recent_logs) > 12:
+                self.recent_logs.pop()
+        self.save_history()
+
+    def record_http(self, proxy_name: str, model_name: str, code: int):
+        with self.lock:
+            code_str = str(code)
+            if code_str in self.http_counts:
+                self.http_counts[code_str] += 1
+            else:
+                self.http_counts["other"] += 1
+                
+            short_p = proxy_name.split("//")[-1].split("/")[0] if "//" in proxy_name else proxy_name
+            if short_p not in self.proxy_stats:
+                self.proxy_stats[short_p] = {"200": 0, "429": 0, "other": 0}
+            if model_name not in self.model_stats:
+                self.model_stats[model_name] = {"200": 0, "429": 0, "other": 0}
+
+            if code_str == "200": 
+                self.proxy_stats[short_p]["200"] += 1
+                self.model_stats[model_name]["200"] += 1
+            elif code_str == "429": 
+                self.proxy_stats[short_p]["429"] += 1
+                self.model_stats[model_name]["429"] += 1
+            else: 
+                self.proxy_stats[short_p]["other"] += 1
+                self.model_stats[model_name]["other"] += 1
+
+    def add_log(self, msg: str):
+        with self.lock:
+            ts = datetime.datetime.now().strftime("%H:%M:%S")
+            self.recent_logs.insert(0, f"[{ts}] {msg}")
+            if len(self.recent_logs) > 12:
+                self.recent_logs.pop()
+
+GLOBAL_METRICS = LiveDashboardMetrics()
+
+def start_dashboard_web_server(port=8080, manager=None):
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class DashboardHandler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args): pass
+        
+        def do_GET(self):
+            if self.path == "/api/data":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                
+                # 🚀 核心修復：先獨立讀取 manager 金鑰狀態，絕不與 GLOBAL_METRICS.lock 巢狀重疊，徹底杜絕死鎖！
+                key_statuses = []
+                key_health = {"active": 0, "cooldown": 0, "disabled": 0}
+                if manager:
+                    with manager.lock:
+                        key_statuses = [k.get_status() for k in manager.keys]
+                        for k in manager.keys:
+                            if k.is_disabled: key_health["disabled"] += 1
+                            elif k.rpd_exhausted: key_health["cooldown"] += 1
+                            else: key_health["active"] += 1
+
+                # 計算產出資料庫磁碟容量
+                total_mb = 0.0
+                out_dir = "./exam_database_output"
+                if os.path.exists(out_dir):
+                    for root, dirs, files in os.walk(out_dir):
+                        for f in files:
+                            total_mb += os.path.getsize(os.path.join(root, f))
+                disk_str = f"{total_mb / (1024*1024):.1f} MB"
+
+                with GLOBAL_METRICS.lock:
+                    uptime_sec = int(time.time() - GLOBAL_METRICS.start_time)
+                    time_limit_sec = int(MAX_EXECUTION_TIME_SECONDS)
+                    time_pct = min(100, int((uptime_sec / time_limit_sec) * 100))
+                    
+                    uptime_m = max(1, uptime_sec / 60.0)
+                    qpm = round(GLOBAL_METRICS.completed_questions / uptime_m, 1)
+
+                    tot_http = sum(GLOBAL_METRICS.http_counts.values())
+                    ok_http = GLOBAL_METRICS.http_counts.get("200", 0)
+                    success_rate = f"{(ok_http / tot_http * 100):.1f}%" if tot_http > 0 else "100%"
+
+                    # 🚀 讀取最新融合的歷史總統計
+                    h_base = GLOBAL_METRICS.history_base
+                    cum_q = h_base.get("cumulative_questions", 0) + GLOBAL_METRICS.completed_questions
+                    cum_p = h_base.get("cumulative_papers", 0) + GLOBAL_METRICS.completed_papers
+                    cum_runs = h_base.get("total_runs", 1)
+                    cum_http_200 = h_base.get("cumulative_http_counts", {}).get("200", 0) + GLOBAL_METRICS.http_counts.get("200", 0)
+                    cum_http_429 = h_base.get("cumulative_http_counts", {}).get("429", 0) + GLOBAL_METRICS.http_counts.get("429", 0)
+
+                    data = {
+                        "uptime_formatted": str(datetime.timedelta(seconds=uptime_sec)),
+                        "time_pct": time_pct,
+                        "current_paper": GLOBAL_METRICS.current_paper,
+                        "paper_progress": f"{GLOBAL_METRICS.completed_papers}/{GLOBAL_METRICS.total_papers}",
+                        "progress": f"{GLOBAL_METRICS.completed_questions}/{GLOBAL_METRICS.total_questions}",
+                        "qpm": qpm,
+                        "success_rate": success_rate,
+                        "disk_str": disk_str,
+                        "key_health": key_health,
+                        "diagram_count": GLOBAL_METRICS.diagram_count,
+                        "arbitration_count": GLOBAL_METRICS.arbitration_count,
+                        "http_counts": GLOBAL_METRICS.http_counts,
+                        "proxy_stats": GLOBAL_METRICS.proxy_stats,
+                        "model_stats": GLOBAL_METRICS.model_stats,
+                        "key_statuses": key_statuses,
+                        "recent_logs": GLOBAL_METRICS.recent_logs,
+                        # 📜 歷史戰報傳遞
+                        "cum_runs": cum_runs,
+                        "cum_q": cum_q,
+                        "cum_p": cum_p,
+                        "cum_http_200": cum_http_200,
+                        "cum_http_429": cum_http_429,
+                        "last_run_time": h_base.get("last_run_timestamp", "首升執行")
+                    }
+                self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            else:
+                self.send_response(200)
+                self.send_header("Content-type", "text/html; charset=utf-8")
+                self.end_headers()
+                html = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Exam Parser 即時任務遙測中心</title>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <style>
+                        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+                        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; max-width: 1200px; margin: 0 auto; }
+                        .card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+                        h2 { margin-top: 0; color: #38bdf8; font-size: 1.1rem; border-bottom: 1px solid #334155; padding-bottom: 10px; }
+                        .stat-val { font-size: 1.6rem; font-weight: bold; color: #4ade80; }
+                        .progress-bar-bg { background: #334155; border-radius: 8px; height: 12px; width: 100%; overflow: hidden; margin-top: 6px; }
+                        .progress-bar-fill { background: linear-gradient(90deg, #38bdf8, #4ade80); height: 100%; width: 0%; transition: width 0.5s; }
+                        .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; }
+                        .badge-200 { background: #166534; color: #4ade80; }
+                        .badge-429 { background: #991b1b; color: #fca5a5; }
+                        .badge-503 { background: #854d0e; color: #fef08a; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+                        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #334155; }
+                        th { color: #94a3b8; }
+                        .log-box { background: #020617; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #a7f3d0; max-height: 180px; overflow-y: auto; }
+                    </style>
+                </head>
+                <body>
+                    <h1 style="text-align: center; color: #38bdf8; margin-bottom: 25px;">⚡ Exam Parser 即時遠端遙測儀表板</h1>
+                    <div class="grid">
+                        <div class="card">
+                            <h2>⏱️ GHA 5小時安全時間倒數</h2>
+                            <div>已運行：<span id="uptime" style="font-weight:bold;color:#f8fafc;">-</span> / 05:00:00</div>
+                            <div class="progress-bar-bg"><div id="time-bar" class="progress-bar-fill"></div></div>
+                        </div>
+                        <div class="card">
+                            <h2>📌 當前考卷與進度</h2>
+                            <div>考卷：<span id="paper" style="color:#f1f5f9;font-weight:bold;">-</span></div>
+                            <div style="margin-top:6px;">考卷總進度：<span id="paper-progress" style="color:#38bdf8;font-weight:bold;">0/0 份</span></div>
+                            <div style="margin-top:6px;">當前題目進度：<span id="progress" class="stat-val" style="font-size:1.3rem;">0/0</span> (<span id="qpm">0</span> 題/分)</div>
+                            <div style="margin-top:6px;font-size:0.85rem;color:#94a3b8;">已累積題庫資產：<span id="disk-size" style="color:#4ade80;font-weight:bold;">0 MB</span></div>
+                        </div>
+                        <div class="card">
+                            <h2>🔑 34 把 API 金鑰即時健康度</h2>
+                            <div style="margin-top:5px;"><span class="badge" style="background:#166534;color:#4ade80;">🟢 正常可用</span> <span id="k-active" class="stat-val" style="font-size:1.2rem;color:#4ade80;">0</span> 把</div>
+                            <div style="margin-top:5px;"><span class="badge" style="background:#854d0e;color:#fef08a;">🟡 RPD 冷卻</span> <span id="k-cool" class="stat-val" style="font-size:1.2rem;color:#fef08a;">0</span> 把</div>
+                            <div style="margin-top:5px;"><span class="badge" style="background:#991b1b;color:#fca5a5;">🔴 失效/停用</span> <span id="k-dis" class="stat-val" style="font-size:1.2rem;color:#fca5a5;">0</span> 把</div>
+                        </div>
+                        <div class="card">
+                            <h2>🌐 HTTP 狀態統計與成功率</h2>
+                            <div>請求成功率：<span id="succ-rate" class="stat-val" style="font-size:1.3rem;color:#38bdf8;">100%</span></div>
+                            <div style="margin-top:6px;"><span class="badge badge-200">200 成功</span> <span id="c200" style="color:#4ade80;font-weight:bold;">0</span></div>
+                            <div style="margin-top:4px;"><span class="badge badge-429">429 限流</span> <span id="c429" style="color:#fca5a5;font-weight:bold;">0</span></div>
+                            <div style="margin-top:4px;"><span class="badge badge-503">503 忙碌</span> <span id="c503" style="color:#fef08a;font-weight:bold;">0</span></div>
+                        </div>
+                        <div class="card">
+                            <h2>🎨 圖解與仲裁引擎</h2>
+                            <div>AI 自動繪圖：<span id="diag-count" class="stat-val" style="font-size:1.3rem;color:#38bdf8;">0</span> 張</div>
+                            <div style="margin-top:6px;">學術仲裁修正：<span id="arbit-count" class="stat-val" style="font-size:1.3rem;color:#f59e0b;">0</span> 次</div>
+                        </div>
+                        <div class="card" style="grid-column: span 2;">
+                            <h2>📜 雲端跨次歷史累積總戰報 (Cloud History)</h2>
+                            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+                                <div>歷史總啟動次數：<span id="cum-runs" style="color:#38bdf8;font-weight:bold;">0</span> 次</div>
+                                <div>歷史累積完成考卷：<span id="cum-p" style="color:#4ade80;font-weight:bold;">0</span> 份</div>
+                                <div>歷史累積解析題目：<span id="cum-q" style="color:#4ade80;font-weight:bold;">0</span> 題</div>
+                                <div>歷史累積 API 200 成功：<span id="cum-200" style="color:#4ade80;font-weight:bold;">0</span> 次</div>
+                                <div>歷史 429 限流數：<span id="cum-429" style="color:#fca5a5;font-weight:bold;">0</span> 次</div>
+                            </div>
+                            <div style="margin-top:8px;font-size:0.8rem;color:#94a3b8;">上次啟動時間：<span id="last-run-time">-</span></div>
+                        </div>
+                        <div class="card" style="grid-column: span 2;">
+                            <h2>🤖 各 Gemini 模型流量分流統計 (3.7 / 3.6 / 3.5 / Lite)</h2>
+                            <table>
+                                <thead><tr><th>模型名稱 (Model)</th><th>200 成功</th><th>429 限流</th><th>其他錯誤</th><th>成功率</th></tr></thead>
+                                <tbody id="model-rows"></tbody>
+                            </table>
+                        </div>
+                        <div class="card" style="grid-column: span 2;">
+                            <h2>🚀 多雲代理出口戰報 (Cloudflare / Vercel / Deno)</h2>
+                            <table>
+                                <thead><tr><th>代理節點 (Endpoint)</th><th>200 成功</th><th>429 限流</th><th>其他錯誤</th><th>成功率</th></tr></thead>
+                                <tbody id="proxy-rows"></tbody>
+                            </table>
+                        </div>
+                        <div class="card" style="grid-column: span 2;">
+                            <h2>📜 即時處理動態日誌 (Live Activity)</h2>
+                            <div class="log-box" id="log-box">等待動態更新中...</div>
+                        </div>
+                        <div class="card" style="grid-column: span 2;">
+                            <h2>🔑 金鑰狀態儀表板 (已安全脫敏)</h2>
+                            <table>
+                                <thead><tr><th>API 金鑰 (Masked)</th><th>RPM</th><th>TPM</th><th>RPD 每日配額與狀態</th></tr></thead>
+                                <tbody id="key-rows"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <script>
+                        async function update() {
+                            try {
+                                const res = await fetch('/api/data');
+                                const d = await res.json();
+                                document.getElementById('paper').innerText = d.current_paper;
+                                document.getElementById('paper-progress').innerText = d.paper_progress;
+                                document.getElementById('progress').innerText = d.progress;
+                                document.getElementById('qpm').innerText = d.qpm;
+                                document.getElementById('uptime').innerText = d.uptime_formatted;
+                                document.getElementById('time-bar').style.width = d.time_pct + '%';
+                                document.getElementById('diag-count').innerText = d.diagram_count;
+                                document.getElementById('arbit-count').innerText = d.arbitration_count;
+                                document.getElementById('disk-size').innerText = d.disk_str;
+                                document.getElementById('k-active').innerText = d.key_health.active || 0;
+                                document.getElementById('k-cool').innerText = d.key_health.cooldown || 0;
+                                document.getElementById('k-dis').innerText = d.key_health.disabled || 0;
+                                document.getElementById('succ-rate').innerText = d.success_rate || '100%';
+                                document.getElementById('cum-runs').innerText = d.cum_runs || 0;
+                                document.getElementById('cum-p').innerText = d.cum_p || 0;
+                                document.getElementById('cum-q').innerText = d.cum_q || 0;
+                                document.getElementById('cum-200').innerText = d.cum_http_200 || 0;
+                                document.getElementById('cum-429').innerText = d.cum_http_429 || 0;
+                                document.getElementById('last-run-time').innerText = d.last_run_time || '-';
+                                document.getElementById('cum-p').innerText = d.cum_p || 0;
+                                document.getElementById('cum-q').innerText = d.cum_q || 0;
+                                document.getElementById('cum-200').innerText = d.cum_http_200 || 0;
+                                document.getElementById('cum-429').innerText = d.cum_http_429 || 0;
+                                document.getElementById('last-run-time').innerText = d.last_run_time || '-';
+                                
+                                document.getElementById('c200').innerText = d.http_counts['200'] || 0;
+                                document.getElementById('c429').innerText = d.http_counts['429'] || 0;
+                                document.getElementById('c503').innerText = d.http_counts['503'] || 0;
+                                
+                                let mHTML = '';
+                                for (const [m, stats] of Object.entries(d.model_stats)) {
+                                    const total = stats['200'] + stats['429'] + stats['other'];
+                                    const rate = total > 0 ? ((stats['200'] / total) * 100).toFixed(1) + '%' : '0%';
+                                    mHTML += `<tr><td><b>${m}</b></td><td style="color:#4ade80">${stats['200']}</td><td style="color:#fca5a5">${stats['429']}</td><td>${stats['other']}</td><td>${rate}</td></tr>`;
+                                }
+                                document.getElementById('model-rows').innerHTML = mHTML || '<tr><td colspan="5">尚無模型分流數據</td></tr>';
+
+                                let pHTML = '';
+                                for (const [p, stats] of Object.entries(d.proxy_stats)) {
+                                    const total = stats['200'] + stats['429'] + stats['other'];
+                                    const rate = total > 0 ? ((stats['200'] / total) * 100).toFixed(1) + '%' : '0%';
+                                    pHTML += `<tr><td><b>${p}</b></td><td style="color:#4ade80">${stats['200']}</td><td style="color:#fca5a5">${stats['429']}</td><td>${stats['other']}</td><td>${rate}</td></tr>`;
+                                }
+                                document.getElementById('proxy-rows').innerHTML = pHTML || '<tr><td colspan="5">尚無代理數據</td></tr>';
+                                
+                                document.getElementById('log-box').innerHTML = (d.recent_logs || []).join('<br>') || '尚無動態';
+
+                                let kHTML = '';
+                                (d.key_statuses || []).forEach(k => {
+                                    kHTML += `<tr><td><code>${k.key}</code></td><td>${k.rpm_status}</td><td>${k.tpm_status}</td><td>${k.rpd_status}</td></tr>`;
+                                });
+                                document.getElementById('key-rows').innerHTML = kHTML || '<tr><td colspan="4">無資料</td></tr>';
+                            } catch(e) {}
+                        }
+                        setInterval(update, 2000);
+                        update();
+                    </script>
+                </body>
+                </html>
+                """
+                self.wfile.write(html.encode("utf-8"))
+
+    server = HTTPServer(('0.0.0.0', port), DashboardHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    logging.info(f"🌐 [遙測儀表板] 本地 Web 服務已啟動於 http://127.0.0.1:{port}")
+
 class GeminiFreeTierManager:
     def __init__(self, api_keys: List[str], models: List[str]):
-        cf_proxy_url = os.environ.get("GEMINI_PROXY_URL", "").strip() or None
-        self.keys = [FreeTierKey(k, custom_base_url=cf_proxy_url) for k in api_keys]
+        proxy_env = os.environ.get("GEMINI_PROXY_URL", "").strip()
+        self.proxies = [p.strip() for p in proxy_env.split(",") if p.strip()]
+        self.proxy_idx = 0
+        
+        first_proxy = self.proxies[0] if self.proxies else None
+        self.keys = [FreeTierKey(k, custom_base_url=first_proxy) for k in api_keys]
         self.models = models
         self.key_idx = 0
         self.model_idx = 0
+        self.model_dispatch_counter = 0
+        self.global_last_dispatch_time = 0.0
+        self.last_model_used = models[0] if models else ""
         self.lock = threading.Lock()
-        self.last_model_used = models[0] if models else ""  # 🚨 新增：追蹤上一次呼叫成功的模型
+        
+        # 啟動儀表板伺服器
+        start_dashboard_web_server(port=8080, manager=self)
+
         groq_keys_env = os.environ.get("GROQ_API_KEY", "")
         self.groq_keys = [k.strip() for k in groq_keys_env.split(",") if k.strip()]
         self.groq_key_idx = 0
@@ -992,7 +1404,16 @@ class GeminiFreeTierManager:
         # 🧠 讀取或初始化模型 Token 上限記憶庫
         self.model_limits_file = "model_limits.json"
         self.model_token_limits = self.load_model_token_limits()
-
+    
+    def get_next_proxy_url(self) -> Optional[str]:
+        """動態輪替取用多雲代理端點 (Cloudflare -> Vercel -> Deno)"""
+        if not self.proxies:
+            return None
+        with self.lock:
+            p = self.proxies[self.proxy_idx]
+            self.proxy_idx = (self.proxy_idx + 1) % len(self.proxies)
+            return p
+            
     def _call_openai_compatible_raw(self, client, base_url, api_key, model, prompt_text, response_schema, temperature=0.1):
         """底層通用 API 呼叫器，自帶思考模型容錯與萬能 JSON 清洗"""
         schema_json = response_schema.model_json_schema()
@@ -1364,13 +1785,24 @@ class GeminiFreeTierManager:
         if provider == "groq":
             return self._generate_with_groq(contents, response_schema, temperature, max_attempts, preferred_model, task_desc)
 
-        # === 🚨 建立動態模型降級梯隊 (Model Fallback Cascade) ===
+        # === 🚀 全動態模型調度與負載均衡梯隊 ===
         candidate_models = []
+        with self.lock:
+            self.model_dispatch_counter += 1
+            dispatch_offset = self.model_dispatch_counter
+
+        # 🚨 若有指定 preferred_model 且為 Tier 1，則以該模型起手；否則依計數器在 [3.7, 3.6, 3.5, 3.5-lite, 3.1-lite] 中均勻滾動
+        all_usable_models = [m for m in self.models if m in [
+            "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", 
+            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"
+        ]]
+        
         if preferred_model and preferred_model in self.models:
-            candidate_models.append(preferred_model)
-            candidate_models.extend([m for m in self.models if m != preferred_model])
+            start_model = preferred_model
         else:
-            candidate_models = list(self.models)
+            start_model = all_usable_models[dispatch_offset % len(all_usable_models)]
+
+        candidate_models = [start_model] + [m for m in self.models if m != start_model]
 
         estimated_tokens = self.estimate_tokens(contents)
         attempts = 0
@@ -1390,7 +1822,6 @@ class GeminiFreeTierManager:
                     break
                     
             if client is None:
-                # 若所有候選模型都在冷卻中，微睡 1.5 秒後再試
                 logging.info("⏳ [全梯隊滿載] 所有模型額度短暫冷卻中，等待 1.5 秒...")
                 smart_sleep(1.5)
                 attempts += 1
@@ -1399,25 +1830,26 @@ class GeminiFreeTierManager:
             self.last_model_used = model
             
             thinking_config = None
-            # 支援 3.7, 3.6, 3.5, 3.0, 2.5 系列模型啟用 Thinking 深度思考
             if any(m in model for m in ["gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
                 if enable_thinking:
                     thinking_config = types.ThinkingConfig(thinking_level='HIGH')
                 else:
-                    # 🚨 關鍵修復：關閉 Thinking 時必須完全為 None，絕不可傳入 MINIMAL（否則會持續觸發 400 錯誤）
                     thinking_config = None
             try:
-                # 🚀 優化：移除 8~15 秒強制等待，改為 0.1~0.3 秒微抖動防多線程撞車
-                import random
-                smart_sleep(random.uniform(0.1, 0.3))
+                # 🚀 修復：全域 QPS 漏桶閥門（確保任何兩個發往 Google 的請求至少間隔 0.35 秒，徹底打散 IP 流量）
+                with self.lock:
+                    now_t = time.time()
+                    time_since_last = now_t - getattr(self, "global_last_dispatch_time", 0.0)
+                    if time_since_last < 0.35:
+                        time.sleep(0.35 - time_since_last)
+                    self.global_last_dispatch_time = time.time()
 
                 desc_str = f" {task_desc}" if task_desc else ""
                 
-                # 🚀 動態載入該模型專屬的 Token 上限（若無記錄則預設先從最高 65536 開始嘗試）
+                # 🚀 動態載入該模型專屬的 Token 上限
                 model_max_tokens = self.model_token_limits.get(model, 65536)
                 
                 print(f"🔹{desc_str} 嘗試使用模型 {model} (Max Tokens: {model_max_tokens}) 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
-                # 每次執行時顯示金鑰狀態
                 self.print_keys_status()
 
                 gen_config = types.GenerateContentConfig(
@@ -1430,11 +1862,18 @@ class GeminiFreeTierManager:
                 if thinking_config:
                     gen_config.thinking_config = thinking_config
 
-                response = client.models.generate_content(
+                # 🚀 修復：從 Key 物件中動態取用已快取的 Client，防止連線池洩漏
+                chosen_proxy = self.get_next_proxy_url()
+                active_client = key_obj.get_client(chosen_proxy)
+
+                response = active_client.models.generate_content(
                     model=model,
                     contents=contents,
                     config=gen_config,
                 )
+                
+                # 📊 記錄成功 200 狀態（包含代理名稱與模型名稱）
+                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, 200)
 
                 if not response:
                     logging.warning("⚠️ API 回傳完全為空 (None)，可能發生網路瞬斷，準備重試...")
@@ -1487,6 +1926,8 @@ class GeminiFreeTierManager:
             except RPDExhaustedException as ree:
                 raise ree
             except APIError as e:
+                err_code = getattr(e, 'code', 500)
+                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", err_code)
                 err_str = str(e).lower()
                 
                 # 🚀 檢測本題是否包含 PIL 圖片（若無圖片，則可安全切換至第三方大模型備援）
@@ -1558,7 +1999,11 @@ class GeminiFreeTierManager:
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
                     self.handle_rate_limit_error(key_obj, model, err_str)
                     
-                    # 🚨 2. 多 Key 智慧備援分流
+                    # 🚨 遇到 429 時，主動將當前模型移至候選清單末尾，讓 3.6 / 3.5 / Lite 自動接管下一次請求
+                    if candidate_models and len(candidate_models) > 1:
+                        candidate_models.append(candidate_models.pop(0))
+                    
+                    # 多 Key 智慧備援分流
                     fallback_threshold = max(5, int(len(self.keys) * 0.8))
                     if attempts >= fallback_threshold and not has_pil_images:
                         logging.info(f"🔄 [429 智慧避險] 已充分輪詢 {attempts} 把金鑰皆遇限流，切換至備援平台處理...")
@@ -1566,12 +2011,9 @@ class GeminiFreeTierManager:
                         if res_fallback:
                             return res_fallback, None
 
-                    next_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
-                    next_model = candidate_models[next_tier_idx]
-                    
-                    # 🚀 平滑降溫緩衝：放寬切換間隔至 1.2 ~ 2.2 秒，讓 Google 的瞬時 QPS 令牌桶注滿，防止連環 429
-                    logging.warning(f"⏳ [429 平滑切換] 金鑰 {key_obj.api_key[:8]}... 進入獨立冷卻，等待 1.5 秒平滑切換 (第 {attempts} 次嘗試)...")
-                    smart_sleep(random.uniform(1.2, 2.2))
+                    wait_time = random.uniform(1.8, 3.5)
+                    logging.warning(f"⏳ [429 階梯平滑降級] 金鑰 {key_obj.api_key[:8]}... 進入冷卻，模型切換至 {candidate_models[0]}，等待 {wait_time:.1f} 秒...")
+                    smart_sleep(wait_time)
                     continue
                 else:
                     smart_sleep(2)
@@ -1965,6 +2407,8 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
             
             if result.returncode == 0 and os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0:
                 logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(norm_diagram_path)}")
+                with GLOBAL_METRICS.lock:
+                    GLOBAL_METRICS.diagram_count += 1
                 return True
             else:
                 err_msg = result.stderr.strip()
@@ -2601,6 +3045,10 @@ class ExamParser:
                 enable_thinking=True,
                 task_desc="[終極學術仲裁]"
             )
+            if res:
+                with GLOBAL_METRICS.lock:
+                    GLOBAL_METRICS.arbitration_count += 1
+                    
             return res
         except Exception as e:
             logging.error(f"執行學術仲裁 API 呼叫失敗: {e}")
@@ -2693,10 +3141,18 @@ class ExamParser:
         subjects_stem = ["數學", "數A", "數B", "數學乙", "數學甲", "數甲", "數乙", "物理", "化學", "生物", "地球科學", "自然"]
         is_stem = any(t in subject for t in subjects_stem)
 
-        # Stage 1 用 Flash-Lite 極速掃描；Stage 2/3 優先採用 3.7-Flash（遇 429 自動階梯降級）
-        stage_1_model = "gemini-3.5-flash-lite"   # 第一階段：巨量頁面快速 OCR 與圖框標記
-        stage_2_model = "gemini-3.7-flash"        # 第二階段：名師級深度解題 (首選 3.7-flash)
-        validator_model = "gemini-3.7-flash"      # 第三階段：嚴謹閱卷審查與代數驗算 (首選 3.7-flash)
+        # Stage 1 用 Flash-Lite 極速掃描
+        stage_1_model = "gemini-3.5-flash-lite"
+        # 🚀 核心修復：將 Lite 模型納入主輪替池，讓 3.7 / 3.6 / 3.5 / 3.5-lite / 3.1-lite 全五款模型均勻吃滿配額
+        tier1_pool = [
+            "gemini-3.7-flash", 
+            "gemini-3.6-flash", 
+            "gemini-3.5-flash", 
+            "gemini-3.5-flash-lite", 
+            "gemini-3.1-flash-lite"
+        ]
+        stage_2_model = tier1_pool[0]
+        validator_model = tier1_pool[1]
         # stage_2_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         # validator_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         
@@ -3862,6 +4318,13 @@ class ExamParser:
         # 💡 將已加載的【有效詳解】建立成對位索引表（自動剔除先前超時或失敗的無效詳解，強制重跑）
         partial_map = {q.get("question_number"): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
+        # 📊 連動更新遠端 Web 儀表板當前考卷與題目進度
+        with GLOBAL_METRICS.lock:
+            GLOBAL_METRICS.current_paper = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+            GLOBAL_METRICS.total_questions = len(all_extracted_questions)
+            GLOBAL_METRICS.completed_questions = len(loaded_partial_questions)
+        GLOBAL_METRICS.add_log(f"🚀 開始解析考卷：{GLOBAL_METRICS.current_paper} (總題數：{len(all_extracted_questions)})")
+
         task_queue = []
         for q in all_extracted_questions:
             q_num = q.get("question_number")
@@ -3964,15 +4427,22 @@ class ExamParser:
                 batch_contents.insert(0, batch_prompt)
 
                 try:
-                    # === 將 Stage 2 切換至主力 gemini-3.6-flash ===
+                    # 🚀 依據題號動態輪替 Stage 2 首選模型 (3.7 / 3.6 / 3.5)，防止全網同時擠壓 3.7
+                    task_q_num = current_batch[0]["q_data"].get("question_number", "1")
+                    try:
+                        q_num_int = int(re.sub(r'\D', '', str(task_q_num)) or 1)
+                    except Exception:
+                        q_num_int = 1
+                    dynamic_stage2_model = tier1_pool[q_num_int % len(tier1_pool)]
+
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
                         contents=batch_contents, 
                         response_schema=QuestionSolutionBatch,
                         temperature=0.3,
-                        preferred_model=stage_2_model,  
+                        preferred_model=dynamic_stage2_model,  
                         provider="google",
                         enable_thinking=True,
-                        task_desc=f"{paper_tag} [Gemini 深度解題]"
+                        task_desc=f"{paper_tag} [Gemini 深度解題 ({dynamic_stage2_model})]"
                     )
                     
                     # 🚨 核心優化：將 Stage 2 生成的所有詳解結果遞迴且全面地轉為繁體中文，阻斷簡體字存入資料庫
@@ -4247,15 +4717,17 @@ class ExamParser:
                     
                     validator_batch_prompt = llama_cot_instruction + PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
                     
-                    # === 將 Stage 3 切換至主力 gemini-3.6-flash ===
+                    # 🚀 Stage 3 審查模型亦交錯輪替，與解題模型錯開
+                    dynamic_val_model = tier1_pool[(q_num_int + 1) % len(tier1_pool)]
+
                     val_dict, val_err = self.ai_manager.generate_with_retry(
                         contents=[validator_batch_prompt], 
                         response_schema=SolutionValidatorBatch,
                         temperature=0.0, 
-                        preferred_model=validator_model, 
+                        preferred_model=dynamic_val_model, 
                         provider="google", 
                         enable_thinking=True,
-                        task_desc=f"{paper_tag} [Gemini 審查]"
+                        task_desc=f"{paper_tag} [Gemini 審查 ({dynamic_val_model})]"
                     )
 
                     # 處理審查結果 (包含重掃描 OCR)
@@ -4440,7 +4912,13 @@ class ExamParser:
                                     del q_data['_cropped_pil_images']
                                 update_subject_taxonomy(q_data.get("sub_subject", subject), q_data)
                                 all_final_questions.append(q_data)
-                            completed_indices.add(idx) # 🆕 標記此題目在當前批次中已成功處理，避免重複寫入
+                                
+                                # 📊 即時更新網頁儀表板進度與滾動日誌
+                                with GLOBAL_METRICS.lock:
+                                    GLOBAL_METRICS.completed_questions = len(all_final_questions)
+                                GLOBAL_METRICS.add_log(f"✅ 題號 {q_data['question_number']} 詳解與圖解通過審查！")
+
+                            completed_indices.add(idx)
                             save_partial_progress_immediately(partial_json_path, all_final_questions)
                             logging.info(f"  -> 🎉 {paper_tag} 題號 {q_data['question_number']} 通過驗證，成功收錄Partial。")
                         else:
@@ -4489,25 +4967,28 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = max(2, min(len(API_KEYS) * 2, 6))
+        max_workers = max(2, min(len(API_KEYS) * 2, 20))
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒 (啟用冷啟動階梯平滑調度)...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = set()
             thread_spawn_count = 0
             while True:
+                to_submit = []
                 with queue_lock:
-                    # 分派任務直到線程池滿或佇列空
-                    while len(task_queue) > 0 and len(futures) < max_workers:
+                    # 🚀 修正：持鎖期間只做資料列佇列取出，絕不呼叫 time.sleep 阻塞全域鎖
+                    while len(task_queue) > 0 and (len(futures) + len(to_submit)) < max_workers:
                         current_batch = task_queue[:active_batch_size]
                         task_queue = task_queue[active_batch_size:]
-                        futures.add(executor.submit(process_question_chunk, current_batch, active_batch_size))
-                        
-                        # 🚀 冷啟動隨機平滑防禦：前 12 條線程的啟動間隔採用 0.3 ~ 0.8 秒隨機抖動，徹底打散請求節奏
-                        if thread_spawn_count < max_workers:
-                            thread_spawn_count += 1
-                            import random
-                            time.sleep(random.uniform(0.3, 0.8))
+                        to_submit.append(current_batch)
+
+                # 🚀 在鎖外提交任務，並加入微延遲打散併發發送，防止 IP 級 429
+                for batch in to_submit:
+                    futures.add(executor.submit(process_question_chunk, batch, active_batch_size))
+                    if thread_spawn_count < max_workers:
+                        thread_spawn_count += 1
+                        import random
+                        time.sleep(random.uniform(0.15, 0.35))
                 
                 if not futures: break
                 
@@ -4639,6 +5120,10 @@ class ExamParser:
 
         
         logging.info(f"✅ [{year} {subject}] 處理完成！共擷取 {len(all_final_questions)} 題，已儲存至 {json_path}")
+        # 📊 連動更新遠端儀表板之已完成考卷數量
+        with GLOBAL_METRICS.lock:
+            GLOBAL_METRICS.completed_papers += 1
+        GLOBAL_METRICS.add_log(f"🎉 考卷 [{year} {subject}] 解析完成並成功存檔！")
         # 🚨 關閉 PDF 文件手把
         if doc is not None:
             try:
@@ -4938,7 +5423,9 @@ if __name__ == "__main__":
     
     # 2. 自動尋找所有要處理的試卷
     exam_tasks = auto_find_exam_sets(TARGET_DIRECTORIES)
-    logging.info(f"🔍 總共在目錄中找到了 {len(exam_tasks)} 份試卷需要處理。")  # ⚠️ 建議設 3 即可，因為單張考卷內部還有高達 25 個子執行緒
+    logging.info(f"🔍 總共在目錄中找到了 {len(exam_tasks)} 份試卷需要處理。")
+    with GLOBAL_METRICS.lock:
+        GLOBAL_METRICS.total_papers = len(exam_tasks)  # ⚠️ 建議設 3 即可，因為單張考卷內部還有高達 25 個子執行緒
     max_exam_workers = 1
     logging.info(f"🚀 開始多張考卷並行處理 (Max Workers: {max_exam_workers})")
 

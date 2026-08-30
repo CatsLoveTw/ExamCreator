@@ -111,7 +111,22 @@ jobs:
           cp -f ./gdrive_workspace/key_errors_summary.txt ./key_errors_summary.txt 2>/dev/null || true
           cp -f ./gdrive_workspace/model_limits.json ./model_limits.json 2>/dev/null || true
           cp -f ./gdrive_workspace/key_status.txt ./key_status.txt 2>/dev/null || true
+          cp -f ./gdrive_workspace/telemetry_history.json ./telemetry_history.json 2>/dev/null || true
           if [ ! -f "./model_limits.json" ]; then echo "{}" > ./model_limits.json; fi
+
+      - name: 🌐 啟動 Cloudflare Tunnel 即時儀表板穿透
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb && rm cloudflared.deb
+          
+          # 背景啟動穿透通道，對接本機 8080 遙測儀表板
+          cloudflared tunnel --url http://127.0.0.1:8080 > cloudflare_tunnel.log 2>&1 &
+          sleep 6
+          
+          echo "======================================================================="
+          echo "🎉 [即時遙測中心網址已生成] 請複製下方網址在手機/電腦開起儀表板："
+          grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' cloudflare_tunnel.log || echo "⚠️ 穿透網址生成中，可於下一步查看完整 log"
+          echo "======================================================================="
 
       - name: Run parser script
         timeout-minutes: 320
@@ -141,7 +156,7 @@ jobs:
             --checkers 32 \
             --config rclone.conf -v
 
-          for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt; do
+          for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt telemetry_history.json; do
             if [ -f "./$state_file" ]; then
               rclone copyto "./$state_file" "gdrive:$state_file" --config rclone.conf -v
             fi
