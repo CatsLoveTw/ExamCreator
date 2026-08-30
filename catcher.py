@@ -925,9 +925,13 @@ class FreeTierKey:
         if current_time < self.model_cooldowns.get(model, 0.0):
             return False
             
-        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 2.0秒，Flash 4.0秒）
-        min_interval = 2.0 if "lite" in model else 4.0
+        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 2.0秒，Flash 3.5秒）
+        min_interval = 2.0 if "lite" in model else 3.5
         if (current_time - self.model_last_request.get(model, 0.0)) < min_interval:
+            return False
+            
+        # 🚨 3. 同一 Key 跨模型通用防抖動：該 Key 上一次無論發給誰，至少間隔 1.0 秒
+        if (current_time - getattr(self, "last_global_request_time", 0.0)) < 1.0:
             return False
             
         # 3. 該模型的 60 秒滑動視窗 RPM 檢查
@@ -944,6 +948,7 @@ class FreeTierKey:
     def add_request_model(self, model: str, current_time: float, estimated_tokens: int):
         """記錄特定模型的請求時間"""
         self.model_last_request[model] = current_time
+        self.last_global_request_time = current_time # 記錄該 Key 的全局最新發送時間
         if model not in self.model_request_times:
             self.model_request_times[model] = []
         self.model_request_times[model].append(current_time)
@@ -1553,7 +1558,7 @@ class GeminiFreeTierManager:
                 if e.code == 429 or "quota" in err_str or "exhausted" in err_str:
                     self.handle_rate_limit_error(key_obj, model, err_str)
                     
-                    # 🚀 深度輪詢：至少嘗試過 80% 的 Key（約 25~28 次）之後，才切換第三方備援！
+                    # 🚨 2. 多 Key 智慧備援分流
                     fallback_threshold = max(5, int(len(self.keys) * 0.8))
                     if attempts >= fallback_threshold and not has_pil_images:
                         logging.info(f"🔄 [429 智慧避險] 已充分輪詢 {attempts} 把金鑰皆遇限流，切換至備援平台處理...")
@@ -1564,9 +1569,9 @@ class GeminiFreeTierManager:
                     next_tier_idx = min(attempts // RETRIES_PER_MODEL, len(candidate_models) - 1)
                     next_model = candidate_models[next_tier_idx]
                     
-                    # 🚨 3. 核心提速：手頭有 34 把 Key 時，不需原地睡 30 秒！微抖動 0.2~0.5 秒直接抓下一把全新 Key！
-                    logging.warning(f"⏳ [429 快速切換] 金鑰 {key_obj.api_key[:8]}... 限流冷卻，立即切換下一把金鑰 (第 {attempts} 次嘗試)...")
-                    smart_sleep(random.uniform(0.2, 0.5))
+                    # 🚀 平滑降溫緩衝：放寬切換間隔至 1.2 ~ 2.2 秒，讓 Google 的瞬時 QPS 令牌桶注滿，防止連環 429
+                    logging.warning(f"⏳ [429 平滑切換] 金鑰 {key_obj.api_key[:8]}... 進入獨立冷卻，等待 1.5 秒平滑切換 (第 {attempts} 次嘗試)...")
+                    smart_sleep(random.uniform(1.2, 2.2))
                     continue
                 else:
                     smart_sleep(2)
@@ -2782,22 +2787,30 @@ class ExamParser:
                             fail_marker = f"{full_img_path}.failed"
                             force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
 
-                            # 🚨 關鍵修復：若開啟強制重繪，自動刪除舊的 .failed 標記，給予重新生成機會！
+                            # 🚨 狀態清理：只要實體 .png 存在且大於 0 byte，代表已經成功，強制刪除殘留的 .failed 標記！
+                            if os.path.exists(full_img_path) and os.path.getsize(full_img_path) > 0:
+                                if os.path.exists(fail_marker):
+                                    try: os.remove(fail_marker)
+                                    except Exception: pass
+                                if not os.path.exists(done_marker):
+                                    try:
+                                        with open(done_marker, "w", encoding="utf-8") as f_mk:
+                                            f_mk.write("done\n")
+                                    except Exception: pass
+                                if not force_refresh:
+                                    continue  # 圖片已存在且完美，直接秒級跳過！
+
+                            # 🚨 若開啟強制重繪，自動清理所有舊標記
                             if force_refresh and os.path.exists(fail_marker):
                                 try: os.remove(fail_marker)
                                 except Exception: pass
 
-                            # 在一般模式下，只有「已有實體檔案且標記失敗」才跳過；若圖檔本體缺失則一律嘗試補繪
-                            if not force_refresh and os.path.exists(fail_marker) and os.path.exists(full_img_path):
-                                continue
-
                             needs_draw = False
                             if force_refresh:
-                                # 強制重繪：只要未標記 .done 就重新繪製
-                                if not os.path.exists(done_marker):
-                                    needs_draw = True
+                                # 強制重繪模式
+                                needs_draw = True
                             else:
-                                # 一般模式：實體檔案不存在、大小為 0 均執行補繪
+                                # 一般模式：實體檔案不存在或大小為 0 均執行補繪
                                 if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
                                     needs_draw = True
 
