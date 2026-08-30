@@ -1922,13 +1922,21 @@ class GeminiFreeTierManager:
                     smart_sleep(1.0)
                     continue
 
-                # 🚨 401 Unauthorized 錯誤處理（無效/過期金鑰）
-                if e.code == 401 or "unauthorized" in err_str or "api key not valid" in err_str:
+                # 🚨 401 錯誤處理（精確防誤殺：只有 Google 官方證實金鑰無效才停用）
+                is_real_google_invalid = any(k in err_str for k in ["api key not valid", "api_key_invalid", "key_invalid", "invalid api key"])
+                
+                if (e.code == 401 or "unauthorized" in err_str) and is_real_google_invalid:
                     with self.lock:
                         key_obj.is_disabled = True
                         key_obj.disable_reason = "401_Unauthorized"
                     self.log_key_error(key_obj.api_key, 401, "金鑰無效、過期或拼寫錯誤")
-                    logging.warning(f"⚠️ [401 金鑰無效] 金鑰 {key_obj.api_key[:8]}... 被判定為無效，已永久停用。")
+                    logging.warning(f"⚠️ [401 確診金鑰無效] 金鑰 {key_obj.api_key[:8]}... 經 Google 官方證實無效，已永久停用。")
+                    continue
+                elif e.code == 401:
+                    # 🚀 核心防誤殺機制：此 401 來自 Vercel/Cloudflare 代理層 (如 Deployment Protection)，金鑰本身 100% 正常！
+                    logging.warning(f"⚠️ [401 代理攔截保護] 代理端點 {chosen_proxy} 回傳 401 驗證，金鑰 {key_obj.api_key[:8]}... 保持正常可用，切換下一個代理重試...")
+                    attempts += 1
+                    smart_sleep(1.0)
                     continue
 
                 # 🚨 403 Forbidden 錯誤處理（地區拒絕、未開通 API 或帳單欠費）
