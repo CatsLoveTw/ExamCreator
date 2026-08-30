@@ -1805,12 +1805,12 @@ class GeminiFreeTierManager:
                 else:
                     thinking_config = None
             try:
-                # 🚀 修復：全域 QPS 漏桶閥門（確保任何兩個發往 Google 的請求至少間隔 0.35 秒，徹底打散 IP 流量）
+                # 🚀 平滑安全閥門：將出站微間隔調至 0.5 秒，搭配 8 條執行緒，打造最平穩安全的 API 請求節奏
                 with self.lock:
                     now_t = time.time()
                     time_since_last = now_t - getattr(self, "global_last_dispatch_time", 0.0)
-                    if time_since_last < 0.35:
-                        time.sleep(0.35 - time_since_last)
+                    if time_since_last < 0.5:
+                        time.sleep(0.5 - time_since_last)
                     self.global_last_dispatch_time = time.time()
 
                 desc_str = f" {task_desc}" if task_desc else ""
@@ -4937,7 +4937,7 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = max(2, min(len(API_KEYS) * 2, 20))
+        max_workers = max(2, min(len(API_KEYS) * 2, 6))
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒 (啟用冷啟動階梯平滑調度)...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
