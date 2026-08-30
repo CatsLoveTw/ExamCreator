@@ -1085,37 +1085,6 @@ class LiveDashboardMetrics:
                 self.recent_logs.pop()
         self.save_history()
 
-    def record_http(self, proxy_name: str, model_name: str, code: int):
-        with self.lock:
-            code_str = str(code)
-            if code_str in self.http_counts:
-                self.http_counts[code_str] += 1
-            else:
-                self.http_counts["other"] += 1
-                
-            short_p = proxy_name.split("//")[-1].split("/")[0] if "//" in proxy_name else proxy_name
-            if short_p not in self.proxy_stats:
-                self.proxy_stats[short_p] = {"200": 0, "429": 0, "other": 0}
-            if model_name not in self.model_stats:
-                self.model_stats[model_name] = {"200": 0, "429": 0, "other": 0}
-
-            if code_str == "200": 
-                self.proxy_stats[short_p]["200"] += 1
-                self.model_stats[model_name]["200"] += 1
-            elif code_str == "429": 
-                self.proxy_stats[short_p]["429"] += 1
-                self.model_stats[model_name]["429"] += 1
-            else: 
-                self.proxy_stats[short_p]["other"] += 1
-                self.model_stats[model_name]["other"] += 1
-
-    def add_log(self, msg: str):
-        with self.lock:
-            ts = datetime.datetime.now().strftime("%H:%M:%S")
-            self.recent_logs.insert(0, f"[{ts}] {msg}")
-            if len(self.recent_logs) > 12:
-                self.recent_logs.pop()
-
 GLOBAL_METRICS = LiveDashboardMetrics()
 
 def start_dashboard_web_server(port=8080, manager=None):
@@ -1927,7 +1896,8 @@ class GeminiFreeTierManager:
                 raise ree
             except APIError as e:
                 err_code = getattr(e, 'code', 500)
-                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", err_code)
+                # 🚀 修正：補上漏傳的 model 參數，確保 429 / 503 錯誤能正確計入儀表板並啟動自癒重試
+                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, err_code)
                 err_str = str(e).lower()
                 
                 # 🚀 檢測本題是否包含 PIL 圖片（若無圖片，則可安全切換至第三方大模型備援）
