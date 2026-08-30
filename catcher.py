@@ -1903,11 +1903,11 @@ class GeminiFreeTierManager:
                 # 🚀 檢測本題是否包含 PIL 圖片（若無圖片，則可安全切換至第三方大模型備援）
                 has_pil_images = any(isinstance(c, Image.Image) for c in contents) if isinstance(contents, list) else False
                 
-                # 🚀 404 模型不存在：直接跳過該模型
+                # 🚀 404 模型不存在：直接跳過該無效模型 (修復 target_model 變數未定義 Bug)
                 if e.code == 404 or "not found" in err_str or "is not found for api version" in err_str:
-                    logging.warning(f"⏭️ [404 模型無效] 專案不支援模型 {target_model}，立即切換下一梯隊...")
-                    if target_model in candidate_models:
-                        candidate_models.remove(target_model)
+                    logging.warning(f"⏭️ [404 模型無效] 專案不支援模型 {model}，立即切換下一梯隊...")
+                    if model in candidate_models:
+                        candidate_models.remove(model)
                     smart_sleep(0.5)
                     continue
 
