@@ -1762,8 +1762,9 @@ class GeminiFreeTierManager:
 
         # 🚨 若有指定 preferred_model 且為 Tier 1，則以該模型起手；否則依計數器在 [3.7, 3.6, 3.5, 3.5-lite, 3.1-lite] 中均勻滾動
         all_usable_models = [m for m in self.models if m in [
-            "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", 
-            "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"
+            "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", 
+            "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+            "gemini-2.5-flash"
         ]]
         
         if preferred_model and preferred_model in self.models:
@@ -1799,7 +1800,7 @@ class GeminiFreeTierManager:
             self.last_model_used = model
             
             thinking_config = None
-            if any(m in model for m in ["gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
+            if any(m in model for m in ["gemini-3.8", "gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
                 if enable_thinking:
                     thinking_config = types.ThinkingConfig(thinking_level='HIGH')
                 else:
@@ -3120,9 +3121,11 @@ class ExamParser:
         is_stem = any(t in subject for t in subjects_stem)
 
         # Stage 1 用 Flash-Lite 極速掃描
-        stage_1_model = "gemini-3.5-flash-lite"
+        stage_1_models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+        stage_1_model = stage_1_models[0]
         # 🚀 核心修復：將 Lite 模型納入主輪替池，讓 3.7 / 3.6 / 3.5 / 3.5-lite / 3.1-lite 全五款模型均勻吃滿配額
         tier1_pool = [
+            "gemini-3.8-flash",
             "gemini-3.7-flash", 
             "gemini-3.6-flash", 
             "gemini-3.5-flash", 
@@ -3601,11 +3604,12 @@ class ExamParser:
                     batch_contents_with_labels.append("\n\n=== 原始純文字對照 ===")
                     batch_contents_with_labels.append(batch_text_combined)
 
+                    current_stage1_model = stage_1_models[(b_idx // page_batch_size) % len(stage_1_models)]
                     result_dict_1, error_1 = self.ai_manager.generate_with_retry(
                         contents=batch_contents_with_labels,
                         response_schema=PageExtraction,
                         temperature=0.0,
-                        preferred_model=stage_1_model,
+                        preferred_model=current_stage1_model,
                         enable_thinking=False
                     )
 
@@ -5383,6 +5387,7 @@ if __name__ == "__main__":
         print(f"打散後最後一組: {API_KEYS[-1][:15]}...")
     # 推薦使用 flash 模型處理多模態 (Vision) 任務，速度快且便宜
     MODELS = [
+        "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",         
         "gemini-3.5-flash",       
