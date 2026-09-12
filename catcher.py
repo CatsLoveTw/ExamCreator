@@ -124,6 +124,8 @@ def clean_ocr_answer_format(ans_str: str) -> str:
     """清理多欄解答排版干擾下的格式污染與中文字洩漏，並排除手寫題的斜線與無效字元"""
     import re
     ans_str = str(ans_str).strip()
+    if not ans_str:
+        return ""
     
     # 1. 剝除包裹的括號，例如 (3) -> 3, (1) -> 1, （A） -> A
     ans_str = re.sub(r'^[（\(]([A-Ga-g0-9,]+)[）\)]$', r'\1', ans_str)
@@ -133,27 +135,70 @@ def clean_ocr_answer_format(ans_str: str) -> str:
     if opt_match and "選項" in ans_str:
         return opt_match.group(1).upper()
         
-    # 🚨 核心修正：若包含大考官方的「無答案」、「送分」、「全體給分」、「不計分」等字樣，完整保留並標準化
+    # 3. 完整保留大考官方標準標記
     if any(k in ans_str for k in ["無答案", "全體給分", "送分", "不計分"]):
         return "無答案（全體給分）"
         
-    # 🚨 修正：若答案卷上標示為斜線「／」、「/」、「\」或空白，代表該非選擇題無劃記答案，直接過濾為空字串，防止污染
+    # 4. 若答案卷標示為斜線或無效標記，過濾為空字串
     if ans_str in ["/", "／", "\\", "無", "無題目", ""] or re.match(r'^[\s/／\\–\-_]+$', ans_str):
         return "" 
     
-    # 1. 偵測並處理中文說明的拼接格式，例如 "14題答案為2，15題答案為6" 或 "第14列為2，第15列為6"
-    pattern = r'(?:第)?\s*(\d+)\s*(?:題|列)?\s*(?:答案)?\s*(?:為|是|:)?\s*([A-Ga-g0-9\-±])'
-    matches = re.findall(pattern, ans_str)
-    if matches:
-        matches_sorted = sorted(matches, key=lambda x: int(x[0]))
-        return ",".join(m[1] for m in matches_sorted)
+    # 5. 🚨【致命截斷修復】：只有當字串中真的出現「題/列/答案/為/是」等文字時，才執行拼接格式拆解！
+    # 嚴禁對純數值（如 "120"、"45"）執行此正則，否則 120 會被當作「第12題答案為0」而遭截斷！
+    has_marker = any(k in ans_str for k in ["題", "列", "答案", "為", "是"])
+    if has_marker:
+        pattern = r'(?:第\s*)?(\d+)\s*(?:題|列)\s*(?:答案)?\s*(?:為|是|:|：)?\s*([A-Ga-g0-9\-±/.]+)'
+        matches = re.findall(pattern, ans_str)
+        if matches:
+            matches_sorted = sorted(matches, key=lambda x: int(x[0]))
+            return ",".join(m[1] for m in matches_sorted)
         
-    # 2. 如果非中文拼接格式，則移除所有中文字元與不合規字元
+    # 6. 如果包含 LaTeX 數學式或特殊符號，保留反斜線、大括號與運算符號
+    if any(c in ans_str for c in ["\\", "$", "{", "}", "^", "_"]):
+        cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
+        return cleaned.strip(" ,;")
+
+    # 7. 一般答案：清除中文字元，但完整保留英數、逗號、負號、分數線 / 與小數點 .
     cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
-    cleaned = re.sub(r'[^\w,\-±]', '', cleaned)
+    cleaned = re.sub(r'[^\w,\-±/.]', '', cleaned)
     return cleaned.strip(",")
 
+def evaluate_solution_quality(q_obj: dict) -> int:
+    """
+    評估一道題目的詳解品質得分，用於在重題中挑選最佳版本
+    """
+    sol = str(q_obj.get("detailed_solution", "")).strip()
+    score = len(sol) # 基礎長度分
+    
+    # 🚨 扣分項：無效、崩潰、截斷或佔位文字
+    invalid_kw = ["題目內容缺失", "無法判定", "本題不存在", "超時或失敗", "系統提示", "引發系統內部", "崩潰", "封面作答注意事項"]
+    for kw in invalid_kw:
+        if kw in sol:
+            score -= 50000
+
+    # 🌟 加分項：名師多維解法標籤
+    if "### 【標準解法】" in sol or "【標準解法】" in sol: score += 800
+    if "### 【另解" in sol or "【另解" in sol: score += 1000
+    if "### 【速解" in sol or "【速解" in sol: score += 600
+    if "![圖" in sol or "diagram_" in sol: score += 500
+    
+    # 選項分析完整性加分
+    opt_ana = str(q_obj.get("options_analysis", ""))
+    if opt_ana and "本題為非選擇題" not in opt_ana and len(opt_ana) > 50:
+        score += 600
+        
+    # 核心觀念與易錯陷阱加分
+    if len(str(q_obj.get("concept_review", ""))) > 30: score += 300
+    if len(str(q_obj.get("traps_and_warnings", ""))) > 30: score += 300
+    
+    return score
+
 def deduplicate_questions(questions: list) -> list:
+    """
+    高階智能去重器：
+    1. 雙重識別：題號相同 或 題幹文本相似度高達 85%
+    2. 智能仲裁：當偵測到重複題目時，呼叫 evaluate_solution_quality 比對兩者詳解，強制保留最佳推導版本！
+    """
     if not questions:
         return []
         
@@ -161,7 +206,7 @@ def deduplicate_questions(questions: list) -> list:
         def clean_set(s):
             return set(re.sub(r'[^\w\u4e00-\u9fa5]', '', str(s)))
         set1 = clean_set(s1)
-        set2 = clean_set(s2)  # 修正：移除原本的 set2 = clean_text = clean_set(s2) typo
+        set2 = clean_set(s2)
         if not set1 or not set2:
             return 0.0
         return len(set1.intersection(set2)) / float(len(set1.union(set2)))
@@ -171,22 +216,41 @@ def deduplicate_questions(questions: list) -> list:
         is_duplicate = False
         q_text = q.get("question_text", "")
         q_num = str(q.get("question_number", "")).strip()
+        q_type = str(q.get("question_type", "")).strip()
         
         for existing in deduped:
             ext_text = existing.get("question_text", "")
             ext_num = str(existing.get("question_number", "")).strip()
+            ext_type = str(existing.get("question_type", "")).strip()
             
-            # 修正：只有當「題號完全相同」時，才允許進行文本相似度去重
-            if q_num == ext_num:
-                similarity = get_text_similarity(q_text, ext_text)
-                if similarity > 0.85:
-                    is_duplicate = True
-                    logging.warning(f"🔄 [跨批次去重] 偵測到重複擷取！題號 {q_num} 與已存在題號相同且內容相似，自動執行去重合併。")
-                    if len(q_text) > len(ext_text):
-                        existing.update(q)
-                    break
+            # 判定是否為重複題目：題號相同且題型相同，或文本相似度 > 85%
+            same_id = (q_num == ext_num and q_type == ext_type and q_num != "")
+            similarity = get_text_similarity(q_text, ext_text)
+            
+            if same_id or (similarity > 0.85 and len(q_text) > 20):
+                is_duplicate = True
+                score_new = evaluate_solution_quality(q)
+                score_old = evaluate_solution_quality(existing)
+                
+                logging.warning(f"🔄 [智能重題仲裁] 偵測到重複題目：題號 {q_num} (相似度: {similarity:.2f})")
+                logging.warning(f"  -> 現存版本品質分: {score_old} | 新版本品質分: {score_new}")
+                
+                # 保留品質評分更高、推導更豐富的版本
+                if score_new > score_old:
+                    logging.info(f"  -> 🏆 新版本詳解品質更佳，執行覆寫保留！")
+                    existing.clear()
+                    existing.update(q)
+                else:
+                    logging.info(f"  -> 🛡️ 現存版本詳解品質更佳，保留現有成果。")
+                    # 若新題目含有圖片而舊題目沒有，補充圖片資訊
+                    if not existing.get("image_paths") and q.get("image_paths"):
+                        existing["image_paths"] = q["image_paths"]
+                        existing["has_image"] = True
+                break
+                
         if not is_duplicate:
             deduped.append(q)
+            
     return deduped
 
 def normalize_and_merge_subject_taxonomy(taxonomy: dict) -> dict:
@@ -217,10 +281,42 @@ def normalize_and_merge_subject_taxonomy(taxonomy: dict) -> dict:
         
     return new_taxonomy
 
+def fix_latex_matrices(text: str) -> str:
+    r"""
+    🚨 矩陣與聯立方程語法修復器：
+    1. 自動識別裸露的 \begin{bmatrix}、\begin{pmatrix}、\begin{cases} 等環境
+    2. 強制為其補齊 $ ... $ 或 $$ ... $$ 定界符，確保 KaTeX / MathJax 100% 正常渲染
+    3. 保護矩陣換行雙反斜線 \\ 不被 Markdown 轉義損毀
+    """
+    if not isinstance(text, str) or "\\begin{" not in text:
+        return text
+
+    # 定義所有常見矩陣與多行數學環境
+    env_pattern = r'(\\begin\{(?:matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|array)\}[\s\S]*?\\end\{(?:matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases|aligned|array)\})'
+
+    # 分割已有的 $ ... $ 與 $$ ... $$ 區塊，避免重複包裹
+    parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
+    for i in range(len(parts)):
+        if i % 2 == 0:  # 偶數索引代表非數學環境（裸露文字區塊）
+            if "\\begin{" in parts[i]:
+                def wrap_matrix(m):
+                    block = m.group(1).strip()
+                    # 確保矩陣內部的換行符號維持為標準 LaTeX 的 \\
+                    block = re.sub(r'(?<!\\)\\(?![\\a-zA-Z])', r'\\\\', block)
+                    if "\n" in block or "\\\\" in block:
+                        return f" $${block}$$ "
+                    return f" ${block}$ "
+                parts[i] = re.sub(env_pattern, wrap_matrix, parts[i])
+
+    return "".join(parts)
+
 def sanitize_latex_syntax(text: str) -> str:
-    """具備區塊保護的高階 LaTeX 語法修復器（防範 \i 正則語法錯誤）"""
+    r"""具備區塊保護的高階 LaTeX 語法修復器（防範 \i 正則語法錯誤）"""
     if not isinstance(text, str) or not text:
         return text
+
+    # 先修復矩陣環境
+    text = fix_latex_matrices(text)
 
     # 1. 保護並清洗所有的 $$ ... $$ 大公式區塊
     def clean_display_block(m):
@@ -328,34 +424,81 @@ def pre_validate_format(q_data: dict, sol_data: dict):
         for k, v in fixed_sol.items():
             sol_data[k] = v
 
-    # 1. 選擇題答案數字 (1,2,3,4,5) 自動映射為英文字母 (A,B,C,D,E)
+    # 1. 選擇題答案與選項 Key 雙向自動對齊與標準化（支援 1-5 轉 A-E，以及 A-E 轉 1-5）
     opts = q_data.get("options", [])
-    if opts and q_data.get("question_type") in ["單選題", "多選題"]:
-        opt_keys = [str(o.get("key", "")).strip() for o in opts]
+    q_type = q_data.get("question_type", "")
+    if opts and q_type in ["單選題", "多選題"]:
+        opt_keys = [str(o.get("key", "")).strip() for o in opts if str(o.get("key", "")).strip()]
         ans_str = str(q_data.get("answer", "")).strip()
         
-        # 若選項 key 為 A,B,C,D,E 但答案寫 1,2,3,4,5 或 3,4
-        if any(k.isalpha() for k in opt_keys) and any(c.isdigit() for c in ans_str):
-            num_to_alpha = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E", "6": "F", "7": "G"}
-            converted_parts = []
-            for char in ans_str.replace(" ", "").split(","):
-                for sub_char in char:
-                    if sub_char in num_to_alpha:
-                        converted_parts.append(num_to_alpha[sub_char])
-                    elif sub_char.isalpha():
-                        converted_parts.append(sub_char.upper())
-            if converted_parts:
-                new_ans = ",".join(sorted(list(dict.fromkeys(converted_parts))))
-                q_data["answer"] = new_ans
-                logging.info(f"🔄 [答案 Key 對齊] 題號 {q_data.get('question_number')} 答案已自動從 '{ans_str}' 修復對齊為 '{new_ans}'")
+        # 情況 A：選項 key 全為英文字母 (A 到 J 等)，但答案包含數字 (1, 2, 3...)
+        if all(k.isalpha() for k in opt_keys) and any(c.isdigit() for c in ans_str):
+            # 支援完整對應至大考英文文意選填的 A~L (1~12)
+            num_to_alpha = {str(i+1): chr(65+i) for i in range(15)}
+            # 🚨 修復正則：放寬為所有合法英數 token，嚴禁截斷英文科之 H、I、J 選項！
+            raw_tokens = re.findall(r'\b\d+\b|[A-Za-z]', ans_str)
+            converted = [num_to_alpha.get(t, t.upper()) for t in raw_tokens]
+            if converted:
+                unique_keys = sorted(list(dict.fromkeys(converted)))
+                q_data["answer"] = unique_keys[0] if q_type == "單選題" else "".join(unique_keys)
 
-    # 2. 當目前題目並非「選擇與非選並存」的混合題，且為非選擇題型時，清空 options_analysis 避免格式混淆
+        # 情況 B：選項 key 全為數字 (1, 2, 3...)，但答案包含英文字母 (A, B, C...)
+        elif all(k.isdigit() for k in opt_keys) and any(c.isalpha() for c in ans_str):
+            alpha_to_num = {chr(65+i): str(i+1) for i in range(15)}
+            raw_tokens = re.findall(r'[A-Za-z]', ans_str)
+            converted = [alpha_to_num.get(t.upper(), t) for t in raw_tokens]
+            if converted:
+                unique_keys = sorted(list(dict.fromkeys(converted)))
+                q_data["answer"] = unique_keys[0] if q_type == "單選題" else "".join(unique_keys)
+
+        # 情況 C：清理括號與自然語言贅字（例如將 "(3)(5) [即 (C)(E)]" 洗成純淨的 "35" 或 "CE"）
+        else:
+            valid_chars = re.findall(r'[A-Za-z0-9]', ans_str)
+            filtered = [c.upper() for c in valid_chars if c.upper() in opt_keys]
+            if filtered:
+                unique_keys = sorted(list(dict.fromkeys(filtered)))
+                q_data["answer"] = unique_keys[0] if q_type == "單選題" else "".join(unique_keys)
+
+    # 0. 🚨 選項矩陣自動包裹防護：若選項內容含有矩陣指令但未包裹 $，強制包裹為 $...$
+    for opt in q_data.get("options", []):
+        val = str(opt.get("value", "")).strip()
+        if "\\begin{" in val and not (val.startswith("$") and val.endswith("$")):
+            opt["value"] = f"${val}$"
+
+    # 2. 定義混合題判定屬性（修復 NameError: is_hybrid）
     is_hybrid = len(q_data.get("options", [])) > 0 and len(q_data.get("scoring_criteria", "")) > 0
-    if q_data.get("question_type") in ["選填題", "簡答題", "繪圖作圖題"] and not is_hybrid:
+    q_type = q_data.get("question_type", "")
+
+    # 當非選擇題型且非混合題時，清空 options_analysis 避免格式混淆
+    if q_type in ["選填題", "簡答題", "繪圖作圖題"] and not is_hybrid:
         sol_data["options_analysis"] = []
+
+    # 2-2. 🚨 評分標準統一化與客觀化：徹底清除客觀題中幻想的手寫評分，並落實非選標準量規
+    if q_type in ["單選題", "多選題", "選填題"] and not is_hybrid:
+        # 1. 徹底從詳解中掃除 AI 幻想的手寫給分點標籤
+        det_sol = sol_data.get("detailed_solution", "")
+        for fake_header in ["### 【手寫題評分對照】", "### 【評分對照】", "【手寫題評分對照】", "【手寫/選填評分對照】"]:
+            if fake_header in det_sol:
+                det_sol = det_sol.split(fake_header)[0].strip()
+        # 清理行內殘留的假給分點標記（例如：**【列式給分點（得1分）】**）
+        det_sol = re.sub(r'\*\*【(?:列式|計算|數值|結論)給分點[^】]*】\*\*', '', det_sol)
+        sol_data["detailed_solution"] = det_sol.strip()
+            
+        # 2. 剛性約束客觀題之標準計分規則（杜絕隨機生成）
+        if q_type == "單選題":
+            sol_data["scoring_rubric"] = "單選題每題 5 分（依考卷配分），答對得 5 分，答錯或未作答得 0 分，不倒扣。"
+        elif q_type == "多選題":
+            sol_data["scoring_rubric"] = "多選題每題 5 分，各選項獨立判定。所有選項全對得 5 分；錯 1 個選項得 3 分；錯 2 個選項得 1 分；錯 3 個以上或未作答得 0 分，不倒扣。"
+        elif q_type == "選填題":
+            sol_data["scoring_rubric"] = "選填題每題完全答對得滿分（依考卷配分，通常為 5~8 分），未完全答對、填錯任意一格或未作答得 0 分，不倒扣。"
+    elif q_type in ["簡答題", "繪圖作圖題"] or is_hybrid:
+        # 若為手寫非選題且無官方細則，確保其具備客觀的三段式給分量規
+        current_rubric = sol_data.get("scoring_rubric", "")
+        if not current_rubric or len(current_rubric.strip()) < 10:
+            sol_data["scoring_rubric"] = "非選擇題評分標準（依考卷配分）：\n1. 【概念列式分（40%）】：正確列出核心定理、方程式或幾何模型。\n2. 【過程推導分（40%）】：計算步驟完整、符號合規無計算瑕疵。\n3. 【結論數值分（20%）】：求得正確數值結果、最簡式或標註正確單位。"
         
     # 3. 自動修正選填題答案格式，若無半形逗號則依記挖空數量強制拆分
-    if q_data.get("question_type") == "選填題" and "," not in str(q_data.get("answer", "")):
+    if q_type == "選填題" and "," not in str(q_data.get("answer", "")):
         raw_ans = str(q_data.get("answer", "")).strip()
         expected_count = q_data.get("_expected_blank_count", 0)
         if expected_count > 0 and len(raw_ans) == expected_count:
@@ -532,8 +675,9 @@ PROMPT_STAGE_2_MAIN = """
             - `### 【另解一：[命名你的思維，例如：座標轉換/幾何投影法]】`：提供第二套完整且嚴謹的推導思維。**如果某個另解因為方法特質限制，只能用來判斷部分選項，你必須在該另解的標題或開頭極其明確地註明：『本解法專用於快速判斷選項 X, Y』。**
             - `### 【另解二：[命名...]】`、`### 【另解三：[命名...]】`：依此類推。
             - `### 【另解 / 秒殺速解：[命名...]】`：提供極度直覺、極富創意或能在大考中快速破題的秒殺方法。
-            - 我們期望你**竭盡所能提供 3 到 5 種完全不同的切入角度與解法**，以最豐富且深具啟發性的思維碰撞，展現補教名師的風範。
-            - `### 【手寫題評分對照】`：若本題為非選擇題且含有「手寫評分標準」，你必須在標準解法中明確用粗體標示出各給分與扣分點（例如：`**【列式給分點（得1分）】**`、`**【計算與數值給分點（得1分）】**`）。
+            - 我們期望你**竭盡所能提供 2 到 4 種完全不同的切入角度與解法**，以最豐富且深具啟發性的思維碰撞，展現補教名師的風範。
+            - 🚨【純選擇題與純選填題剛性禁令】：若本題為「單選題」、「多選題」或「純選填題」，**【絕對嚴格禁止】** 在 `detailed_solution` 中輸出 `### 【手寫題評分對照】` 或任何給分點表格！此區塊僅限於非選擇題/計算證明題/混合題手寫小題！
+            - `### 【手寫題評分對照】`：【僅限非選擇題】若本題為非選擇題且含有「手寫評分標準」，才允許在詳解中用粗體標示各給分點（如：`**【列式給分點（得1分）】**`）。
     - 🚨【選擇題選項對位硬性規定】：對於單選題、多選題、以及有提供選項的選填題，你必須在 `options_analysis` 列表中，為 `options` 中的**每一個**選項（如 A, B, C 或 1, 2, 3，必須與題目給定的選項 key 嚴格對齊）提供一個獨立的分析對象。
     - 每個對象包含 `key`（選項標籤）與 `explanation`（該選項的詳細分析、公式推導或對錯判斷，並在結尾明確指出該選項為『正確』或『錯誤』）。
     - 如果本題為非選擇題、計算題、簡答題，或者原題沒有選項，請將 `options_analysis` 設為空列表 `[]`。
@@ -565,15 +709,53 @@ PROMPT_STAGE_2_MAIN = """
 - 絕對禁止使用 Tab 鍵縮排公式，防止 __LTXS__text 變形損毀。
 - 所有變數與數值必須嚴格包裹在 $...$ 或 $$...$$ 之中。
 
-【三、客觀難度評分量表與分析規範 (1-10分)】
-為了確保所有科目的難度評分具有高度一致性與客觀性，請你**嚴格**按照以下當前學科的客觀級距給予 `difficulty_level`：
-{subject_rubric}
+【三、文理雙軌客觀難度量化矩陣規範 (1-10分，嚴禁隨意給分)】
+為了確保所有學科（文科、理科）難度評分絕對客觀公正，你【必須】依據當前學科屬性，對以下四個維度打分並加總作為最終的 `difficulty_level`（1~10分）：
 
-撰寫 `difficulty_reason` 時，**必須**使用以下固定格式來證明你的評分是客觀的：
+1. **概念跨度（文理通用，1~3分）**：
+   - 1分：單一基本概念、字詞字面義、常識性史實或公式直接代入。
+   - 2分：單一章節跨小節、2個概念關聯（如：修辭+文意、二次配方+判別式、氣候+地形）。
+   - 3分：跨冊次/跨時代/跨領域綜合（如：多文本對比、微積分+幾何、經濟供需+法規衡量）。
+
+2. **推導運算／思維深度（文理分軌，1~3分）**：
+   - **【理科（數/物/化/生/地）】**：
+     * 1分：3步以內心算或基礎代數代入。
+     * 2分：4~7步推導、平衡反應式、二元聯立或向量運算。
+     * 3分：8步以上冗長運算、微積分、分類討論或非直觀空間幾何輔助線。
+   - **【文科（國/英/歷/地/公/國寫）】**：
+     * 1分：單純記憶檢索、字面直接對應、基礎詞彙語法。
+     * 2分：需跨段落訊息拼圖、長難句構拆解、文言字詞語意引申、或需結合歷史因果/法條模型。
+     * 3分：深層批判性思辨、一手史料偏見評估、抽象意象轉譯、或多方觀點駁論建構。
+
+3. **情境包裝與圖表閱讀（文理通用，0~2分）**：
+   - 0分：純文字短句或純符號題，無冗長題幹。
+   - 1分：生活化情境包裝、統計圖表判讀、或實驗數據題。
+   - 2分：長篇素養閱讀材料、多圖表疊合分析、或深層隱蔽條件。
+
+4. **誘答與陷阱強度（文理通用，0~2分）**：
+   - 0分：選項差異顯著，無誘導陷阱。
+   - 1分：含有常見盲點陷阱（如忽略定義域/端點值、時序錯置、同義代換偷換概念、因果倒置）。
+   - 2分：多重複合陷阱、干擾項與正解極其相似（如微小語意差距、極端邊界反例）。
+
+🚨【評分理由格式剛性要求】：
+在 `difficulty_reason` 欄位中，【必須】條列各維度得分與具體理由，格式如下：
 「本題評為 X 分。
-1. 概念跨度：[說明涉及該學科多少個具體章節或理論]
-2. 思考/運算負擔：[說明推導步驟多寡、圖表複雜度或計算量]
-3. 陷阱與干擾：[說明干擾選項的強度或隱藏條件]」
+1. 概念跨度（X分）：[說明考查之學科觀念與冊次]
+2. 思維深度/運算量（X分）：[理科說明推導步數；文科說明閱讀推理與思辨深度]
+3. 情境包裝（X分）：[說明是否含有長篇情境或圖表]
+4. 陷阱強度（X分）：[說明干擾選項或邏輯陷阱]
+總計得分：X + X + X + X = X 分。」
+🚨 若本題因原卷缺漏或封面說明而無實質試題，難度【強制設為 1 分】，嚴禁評為高分！
+
+🚨【評分理由格式剛性要求】：
+在 `difficulty_reason` 欄位中，【必須】詳細列出上述四個維度的具體給分依據與加總算式，格式範例如下：
+「本題評為 X 分。
+1. 概念跨度（X分）：[具體說明涉及哪些概念]
+2. 運算負擔（X分）：[具體說明推導步數與計算量]
+3. 情境包裝（X分）：[說明是否含有圖表或情境]
+4. 陷阱強度（X分）：[說明具體陷阱所在]
+總計得分：X + X + X + X = X 分。」
+🚨 若本題因原卷缺漏或封面說明而無實質計算，難度【強制設為 1 分】，嚴禁評為高分！
 
 【三、邏輯一致性自我校驗與防偽原則（Self-Correction & Anti-Fabrication Loop）】
         0. 🚨【圖片精確性確認與重掃描機制】：請仔細檢查你收到的題目圖片。如果發現圖片裁剪錯誤（例如圖片中印著的題號不是當前題號）、圖片模糊，或者關鍵公式/表格被切掉，你必須將 `suspects_image_mismatch` 設為 `true`。系統將自動啟動重掃描補件與重新裁剪機制，以確保下一輪生成時能拿到最完美的圖片！
@@ -593,6 +775,11 @@ PROMPT_STAGE_2_MAIN = """
            - 在台灣大考中（例如 114學測數乙 一(1)），循環小數（如 $1.\\bar{{5}}$，即數字上方有一橫線或圓點）在低解析度或 OCR 中極易被誤識別為普通小數（如 $1.5$）。
            - 如果你發現以普通小數計算出來的值（如 $1.5 \\times 5 = 7.5$）完全不對位任何選項，但以循環小數（如 $1.\\bar{{5}} \\times 5 = \\frac{{14}}{{9}} \\times 5 = \\frac{{70}}{{9}} = 7.\\bar{{7}}$）計算能完美對齊正確選項（如 $7.\\bar{{7}}$，即選項 (3)），**這代表最初的題目文字辨識存在微小符號遺漏！**
            - 在此情況下，你**必須**將題目文字自動修正為正確的循環小數格式進行詳解，並在詳解中加上說明。**絕對禁止迎合錯誤的無點小數進行強湊計算！**
+        5-2. **🚨【對數 log 底數與真數防錯位極度警告】🚨**：
+           - 在數學題目中，對數 $\\log_a b$ 的「底數 $a$」是較小的下標，而「真數 $b$」是正常大小的主字體！
+           - 例如 $\\log_2 3$（底數為 2，真數為 3）、$\\log_4 6$（底數為 4，真數為 6）。
+           - 嚴禁看反底數與真數（例如不可看成 $\\log_3 2$ 或 $\\log_6 4$）！
+           - 在比較對數大小或計算對數方程式時，請仔細比對圖片中的下標字體，切勿將指數規律看反。
            
 【六、學科分類與解題技巧命名剛性規範（🚨最高優先級：違反將導致系統崩潰🚨）】
 
@@ -604,10 +791,13 @@ PROMPT_STAGE_2_MAIN = """
 3. **【合併優於拆分】**：即使現有清單的名稱比你學術上想的稍微寬泛（例如現有 `必修_排列組合_計數原理`，而你想寫 `必修_排列組合_計數原理_加法原理應用`），也請**優先選擇現有的寬泛名稱**，而不是隨意創建一項只多出兩三個字的新考點！
 4. 只有在現有清單與本題考點**完全風馬牛不相及（例如：數學題考到化學，或者現有清單完全為空）**時，你才被允許「自建考點」，且自建考點必須嚴格遵循相同層級命名規範。
 
-1. **題型分類 (topic_category) 命名規範**：
-    - **首字強制約束**：此欄位輸出的字串**必須且只能**以 `必修_` 或 `選修_` 作為開頭（例如：`選修_化學平衡_平衡計算`、`必修_形音義_字形辨正_形近易混淆字辨析`）。
-    - **階層化結構**：必須嚴格遵循 `必修/選修_大單元_次單元_具體觀念` 的底線（`_`）連結格式。
-    - 🚨 **【底線 (_) 使用嚴格限制】**：底線 `_` **僅限於**作為「階層（大/次單元）」之間的**分隔符號**！若是同階層中並列的詞彙，或是完整的句子、片語，**絕對禁止**使用底線 `_` 分隔！
+1. **跨單元多維知識點 (topic_categories) 命名規範（極重要）**：
+    - **跨領域複合考點捕捉**：台灣大考鑑別題多為跨單元整合題（如：指數函數結合矩陣、空間向量結合三角比、物理力學結合電磁學、化學平衡結合氧化還原、英文分詞結構結合動詞片語）。
+    - **多考點陣列輸出**：你【必須】在 `topic_categories` 列表中，列出本題所涉及的 **1 到 3 個** 核心學科知識點（按重要性由主至次排列，第一項為主考點，後續為跨章節次要考點）。
+    - **首字強制約束**：列表中的**每一個字串項目**，都【必須且只能】以 `必修_` 或 `選修_` 作為開頭。
+    - **階層化結構**：每一項皆必須嚴格遵循 `必修/選修_大單元_次單元_具體觀念` 的底線（`_`）格式（例如：`["必修_指數與對數_應用模型_按比例成長或衰退模型", "必修_數列與級數_常規_無窮等比級數收斂求和"]`）。
+    - 🚨 **【底線 (_) 使用限制】**：底線 `_` **僅限於**作為大單元、次單元與觀念之間的階層分隔！同階層並列詞請使用斜線 `/`、空格或 `&`（例如：`否定字首 un/dis/in`，不可寫 `否定字首_un_dis`）。
+    - 系統會自動將第一項指派給主索引欄位 `topic_category`，確保多維度檢索與相容性。
       - 並列詞彙請使用斜線 `/`、符號 `&`、半形空格或加號 `+`（例如：`否定字首 un/dis/in/im/il/ir/non`，絕不可寫 `否定字首_un_dis...`）。
       - 英文句子或片語請使用正常的半形空格（例如：`... times as adj. as ...` 或 `no more than vs not more than`）。
     - **首要優先原則**：請 100% 優先從下方提供的現有清單中，挑選與本題最精準配對的一項填入。
@@ -798,6 +988,10 @@ class ExtractedQuestion(BaseModel):
     image_bboxes: List[List[int]] = Field(default=[], description="若有明確附圖，請給出所有附圖的 Bounding Box 列表，格式如 [[ymin, xmin, ymax, xmax]]。注意：所有坐標必須規格化至 0 到 1000 的整數區間。絕對禁止憑空虛構框線！若無實體圖案則必須為空列表 []。")
     options: List[OptionItem] = Field(description="選項物件列表，無則填 []。")
     answer: str = Field(description="本題的標準答案。如果是多選題，必須將所有正確選項字母按字母順序排列，中間不加任何逗號、空格或符號（例如：'ACD' 而非 'A, C, D'）。")
+    official_answer: str = Field(default="", description="大考官方原始提供的解答紀錄")
+    derived_answer: str = Field(default="", description="由 AI 嚴謹學術推導得出之正確答案")
+    has_answer_discrepancy: bool = Field(default=False, description="標記官方解答與學理推導是否產生衝突或排版印刷錯誤")
+    discrepancy_reason: str = Field(default="", description="若存在衝突，詳細記錄學術論證與官方答案疑似錯位之原因")
     image_paths: List[str] = Field(default=[], description="所有實體裁切圖片的路徑列表。若無則為空列表 []。")
     question_type: Literal['單選題', '多選題', '選填題', '簡答題', '繪圖作圖題', '混合題'] = Field(description="題型分類。")
     full_page_image_path: str = Field(default="", description="整頁試卷的原始圖片路徑 (作為前端兜底顯示使用)")
@@ -822,6 +1016,7 @@ class OptionAnalysisItem(BaseModel):
 # === 第二階段：大腦層 (Temperature = 0.7) ===
 class QuestionSolution(BaseModel):
     suspects_image_mismatch: bool = Field(default=False, description="【圖片精確性確認】若你發現裁剪出來的圖片與本題題號不符（例如圖中印的題號不是本題題號），或者圖片模糊不清、公式嚴重錯位、表格被切掉時，請設為 true，系統將自動啟動重新掃描與補件機制。")
+    derived_answer: str = Field(default="", description="【本題嚴謹推導答案】請在此填寫你推導出的最終答案字串（如選擇題填 'A' 或 'ABD'；選填題填數值如 '5/6' 或畫卡格式 '-,4,3'；非選題填最終數值如 '12' 或最簡式）。")
     question_analysis: str = Field(description="【題意分析】：用 Markdown 粗體標示核心關鍵字。")
     solving_strategy: str = Field(description="【解題思路】：推導脈絡與解題突破點。")
     detailed_solution: str = Field(description="【完整解法與另解】：極詳細的解答。必須包含正規解法，並強烈建議提供「另解」、「速解」或「不同角度的切入方式」。理科使用 LaTeX，文科交代邏輯。")
@@ -832,7 +1027,11 @@ class QuestionSolution(BaseModel):
     scoring_rubric: str = Field(description="評分標準或配分建議。")
     difficulty_level: int = Field(description="難度評分 (1-10)。")
     difficulty_reason: str = Field(description="給出難度評分的客觀理由。")
-    topic_category: str = Field(description="題型分類。優先使用清單，無則自行發明。")
+    topic_categories: List[str] = Field(
+        default=[], 
+        description="【多維知識點分類列表】本題所涵蓋的所有核心學科知識點列表（按主次順序排列，一般題目 1~2 項，跨單元綜合題 2~4 項）。每一項必須嚴格遵循 '必修/選修_大單元_次單元_具體觀念' 的階層命名格式。"
+    )
+    topic_category: str = Field(default="", description="本題最核心的第一主要知識點（作為主索引，取自 topic_categories[0]）。")
     techniques_used: List[str] = Field(description="使用的解題技巧列表。")
 
 # === 第三階段：審查糾錯層 (Temperature = 0.0) ===
@@ -1614,19 +1813,32 @@ class GeminiFreeTierManager:
         
         # 1. 還原 LaTeX 安全預留字串
         text = text.replace("__LTXS__", "\\")
+
+        # 2. 🚨 救回因 \f (form feed) 被消滅而造成的 \frac 殘損（例如 \f rac -> \frac，或直接變成 rac）
+        text = re.sub(r'[\x0c]rac(?![a-zA-Z])', r'\\frac', text)
+        text = re.sub(r'[\x0c]?(?:(?<=\$)|\b)rac(?=\{)', r'\\frac', text)
         
-        # 2. 精確修復控制字元：避免將 \quad 變成 \tquad，或將 \beta 變成 \b eta
-        # 只有當控制字元後面接的是特定 LaTeX 關鍵字時才進行精確還原
+        # 3. 🚨 救回因 \r (carriage return) 導致的 \right 殘損（例如 \r\right 或是 \right 變換行）
+        text = re.sub(r'[\r\n]+ight(?=[)\]}|.])', r'\\right', text)
+        text = text.replace(r"\r\right", r"\right").replace(r"\r\left", r"\left")
+
+        # 4. 🚨 救回因 \i 被不當吃掉導致的 \infty -> \fty，以及 \implies -> implies
+        text = re.sub(r'\\?fty\b', r'\\infty', text)
+        text = re.sub(r'(?<!\\)\bimplies\b', r'\\implies', text)
+        text = re.sub(r'(?<!\\)\biff\b', r'\\iff', text)
+        text = re.sub(r'\\?bsim\b', r'\\approx', text)
+        text = re.sub(r'\\bar\{log\}', r'\\log', text)
+
+        # 5. 精確修復控制字元
         replacements = {
             "\x0c": r"\f",  # Form Feed
-            "\x0d": r"\r",  # Carriage Return
             "\x08": r"\b",  # Backspace
             "\x09": r"\t",  # Tab
         }
         for char, replacement in replacements.items():
             text = text.replace(char, replacement)
             
-        # 3. 修復因替換導致的粘連錯字 (如 \tquad -> \quad, \tcdot -> \cdot)
+        # 6. 修復因替換導致的粘連錯字
         corrupted_fixes = {
             r"\tquad": r"\quad",
             r"\tqquad": r"\qquad",
@@ -1638,6 +1850,7 @@ class GeminiFreeTierManager:
             r"\tnet": r"\net",
             r"\root{": r"\sqrt{",
             r"\bx": r"bx",
+            r"\ffrac": r"\frac",
         }
         for bad, good in corrupted_fixes.items():
             text = text.replace(bad, good)
@@ -2410,26 +2623,30 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 
     return os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0
 def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
-    """動態比對 AI 新增的考點與解題技巧，即時更新並覆寫至 subject.json"""
+    """動態比對 AI 新增的多維考點與解題技巧，即時更新並覆寫至 subject.json"""
     global SUBJECT_TAXONOMY
-    with SUBJECT_FILE_LOCK: # 確保同一時間只有一個人能改檔案
+    with SUBJECT_FILE_LOCK:
         updated = False
-        
-        # 🚨 確保科目名稱本身為繁體
         normalized_subject = s2t(normalized_subject)
         
         if normalized_subject not in SUBJECT_TAXONOMY:
             SUBJECT_TAXONOMY[normalized_subject] = {"topics": [], "techniques": []}
             updated = True
             
-        # 1. 檢查並更新主題 (Topic)
-        new_topic = solution_data.get("topic_category")
-        if new_topic:
-            new_topic = s2t(new_topic) # 🚨 確保轉為繁體
-            if new_topic not in SUBJECT_TAXONOMY[normalized_subject]["topics"]:
-                SUBJECT_TAXONOMY[normalized_subject]["topics"].append(new_topic)
-                logging.info(f"🆕 [動態考點] 已自動新增考點至 subject.json: {new_topic}")
-                updated = True
+        # 1. 檢查並更新多個主題 (支援 topic_categories 列表與向下相容 topic_category)
+        topics_to_check = []
+        if isinstance(solution_data.get("topic_categories"), list):
+            topics_to_check.extend(solution_data["topic_categories"])
+        if solution_data.get("topic_category"):
+            topics_to_check.append(solution_data["topic_category"])
+            
+        for t in topics_to_check:
+            if t and isinstance(t, str):
+                t_clean = s2t(t.strip())
+                if t_clean and t_clean not in SUBJECT_TAXONOMY[normalized_subject]["topics"]:
+                    SUBJECT_TAXONOMY[normalized_subject]["topics"].append(t_clean)
+                    logging.info(f"🆕 [動態考點] 已自動新增考點至 subject.json: {t_clean}")
+                    updated = True
             
         # 2. 檢查並更新解題技巧 (Technique)
         new_techs = solution_data.get("techniques_used", [])
@@ -2744,7 +2961,42 @@ class ExamParser:
         all_answers = {}
         task_id = uuid.uuid4().hex[:8]
         
-        for page_num, page in enumerate(doc):
+        # 🚨 [全科合一解答過濾核心]：先掃描全卷文字層，鎖定屬於本科目的目標頁碼
+        target_subject_keywords = [subject]
+        if "數" in subject:
+            if "乙" in subject: target_subject_keywords = ["數學乙", "數乙", "數學 乙"]
+            elif "甲" in subject: target_subject_keywords = ["數學甲", "數甲", "數學 甲"]
+            elif "A" in subject.upper(): target_subject_keywords = ["數學A", "數A", "數學 A"]
+            elif "B" in subject.upper(): target_subject_keywords = ["數學B", "數B", "數學 B"]
+            else: target_subject_keywords = ["數學考科", "數學科", "數學"]
+        elif "化" in subject: target_subject_keywords = ["化學考科", "化學科", "化學"]
+        elif "物" in subject: target_subject_keywords = ["物理考科", "物理科", "物理"]
+        elif "生" in subject: target_subject_keywords = ["生物考科", "生物科", "生物"]
+        elif "地科" in subject or "地球" in subject: target_subject_keywords = ["地球科學", "地科"]
+        elif "國" in subject: target_subject_keywords = ["國語文", "國文考科", "國文", "國綜"]
+        elif "英" in subject: target_subject_keywords = ["英文考科", "英文科", "英文"]
+        elif "歷" in subject: target_subject_keywords = ["歷史考科", "歷史科", "歷史"]
+        elif "地" in subject and "球" not in subject: target_subject_keywords = ["地理考科", "地理科", "地理"]
+        elif "公" in subject: target_subject_keywords = ["公民與社會", "公民"]
+
+        # 檢驗該答案 PDF 是否為跨學科全卷合一
+        is_multi_subject_pdf = len(doc) > 1
+        valid_pages = []
+        if is_multi_subject_pdf:
+            for p_idx, p in enumerate(doc):
+                p_text = p.get_text("text")
+                if any(kw in p_text for kw in target_subject_keywords):
+                    valid_pages.append(p_idx)
+            # 若無明確關鍵字匹配，退回全頁掃描
+            if not valid_pages:
+                valid_pages = list(range(len(doc)))
+            else:
+                logging.info(f"🎯 [全科解答篩選] 成功鎖定本科目 ({subject}) 答案位於第 {[p+1 for p in valid_pages]} 頁，排除其餘無關學科頁面！")
+        else:
+            valid_pages = [0]
+
+        for page_num in valid_pages:
+            page = doc[page_num]
             pix = page.get_pixmap(dpi=300)
             img_path = os.path.abspath(f"temp_ans_{task_id}_p{page_num}_{model[:8]}.png")
             pix.save(img_path)
@@ -2893,18 +3145,19 @@ class ExamParser:
         if not ans_dict_2: return json.dumps(ans_dict_1, ensure_ascii=False)
         
         # 3. 在 Python 中進行精確的 Key-Value 比對，並在比對前統一空值、None、斜線與未作答標記為 "／"
+        # 🚨 修正：不可將未辨識到的 Key 粗暴設為 "／"，這會導致沒讀到的題目全部被標為無效題
         def sanitize_answer_value(val) -> str:
             if val is None:
-                return "／"
+                return ""
             val_str = str(val).strip()
-            if val_str in ["", "None", "null", "none", "Undefined", "undefined", "／", "/", "\\", "無", "無答案", "－", "[]", "{}"]:
-                return "／"
+            if val_str in ["None", "null", "none", "Undefined", "undefined", "[]", "{}"]:
+                return ""
             return val_str
 
         all_keys = set(list(ans_dict_1.keys()) + list(ans_dict_2.keys()))
         for k in all_keys:
-            ans_dict_1[k] = sanitize_answer_value(ans_dict_1.get(k))
-            ans_dict_2[k] = sanitize_answer_value(ans_dict_2.get(k))
+            if k in ans_dict_1: ans_dict_1[k] = sanitize_answer_value(ans_dict_1[k])
+            if k in ans_dict_2: ans_dict_2[k] = sanitize_answer_value(ans_dict_2[k])
 
         mismatched_keys = []
         for k in all_keys:
@@ -3042,11 +3295,17 @@ class ExamParser:
             q_type = q.get("question_type", "")
             q_num = q.get("question_number", "")
             
-            # 1. 【方案 4：硬性題型與選項清洗】
-            # 若為非選擇題，硬性將 options 清空，防範大考答案卷數據被當作選項混入
-            if q_type in ["選填題", "簡答題", "繪圖作圖題"]:
-                if q.get("options"):
-                    logging.warning(f"🧹 [自動清洗] 偵測到非選擇題型 {q_num} ({q_type}) 含有不合規的 options，已自動強制清除！")
+            # 1. 【題型自我校驗與選項保護】
+            opts = q.get("options", [])
+            # 若題目實際上含有 3 個以上實體選項，這 100% 是選擇題，自動修復題型，絕不刪除選項！
+            if len(opts) >= 3 and q_type in ["選填題", "簡答題", "繪圖作圖題"]:
+                ans_val = str(q.get("answer", "")).strip()
+                new_type = "多選題" if len(re.findall(r'[A-Za-z0-9]', ans_val)) > 1 else "單選題"
+                logging.info(f"🔄 [題型自癒修正] 題號 {q_num} 帶有 {len(opts)} 個選項，已自動從 '{q_type}' 扶正為 '{new_type}'！")
+                q["question_type"] = new_type
+                q_type = new_type
+            elif q_type in ["選填題", "簡答題", "繪圖作圖題"]:
+                # 只有真正無選項的非選題，才清空可能被誤抓的 options
                 q["options"] = []
                 
             # 🚨 [防禦性機制 - 提案三：選擇題「評分標準」反向去污染清洗器]
@@ -3159,11 +3418,19 @@ class ExamParser:
             spec_name = f"{safe_year}_學測_{safe_subject}"
             standard_academic_year = f"{year_digits}學測"
             standard_exam_source = f"{year_digits}學年度學科能力測驗{subject}"
-        else: # AST
+        else: # AST（大考指考 / 分科測驗）
             type_folder = "分科指考"
-            spec_name = f"{safe_year}_分科指考_{safe_subject}"
-            standard_academic_year = f"{year_digits}分科"
-            standard_exam_source = f"{year_digits}學年度分科測驗{subject}"
+            # 🚨 嚴謹依據學制歷史判定：民國 111 年起實施 108 課綱稱為「分科測驗」，110 年以前一律為「指定科目考試（指考）」
+            try:
+                y_val = int(year_digits)
+            except ValueError:
+                y_val = 111
+            ast_short = "分科" if y_val >= 111 else "指考"
+            ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
+
+            spec_name = f"{safe_year}_{ast_short}{mock_tag}_{safe_subject}"
+            standard_academic_year = f"{year_digits}{ast_short}{mock_tag}"
+            standard_exam_source = f"{year_digits}學年度{ast_full}{mock_tag.strip('_')}{subject}"
             
         spec_name = re.sub(r'[\s\n\r\t]+', '', spec_name)
 
@@ -3411,6 +3678,11 @@ class ExamParser:
             # =========================================================
             pages = []
             for page_num in range(len(doc)):
+                # 🚨 學校定期考（段考）絕對不跳過第一頁！只有大考在明確無題目時才跳過封面
+                if exam_type == "SCHOOL":
+                    pages.append(page_num)
+                    continue
+
                 if skip_cover and page_num == 0:
                     logging.info("  -> ⏭️ [封面跳過] 依據 skip_cover 參數，直接跳過第 1 頁分析。")
                     continue
@@ -3425,10 +3697,11 @@ class ExamParser:
                         "作答說明", "答題說明", "答題卡", "考生姓名", "准考證號"
                     ]
                     has_cover_keyword = any(k in raw_page_text for k in cover_keywords)
-                    has_real_question = re.search(r'^\s*(?:1|一|\(一\))\s*[.．、\s)]', raw_page_text, re.MULTILINE) is not None
+                    # 強化對大考與段考各類題號形式的偵測
+                    has_real_question = re.search(r'(?:^|\n)\s*(?:第?\s*[1-9]\s*題|[1-9]\s*[.．、\s)]|[一二三四五]\s*[,、.．\s]|[（(][1-9一二][)）])', raw_page_text) is not None
                     
                     if has_cover_keyword and not has_real_question:
-                        logging.info(f"  -> ⏭️ [封面/說明頁跳過] 偵測到第 {page_num + 1} 頁為封面或作答注意事項頁，自動跳過。")
+                        logging.info(f"  -> ⏭️ [封面/說明頁跳過] 偵測到第 {page_num + 1} 頁為純大考封面注意事項頁，自動跳過。")
                         continue
                     
                 pages.append(page_num)
@@ -3459,7 +3732,7 @@ class ExamParser:
                     2. **【範例過濾】**：若第一頁有「作答注意事項」或「範例」，切勿擷取範例題。
 
                     🚨【是非題 (True/False) 標準化轉單選題剛性規則】🚨：
-                    若題目為「是非題」（例如：1. $sin 26^\circ = cos 64^\circ$）：
+                    若題目為「是非題」（例如：1. $sin 26^\\circ = cos 64^\\circ$）：
                     - **【題型】**：必須將 `question_type` 強制設為 `"單選題"`。
                     - **【選項】**：因為原題未印出選項，你**必須自動為其生成兩個標準選項**：
                       `options`: [
@@ -3501,7 +3774,10 @@ class ExamParser:
                     4-2. **表格強制轉換**：數據表格務必轉換為 Markdown Table 格式嵌入。
                     5. **內文嵌入選項**：若遇上古文或國文科「克漏字」等選項內嵌在文章段落中的狀況，請在題幹中保留如 (A)、(B) 等引導標記以維持文章完整，並將對應的代號與內容整理到 `options` 欄位中。
                     5. **【選填題挖空規則（極度重要）】**：大考選填題常使用圓圈數字（如 \u2468、\u2469 或 \u246c-\u2460）代表畫卡格。請將其轉換為 `[ 9 ]`、`[ 10 ]` 或 `[ 13-1 ]` 的格式。
-                    \U0001f6a8**警告**：有時候圓圈數字旁邊**真的有根號或其他數學符號**（例如 $\\frac{{\\u2468\\sqrt{{\\u2469}}}}{{32}}$），請務必精準轉換為 `\\frac{{ [ 9 ] \\sqrt{{ [ 10 ] }} }}{{ 32 }}`！絕對不可以把真正的根號吃掉，也絕對禁止擅自把 \u2468 和 \u2469 強行合併成 `[ 9-10 ]`！請忠實反映圖片上的數學結構。
+                    5. **【選填題挖空規則（極度重要）】**：大考選填題常使用圓圈數字（如 ⑨、⑩ 或 ⑬-①）代表畫卡格。請將其轉換為 `[ 9 ]`、`[ 10 ]` 或 `[ 13-1 ]` 的標準格式。
+                    🚨【選填題根號與結構警告】：有時候圓圈數字旁邊真的有根號或其他運算符號（例如根號內有畫卡格），請務必精準轉換為例如 `[ 9 ]`、`\\sqrt{{ [ 10 ] }}` 等結構！絕對不可以把真正的根號吃掉，也絕對禁止擅自把 ⑨ 和 ⑩ 強行合併成 `[ 9-10 ]`！
+                    🚨【矩陣 LaTeX 剛性規範】：試卷中的方陣或矩陣，必須使用標準 LaTeX 的 `\\begin{{bmatrix}} ... \\end{{bmatrix}}` 表示，元素間用 `&`，行間用 `\\\\`，且務必包裹在 `$...$` 中！絕對禁止用純文字中括號 `[1 2][-1]` 代替矩陣！
+                    🚨【警告】：有時候圓圈數字旁邊**真的有根號或其他數學運算符號**（例如根號內有畫卡格），請務必精準轉換為例如 `[ 9 ]`、`\\sqrt{{ [ 10 ] }}` 等結構！絕對不可以把真正的根號吃掉，也絕對禁止擅自把 ⑨ 和 ⑩ 強行合併成 `[ 9-10 ]`！請忠實反映圖片上的數學結構。
                     6. **表格強制轉換**：若題目中包含數據表格（如：表1、表2），請【務必】將表格內容完整轉換為 Markdown Table 格式，並嵌入到 `question_text` 中相應的位置。絕對不可省略表格內容！
                     7. **選填題答案與畫卡格子對應規範（極度重要）**：
                        - 大考選填題的答案會對應至多個獨立的畫卡格子（例如：`[ 10-1 ]`、`[ 10-2 ]`、`[ 10-3 ]`）。
@@ -3509,7 +3785,22 @@ class ExamParser:
                        - 例如：
                          * 若題目為 $a=[ 10-1 ][ 10-2 ]$, $b=[ 10-3 ]$，其中 $a = -4$, $b = 3$，其對應畫卡格答案分別為 `-`、`4`、`3`，則 `answer` 欄位必須寫成 `-,4,3`，絕對不可直接相連寫成 `-43`。
                          * 若選填題 A 答案為 $\frac{9}{10}$，畫卡格 9-10 為 9、1、0，則寫成 `9,1,0`，絕對不可寫成 `910`。
-                    8. **克漏字與文意選填特例（極度重要）**：克漏字的選項通常集中在文章下方。請你【主動去文章段落 (shared_context) 中尋找對應的題號】，將「包含該題號空格的那一整個完整句子」提取出來作為 `question_text`，並將題號替換為 `______`。絕對禁止將 (A) (B) (C) (D) 等選項文字當作題幹！
+                    8. **🚨【英文科五大題型專屬擷取剛性規範】🚨**：
+                       - **【詞彙題 (Vocabulary)】**：題幹完整擷取，選項為標準 4 個單字 (A, B, C, D)，`question_type` 為 `"單選題"`。
+                       - **【綜合測驗 (Cloze Test)】**：
+                         * 整篇克漏字文章**完整保留並填入 `shared_context`**。
+                         * 每個小題的 `question_text` 必須擷取「包含該空格的那一個完整英文句子」，並將題號替換為 `______`（例如：`The company decided to ______ the new policy.`）。
+                         * 該小題下方的四個選項填入 `options`，`question_type` 為 `"單選題"`。
+                       - **【文意選填 (Blanks with Word Bank)】**：
+                         * 整篇文章放入 `shared_context`。
+                         * 題目下方給予的單字庫（通常為 A 到 J 或 A 到 L）：**必須為每個小題複製完整的這組相同單字選項庫到 `options`**。
+                         * 該題 `question_text` 填入該空格所在的完整句子，`question_type` 強制設為 `"單選題"`。
+                       - **【篇章結構 (Discourse Structure)】**：
+                         * 整篇文章放入 `shared_context`，空格標註為 `[ 31 ]`、`[ 32 ]` 等。
+                         * 選項庫中的句子 (A)~(E) 填入 `options`，`question_type` 強制設為 `"單選題"`。
+                       - **【混合題 (Hybrid Test)】**：
+                         * 英文混合題常要求在文章中找出單字填空、或回答 2~5 字的簡答題。
+                         * 若為手寫填空或簡答，`question_type` 設為 `"簡答題"`，`options` 為空列表 `[]`。
                     9. **選填題挖空規則**：若遇到大考特有的圓圈畫卡題號（例如 ⑬-① ⑬-②），請統一轉換為標準挖空格式 `[ 13-1 ] [ 13-2 ]`，不要使用 LaTeX 的 \\bigcirc。這有利於系統自動生成填空輸入框。
                     9-2. **🚨【選填題畫卡格圓圈數字不視為圖片】🚨**：
                        大考選填題中出現的帶圓圈數字（如 ⑧、⑨、⑩）是排版文字的一部分（請按規則 9 轉換為 `[ 8 ]`、`[ 9 ]`、`[ 10 ]`）。**【絕對禁止】**將這些圓圈數字、分數線或其相鄰的填空文字框選為 `image_bboxes`！只有當題目中出現真正的實體插圖、函數圖形、幾何圖形或大型數據表時，才將其框選為 `image_bboxes`。
@@ -3825,29 +4116,52 @@ class ExamParser:
                         try: img.close()
                         except Exception: pass
 
+            def filter_ghost_questions(q_list):
+                valid_q = []
+                ghost_keywords = [
+                    "本題於原試卷中不存在", "全卷掃描漏失", "無完整題目文本", 
+                    "題目文字未在影像中提供", "此頁面為試卷封面", "本頁為「大學入學考試中心",
+                    "作答注意事項", "無實質試題文字", "本題不存在"
+                ]
+                for q in q_list:
+                    q_text = q.get("question_text", "").strip()
+                    # 1. 題幹為空或長度過短且無附圖
+                    if not q_text and not q.get("has_image"):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 題幹完全為空，已自動剔除。")
+                        continue
+                    # 2. 題幹命中幽靈佔位字樣
+                    if any(gk in q_text for gk in ghost_keywords):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 命中封面/無效題目特徵，已自動剔除：{q_text[:30]}...")
+                        continue
+                    valid_q.append(q)
+                return valid_q
+
+            all_extracted_questions = filter_ghost_questions(all_extracted_questions)
             all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
             all_extracted_questions = deduplicate_questions(all_extracted_questions)
 
             for q_data in all_extracted_questions:
-                q_sub = q_data.get("sub_subject")
+                q_sub = q_data.get("sub_subject", "")
                 
-                if normalized_subject == "社會":
+                # 🚨 模糊相容「社會考科」、「學測社會」、「社會科」等各式學科名稱
+                if any(k in normalized_subject for k in ["社會", "社考"]):
                     if q_sub not in ["歷史", "地理", "公民與社會"]:
                         q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
-                        if any(k in q_text for k in ["憲法", "法律", "政府", "權利", "經濟", "市場", "社會", "勞工", "法規", "法治"]):
+                        if any(k in q_text for k in ["憲法", "法律", "政府", "權利", "經濟", "市場", "社會", "勞工", "法規", "法治", "契約", "法官", "選制"]):
                             q_data["sub_subject"] = "公民與社會"
-                        elif any(k in q_text for k in ["地圖", "氣候", "地形", "空間", "地理", "貿易", "生活圈", "自然環境", "沙丘", "生活圈", "位置"]):
+                        elif any(k in q_text for k in ["地圖", "氣候", "地形", "空間", "地理", "貿易", "生活圈", "自然環境", "沙丘", "位置", "等高線", "洋流", "降水"]):
                             q_data["sub_subject"] = "地理"
                         else:
                             q_data["sub_subject"] = "歷史"
-                elif normalized_subject == "自然":
+                # 🚨 模糊相容「自然考科」、「學測自然」、「理綜」等各式學科名稱
+                elif any(k in normalized_subject for k in ["自然", "自考", "理綜"]):
                     if q_sub not in ["物理", "化學", "生物", "地球科學"]:
                         q_text = s2t(q_data.get("question_text", "") + q_data.get("shared_context", ""))
-                        if any(k in q_text for k in ["力", "速度", "電", "磁", "能量", "波", "加速度", "力學"]):
+                        if any(k in q_text for k in ["力", "速度", "電", "磁", "能量", "波", "加速度", "力學", "牛頓", "歐姆", "光電"]):
                             q_data["sub_subject"] = "物理"
-                        elif any(k in q_text for k in ["化學", "反應", "分子", "溶液", "元素", "原子", "化合物"]):
+                        elif any(k in q_text for k in ["化學", "反應", "分子", "溶液", "元素", "原子", "化合物", "酸鹼", "莫耳", "氧化", "還原"]):
                             q_data["sub_subject"] = "化學"
-                        elif any(k in q_text for k in ["細胞", "基因", "生態", "植物", "動物", "生物", "染色體", "群落"]):
+                        elif any(k in q_text for k in ["細胞", "基因", "生態", "植物", "動物", "生物", "染色體", "群落", "器官", "葉綠體", "演化"]):
                             q_data["sub_subject"] = "生物"
                         else:
                             q_data["sub_subject"] = "地球科學"
@@ -3904,20 +4218,39 @@ class ExamParser:
                     return ""
 
                 gaps = []
+                # 🚨 防暴走過濾：大考數乙、數A、數甲通常只有 15~20 題左右，排除超出合理題號範圍或答案卷跨科殘留的幽靈題號
+                max_reasonable_q = 25 if "數" in subject else 60
                 for num in expected_q_nums:
                     base_num = get_base_q_num(num)
+                    # 如果題號是純數字且超出本科合理題數，絕不納入補漏清單！
+                    if base_num.isdigit() and int(base_num) > max_reasonable_q:
+                        continue
                     if not is_question_covered(base_num, all_extracted_questions):
                         if base_num not in gaps: gaps.append(base_num)
                 
                 if gaps:
                     logging.warning(f"⚠️ [補漏機制啟動] 偵測到有 {len(gaps)} 道題目在第一階段漏抓：{gaps}")
                     for gap_num in gaps:
-                        target_page_num = 0
-                        for page_idx in range(len(doc)):
+                        target_page_num = -1
+                        
+                        # 🚨 絕對禁止在封面頁（Page 0）或只有作答說明的頁面補漏
+                        search_start_page = 1 if (exam_type != "SCHOOL" and len(doc) > 1) else 0
+                        for page_idx in range(search_start_page, len(doc)):
                             page_text = doc[page_idx].get_text("text")
-                            if re.search(rf'\b{gap_num}\b', page_text) or f" {gap_num} " in page_text:
+                            
+                            # 若該頁包含過多「範例」或「作答注意事項」字眼，跳過該頁搜尋
+                            if "作答注意事項" in page_text and "第壹部分" not in page_text:
+                                continue
+                                
+                            # 嚴格正則比對：必須是實體獨立題號開頭（防止內文數字碰撞）
+                            pattern = rf'(?:^|\n)\s*(?:第\s*{gap_num}\s*題|{gap_num}\s*[.．、\s)]|\({gap_num}\))(?!\d)'
+                            if re.search(pattern, page_text):
                                 target_page_num = page_idx
                                 break
+                        
+                        if target_page_num == -1:
+                            logging.info(f"⏭️ 題號 {gap_num} 在試卷實體內容中並不存在（屬答案卷欄位溢出或雜訊），安全略過。")
+                            continue
                         
                         logging.info(f"🔍 題號 {gap_num} 最可能位於 PDF 第 {target_page_num+1} 頁，啟動單題高精度定向擷取...")
                         
@@ -4085,13 +4418,21 @@ class ExamParser:
                             logging.error(f"混合題勾選選項重建失敗: {e}")
 
             def is_generic_instruction(text):
-                generic_keywords = ["注意事項", "答案卡", "畫記", "作答說明", "答題說明", "本部分", "單選題", "多選題", "選填題"]
+                generic_keywords = ["注意事項", "答案卡", "畫記", "作答說明", "答題說明", "本部分", "單選題", "多選題", "選填題", "考生姓名", "准考證號"]
                 matches = sum(1 for kw in generic_keywords if kw in text)
                 return matches >= 2 or len(text.strip()) < 20
 
             def is_authentic_group_context(text):
-                group_keywords = ["題組", "閱讀", "共用", "下列各題", "圖", "表", "實驗", "情境", "背景"]
-                return any(kw in text for kw in group_keywords)
+                # 🚨 嚴格題組判定：只有試卷上明確印刷「題組」、「回答下列第X-Y題」、「閱讀下文」才認定為題組共同背景
+                # 嚴禁只因出現「圖」、「表」、「實驗」就將獨立單題強行合併！
+                strict_group_patterns = [
+                    r'第?\s*\d+\s*(?:至|到|~|-)\s*\d+\s*題?為題組',
+                    r'閱讀下文[，,、\s]*回答第',
+                    r'題組[：:\s]',
+                    r'根據下列[資料文章實驗情境]+[，,、\s]*回答第',
+                    r'下文[，,、\s]*回答第'
+                ]
+                return any(re.search(p, text) for p in strict_group_patterns)
             
             def get_context_similarity(s1, s2):
                 set1 = set(s1.replace(" ", "").replace("\n", ""))
@@ -4203,17 +4544,56 @@ class ExamParser:
             """
 
         subject_specific_instruction = ""
-        if normalized_subject in ["國文", "國寫"]:
+        if normalized_subject in ["國文", "國綜"]:
             subject_specific_instruction = """
-            【五、國文科專屬審查與解題規範】：
-            1. **古文精準翻譯**：若涉及文言文，詳解必須給出關鍵字詞的「字義與詞性拆解」，並附上流暢的全文翻譯，嚴禁籠統帶過。
-            2. **意象與修辭剖析**：分析選項時，需明確指出詩詞、現代文學中的核心意象（如：落葉象徵衰亡）與修辭手法（如：借代、雙關之隱含語意）。
+            【五、國文科名師多維解題與寫作規範】：
+            1. **多元解題維度**：
+               - `### 【標準解法：文本語意與文言訓詁】`：若涉及文言文，必須進行字詞訓詁（實詞虛詞拆解、倒裝/省略句式還原），並給予優美流暢的白話對譯。
+               - `### 【另解一：文學意象與文意脈絡分析】`：從核心意象、情章剪裁、作者生平或文化思想背景切入，引導學生體會作者的情感寄託。
+               - `### 【另解二 / 考場速解：語氣判讀與關鍵字刪去法】`：分析選項語氣的絕對性、情感色彩（褒貶）、句式對仗排偶對稱性，教導學生在考場快速排除干擾項。
+            2. **白話散文與跨文本**：明確指出選項中的「偷換概念」或「過度推論」之處。
+            """
+        elif normalized_subject == "國寫":
+            subject_specific_instruction = """
+            【五、國語文寫作（國寫）專屬引導與評分量規】：
+            1. **題型分流**：
+               - 第一大題（知性題）：著重「文意統整」、「分析說明」與「立場論述」。詳解必須條列審題重點、立論依據與三段式架構範文。
+               - 第二大題（情意題）：著重「情感抒發」、「生活體悟」與「意象深化」。詳解必須展示高分範文、核心意象經營手法與名言佳句延伸。
+            2. **評分標準規範**：嚴禁套用數理選擇題評分！必須採用大考中心官方「六等九級分量規」：
+               `國寫評分標準：A+等（22~25分，立意深刻結構嚴謹）、A等（18~21分，思維清晰敘述完整）、B+等（14~17分，文意通順符合題意）、B等（10~13分，結構稍鬆文筆平實）、C等（1~9分，未切題或字數不足）。`
             """
         elif normalized_subject == "英文":
             subject_specific_instruction = """
-            【五、英文科專屬審查與解題規範】：
-            1. **長難句骨架拆解**：遇到長難句，詳解必須拆解句子結構（主詞、動詞、關係子句分層說明），並詳細解析關鍵片語或搭配詞 (Collocations) 的語境。
-            2. **閱讀定位句與同義代換 (Paraphrasing)**：閱讀題必須在詳解中指出文章中的「定位句」，並說明選項是如何進行同義字代換的。
+            【五、英文科名師多維解題與寫作規範】：
+            1. **多元解題維度**：
+               - `### 【標準解法：語法骨架與語意分析】`：長難句必須拆解語法骨架（主詞 S、主要動詞 V、分詞構句、關係子句分層說明），並附上通順之中文翻譯。
+               - `### 【另解一：上下文語境與邏輯銜接】`：針對克漏字與篇章結構，抓出關鍵轉折詞（Signposts，如 however, consequently）、代名詞前指關係（Reference words）與語意場連貫性。
+               - `### 【另解二 / 考場速解：詞根詞綴與搭配詞秒殺】`：運用搭配詞（Collocations）、介系詞搭配慣用法、詞根詞綴（Etymology）構詞法，提供不需通篇讀完即可破題的秒殺技巧。
+            2. **閱讀測驗**：必須精準標出文章中的【定位句】（Quote），並點破選項是如何進行「同義詞改寫（Paraphrasing）」的。
+            """
+        elif normalized_subject == "歷史":
+            subject_specific_instruction = """
+            【五、歷史科名師多維解題規範】：
+            1. `### 【標準解法：時序因果與歷史脈絡】`：結合具體時代背景（政治體制、經濟結構、社會文化），梳理歷史事件的前因後果。
+            2. `### 【另解一：史料批判與視角解讀】`：辨析題幹是一手史料（Primary source）還是二手史料，解讀作者身分、寫作立場、意識形態與歷史詮釋的主客觀偏見。
+            3. `### 【另解二 / 考場速解：特徵關鍵字檢索法】`：提取史料中不可竄改的關鍵指標（如貨幣制度、官制名稱、特殊地名、法令名稱），秒判年代與政權。
+            """
+        elif normalized_subject == "地理":
+            subject_specific_instruction = """
+            【五、地理科名師多維解題規範】：
+            1. `### 【標準解法：地理原理與成因分析】`：闡明背後的自然法則（大氣環流、洋流、板塊運動、地形作用力）或人文區位理論（中地理論、韋伯工業區位、農業集約度）。
+            2. `### 【另解一：空間圖表與數據解讀】`：深入解析題幹地圖（等高線、二度分帶坐標）、溫雨圖、統計圖表或 GIS 疊圖邏輯。
+            3. `### 【另解二 / 考場速解：極端氣候與地理要素排除法】`：利用半球判定、迎風背風、緯度帶特徵，快速刪去不合常理之地區選項。
+            """
+        elif normalized_subject in ["公民與社會", "公民"]:
+            subject_specific_instruction = """
+            【五、公民與社會名師多維解題規範】：
+            1. `### 【標準解法：學科模型與法理分析】`：
+               - 法律題：嚴格套用刑法三階論（構成要件、違法性、罪責）、民法權利能力、或憲法比例原則（適當性、必要性、衡平性）。
+               - 經濟題：詳細分析供需曲線位移、均衡價格變動、消費者/生產者剩餘、外部效果或比較利益原理。
+               - 政治/社會題：結合民主治理、選制換算、公共利益衡量或社會不平等理論。
+            2. `### 【另解一：圖形位移與幾何推理】`（經濟題必備）：清晰描述曲線移動方向及福利變化。
+            3. `### 【另解二 / 考場速解：法理要件關鍵字速判】`：利用法條主體要件、除斥期間、或正義理論之核心關鍵詞快速突破。
             """
         elif normalized_subject in ["數學", "數A", "數B", "數甲", "數乙", "數學A", "數學B", "數學甲", "數學乙"]:
             subject_specific_instruction = """
@@ -4297,8 +4677,11 @@ class ExamParser:
 
         
 
-        # 💡 將已加載的【有效詳解】建立成對位索引表（自動剔除先前超時或失敗的無效詳解，強制重跑）
-        partial_map = {q.get("question_number"): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
+        def get_unique_q_key(q_obj):
+            return (str(q_obj.get("question_number", "")).strip(), str(q_obj.get("question_type", "")).strip())
+
+        # 💡 將已加載的【有效詳解】建立成對位索引表（以題號+題型為複合鍵，防止跨大題碰撞）
+        partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
         # 📊 連動更新遠端 Web 儀表板當前考卷與題目進度
         with GLOBAL_METRICS.lock:
@@ -4310,10 +4693,11 @@ class ExamParser:
         task_queue = []
         for q in all_extracted_questions:
             q_num = q.get("question_number")
-            if q_num in partial_map:
+            q_key = get_unique_q_key(q)
+            if q_key in partial_map:
                 # 已經有詳解了！直接重用，不重複調用 API 耗費額度
-                logging.info(f"⏭️  題號 {q_num} 已存在暫存詳解，自動加載成果。")
-                q.update(partial_map[q_num])
+                logging.info(f"⏭️  題號 {q_num} ({q.get('question_type')}) 已存在暫存詳解，自動加載成果。")
+                q.update(partial_map[q_key])
                 all_final_questions.append(q)
             else:
                 task_queue.append({"q_data": q, "critique": "", "retry_count": 0, "recheck_count": 0})
@@ -4501,9 +4885,11 @@ class ExamParser:
                             derived_ans = "".join(sorted(derived_correct_keys))
                             
                             # 💡 核心補件：若本試卷無官方解答（學校段考），自動將 AI 推導出的答案填入 answer 欄位中
-                            if not q_data.get('has_official_answer', True) and derived_ans:
-                                q_data['answer'] = derived_ans
-                                logging.info(f"💡 [無官方解答自動填補] 題號 {q_data['question_number']} 已根據 AI 推導自動寫入答案: '{derived_ans}'")
+                            if not q_data.get('has_official_answer', True):
+                                fallback_ans = sol_data.get('derived_answer', '').strip() or derived_ans
+                                if fallback_ans:
+                                    q_data['answer'] = fallback_ans
+                                    logging.info(f"💡 [無官方解答自動填補] 題號 {q_data['question_number']} 已根據 AI 推導自動寫入答案: '{fallback_ans}'")
 
                             official_ans = str(q_data.get('answer', '')).strip()
                             
@@ -4869,23 +5255,59 @@ class ExamParser:
                                         except: pass
 
                         if is_valid_passed:
-                            # 成功通過，加上總結句
-                            ans = str(q_data.get('answer', '')).strip()
-                            if ans:
-                                # 清理答案字串中的多餘括號與說明文字
-                                clean_ans_code = re.sub(r'[^\w,]', '', ans)
-                                if any(k in ans for k in ["無答案", "全體給分", "送分", "不計分"]):
+                            # 🚨 紀錄官方原始答案與推導答案
+                            if not q_data.get("official_answer"):
+                                q_data["official_answer"] = str(q_data.get('answer', '')).strip()
+                            
+                            derived = item.get("_derived_ans", "").strip()
+                            if derived and derived != "（未順利推導出唯一正確選項）":
+                                q_data["derived_answer"] = derived
+                            else:
+                                q_data["derived_answer"] = q_data["official_answer"]
+
+                            # 判定是否存在衝突
+                            has_conflict = item.get("_discrepancy_detected", False)
+                            q_data["has_answer_discrepancy"] = has_conflict
+                            if has_conflict:
+                                q_data["discrepancy_reason"] = f"學術嚴謹推導答案為【{q_data['derived_answer']}】，但官方原始紀錄為【{q_data['official_answer']}】（疑為答案卷錯位、印刷瑕疵或版本混淆）。"
+
+                            # 成功通過，加上客觀結論句（絕不精神分裂硬凹！）
+                            effective_ans = q_data['derived_answer'] if has_conflict else q_data['official_answer']
+                            
+                            # 🚨 防呆：若答案完全為空，不追加空的「綜上所述」句子
+                            if effective_ans and effective_ans.strip():
+                                if any(k in effective_ans for k in ["無答案", "全體給分", "送分", "不計分"]):
                                     q_data['detailed_solution'] += f"\n\n**綜上所述，本題官方公佈無答案，全體給分。**"
                                 elif q_data.get('question_type', '') in ["單選題", "多選題"]:
-                                    formatted_parts = [f"({char})" for char in clean_ans_code if char.isalnum()]
-                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確選項為：{''.join(formatted_parts)}**"
-                                elif q_data.get('question_type', '') == "選填題" and "," in ans:
-                                    formatted_parts = ans.split(",")
+                                    # 只提取大寫英文字母或純數字選項，防止「即」等中文字元被包成括號 (即)
+                                    valid_opts = re.findall(r'[A-Ga-g1-9]', effective_ans)
+                                    if valid_opts:
+                                        formatted_opts = "".join([f"({c.upper()})" for c in valid_opts])
+                                        if has_conflict:
+                                            q_data['detailed_solution'] += f"\n\n**綜上所述，本題學理嚴謹推導之正確選項為：{formatted_opts}（官方原始答案為：{q_data['official_answer']}，詳見上述疑義剖析）。**"
+                                        else:
+                                            q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確選項為：{formatted_opts}**"
+                                elif q_data.get('question_type', '') == "選填題" and "," in effective_ans:
+                                    formatted_parts = effective_ans.split(",")
                                     blanks_desc = ", ".join([f"第 {idx+1} 空格為「{val}」" for idx, val in enumerate(formatted_parts)])
-                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題選填題各畫卡格答案為：{ans}（即 {blanks_desc}）**"
+                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題選填題各畫卡格答案為：{effective_ans}（即 {blanks_desc}）**"
                                 else:
-                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確答案為：{ans}**"
+                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確答案為：{effective_ans}**"
                             
+                            # 🚨 多維知識點自動補齊與主副關聯校正
+                            raw_cats = q_data.get("topic_categories", [])
+                            if isinstance(raw_cats, list) and raw_cats:
+                                q_data["topic_categories"] = [s2t(str(c).strip()) for c in raw_cats if str(c).strip()]
+                                # 主考點鎖定為第一優先項
+                                q_data["topic_category"] = q_data["topic_categories"][0]
+                            elif q_data.get("topic_category"):
+                                clean_main = s2t(str(q_data["topic_category"]).strip())
+                                q_data["topic_category"] = clean_main
+                                q_data["topic_categories"] = [clean_main]
+                            else:
+                                q_data["topic_category"] = "必修_綜合主題"
+                                q_data["topic_categories"] = ["必修_綜合主題"]
+
                             with queue_lock:
                                 if '_cropped_pil_images' in q_data:
                                     for pimg in q_data['_cropped_pil_images']:
@@ -5005,7 +5427,12 @@ class ExamParser:
                     break
 
         # 最後排序題號以維持最終 JSON 整齊，防範字典序排序導致 10 排在 2 前面
-        all_final_questions.sort(key=lambda x: natural_sort_key(x.get('question_number', '0')))
+        def safe_page_to_int(val):
+            try: return int(val)
+            except (ValueError, TypeError): return 1
+
+        # 🚨 結合頁碼 (整數化保證安全) 與題號，保證整份考卷按照實體印刷順序排列
+        all_final_questions.sort(key=lambda x: (safe_page_to_int(x.get('page_number', 1)), natural_sort_key(x.get('question_number', '0'))))
 
         if not all_final_questions:
             logging.error(f"❌ [任務中止] [{year} {subject}] 解析出的題目數量為 0！")
@@ -5228,6 +5655,10 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         exam_type = "MOCK"
         mock_tag = ""
 
+        # 🚨 精確標記是否為「補考」，徹底阻斷補考與正式考 cross-contamination
+        is_makeup = any(k in filename_clean for k in ["補考", "補辦", "代考"])
+        makeup_tag = "_補考" if is_makeup else ""
+
         is_ast = any(k in filename_clean for k in ["指考", "指定科目", "分科"])
         is_gsat = any(k in filename_clean for k in ["學測", "學科能力"])
         is_school = "school_exam_papers_only" in rel_dir_path or any(k in combined_path_text for k in ["定期考", "段考", "期中考", "期末考", "月考", "定期次考"])
@@ -5235,8 +5666,10 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
 
         if is_ast and not is_mock_kw:
             exam_type = "AST"
+            mock_tag = makeup_tag  # 將補考明確標註在 tag 中
         elif is_gsat and not is_mock_kw:
             exam_type = "GSAT"
+            mock_tag = makeup_tag
         elif is_school and not is_mock_kw:
             exam_type = "SCHOOL"
             school_match = re.search(r'((?:第[一二三四五六七八九十0-9]+次?)?(?:定期考|段考|期中考|期末考|月考))', filename_clean)
@@ -5321,8 +5754,12 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     continue
                 final_q_file = sorted(q_candidates, key=lambda x: len(x), reverse=True)[0]
                 
-                # 尋找解答檔
-                a_candidates = [filename for filename, meta in grouped_files if meta["role"] == "answer"]
+                # 尋找解答檔：若題目為補考，則答案檔「必須」為補考；若題目非補考，答案檔「嚴禁」為補考！
+                is_q_makeup = "_補考" in key[2]
+                a_candidates = [
+                    filename for filename, meta in grouped_files 
+                    if meta["role"] == "answer" and (("_補考" in meta["mock_tag"]) == is_q_makeup)
+                ]
                 if a_candidates:
                     # 優先選擇含有「選擇題」、「定稿」、「參考答案」等精確字眼的 PDF 檔
                     a_candidates.sort(key=lambda x: (

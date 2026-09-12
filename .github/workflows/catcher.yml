@@ -6,6 +6,16 @@ on:
     - cron: '0 7,19 * * *'
   workflow_dispatch: # 支援手動在 GitHub 網頁點擊執行
     inputs:
+      repair_only:
+        description: '⚡ 【秒級修復】僅執行 100+ 份資料庫離線清洗（剔除幽靈題、合併重題、升級知識點，修復後直接上傳，不跑 catcher.py）'
+        required: false
+        type: boolean
+        default: false
+      run_repair_before_parse:
+        description: '🧹 【修復+續跑】先執行資料庫離線修復，再啟動 catcher.py 進行新題目解析'
+        required: false
+        type: boolean
+        default: false
       refresh_diagrams:
         description: '🔄 是否強制重繪所有 AI 圖解 (修復舊版中文豆腐塊與細長條變形)'
         required: false
@@ -114,7 +124,20 @@ jobs:
           cp -f ./gdrive_workspace/telemetry_history.json ./telemetry_history.json 2>/dev/null || true
           if [ ! -f "./model_limits.json" ]; then echo "{}" > ./model_limits.json; fi
 
+      - name: 🛠️ 執行資料庫離線無損修復與重漏題仲裁
+        if: ${{ github.event.inputs.repair_only == 'true' || github.event.inputs.run_repair_before_parse == 'true' }}
+        run: |
+          echo "=========================================================="
+          echo "🚀 啟動 100+ 份試卷資料庫離線無損修復引擎 (Zero-API Cost)..."
+          echo "=========================================================="
+          python repair_database.py
+          
+          # 🚨 資安與儲存優化：刪除本機自動生成的 .bak 備份檔案，防止冗餘備份檔同步到 Google Drive 浪費空間
+          find ./exam_database_output -name "*.bak" -type f -delete
+          echo "✅ 資料庫修復完畢，已就緒！"
+
       - name: 🌐 啟動 Cloudflare Tunnel 即時儀表板穿透
+        if: ${{ github.event.inputs.repair_only != 'true' }}
         run: |
           curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
           sudo dpkg -i cloudflared.deb && rm cloudflared.deb
@@ -129,6 +152,7 @@ jobs:
           echo "======================================================================="
 
       - name: Run parser script
+        if: ${{ github.event.inputs.repair_only != 'true' }}
         timeout-minutes: 320
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

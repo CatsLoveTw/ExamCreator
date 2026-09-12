@@ -5,3 +5,15 @@ exam_database_output/
 ast_exam_papers_only/
 gsat_exam_papers_only/
 exams_temp.zip
+rclone.conf
+*.conf
+*.bak
+.env.secret
+.env*
+gdrive_workspace/
+*.secret
+exam_issue_tickets.json.tmp
+exam_images.zip
+
+__pycache__/
+*.pyc
