@@ -75,19 +75,23 @@ jobs:
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
 
-      - name: Pull Workspace from Google Drive (極速壓縮包模式)
+      - name: Pull Workspace from Google Drive (雙軌智慧拉取模式)
         run: |
           echo "⬇️ 開始從 Google Drive 雲端同步最新進度與題庫..."
           mkdir -p gdrive_workspace
           
           # =========================================================================
-          # 🚀 關鍵提速：排除散裝小圖片，只拉取根目錄壓縮包、狀態檔與 JSON 資料庫（3 秒完成！）
+          # 🚀 第一步：優先抓取根目錄的高速壓縮包與狀態檔（秒級完成核心數據恢復）
           # =========================================================================
           rclone copy gdrive: ./gdrive_workspace \
-            --exclude "exam_database_output/**/images/**" \
+            --include "exam_databases.zip" \
+            --include "exam_images.zip" \
+            --include "*.zip" \
+            --include "*.json" \
+            --include "key_status.txt" \
+            --include "key_errors_summary.txt" \
             --fast-list \
-            --transfers 16 \
-            --config rclone.conf -v
+            --config rclone.conf -v || true
 
           # 1. 解壓縮原始考卷題庫壓縮包 (exams.zip, mock.zip, full.zip, school.zip)
           for zipfile in exams.zip mock.zip full.zip school.zip; do
@@ -97,30 +101,31 @@ jobs:
             fi
           done
 
-          # 2. 檢查題庫資料夾
-          ls -d *_exam_papers_only 2>/dev/null || echo "⚠️ 警告：未找到任何 *_exam_papers_only 題庫資料夾"
-
-          # 3. 恢復 JSON 解析資料庫
+          # 2. ⚡ 優先解壓 exam_databases.zip 高速題庫包（瞬間恢復所有已完成的 JSON）
           mkdir -p exam_database_output
-          if [ -d "./gdrive_workspace/exam_database_output" ]; then
-            cp -a ./gdrive_workspace/exam_database_output/. ./exam_database_output/ 2>/dev/null || true
+          if [ -f "./gdrive_workspace/exam_databases.zip" ]; then
+            echo "⚡ 找到題庫高速包 exam_databases.zip，正在秒級解壓縮..."
+            unzip -q -o "./gdrive_workspace/exam_databases.zip" -d ./
+            echo "✅ 題庫資料庫已瞬間恢復完成！"
           fi
 
-          # =========================================================================
-          # 🖼️ 核心提速：優先下載單一圖片壓縮包 exam_images.zip（直接省下 25 分鐘！）
-          # =========================================================================
+          # 3. ⚡ 優先解壓 exam_images.zip 圖片高速包
           if [ -f "./gdrive_workspace/exam_images.zip" ]; then
             echo "⚡ 找到圖片高速包 exam_images.zip，正在秒級解壓縮..."
             unzip -q -o "./gdrive_workspace/exam_images.zip" -d ./
             echo "✅ 圖片庫已瞬間恢復完成！"
-          else
-            echo "ℹ️ 首次過渡提示：雲端尚未建立 exam_images.zip，從雲端同步散裝圖片（本次結束後將自動打包成高速包）..."
-            rclone copy gdrive:exam_database_output ./exam_database_output \
-              --fast-list \
-              --transfers 16 \
-              --checkers 32 \
-              --config rclone.conf -v || true
           fi
+
+          # =========================================================================
+          # 🔄 第二步：啟動「增量補足機制」，透過 rclone 確保雲端上任何殘留的 partial、
+          #           新生成的散裝 JSON 或漏掉的圖片能被精準補齊到本地工作區
+          # =========================================================================
+          echo "🔄 正在從雲端增量同步並補足任何散裝、partial 檔案..."
+          rclone copy gdrive:exam_database_output ./exam_database_output \
+            --fast-list \
+            --transfers 16 \
+            --checkers 32 \
+            --config rclone.conf -v || true
           
           # 4. 精準還原知識庫與狀態記憶庫
           cp -f ./gdrive_workspace/subject.json ./subject.json 2>/dev/null || true

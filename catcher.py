@@ -4121,18 +4121,30 @@ class ExamParser:
                 ghost_keywords = [
                     "本題於原試卷中不存在", "全卷掃描漏失", "無完整題目文本", 
                     "題目文字未在影像中提供", "此頁面為試卷封面", "本頁為「大學入學考試中心",
-                    "作答注意事項", "無實質試題文字", "本題不存在"
+                    "作答注意事項", "無實質試題文字", "本題不存在", "題目內容缺失", 
+                    "題目闕如", "無法判定", "未包含第"
                 ]
                 for q in q_list:
-                    q_text = q.get("question_text", "").strip()
+                    q_text = str(q.get("question_text", "")).strip()
+                    ans_text = str(q.get("answer", "")).strip()
+                    cat_text = str(q.get("topic_category", "")).strip()
+                    ana_text = str(q.get("question_analysis", "")).strip()
+                    
+                    combined_text = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
+                    
                     # 1. 題幹為空或長度過短且無附圖
-                    if not q_text and not q.get("has_image"):
-                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 題幹完全為空，已自動剔除。")
+                    if len(q_text) < 5 and not q.get("has_image"):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 題幹過短且無附圖，已自動剔除。")
                         continue
-                    # 2. 題幹命中幽靈佔位字樣
-                    if any(gk in q_text for gk in ghost_keywords):
-                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 命中封面/無效題目特徵，已自動剔除：{q_text[:30]}...")
+                    # 2. 全欄位雷達掃描命中幽靈佔位字樣
+                    if any(gk in combined_text for gk in ghost_keywords):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 命中封面/無效題目特徵，已自動剔除。")
                         continue
+                    # 3. 答案為斜線且題幹極短 (如只寫 "第18題")
+                    if ans_text in ["/", "／"] and len(q_text) < 15 and not q.get("has_image"):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 疑似佔位符，已自動剔除。")
+                        continue
+                        
                     valid_q.append(q)
                 return valid_q
 

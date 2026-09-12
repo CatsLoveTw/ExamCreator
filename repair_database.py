@@ -141,19 +141,32 @@ def repair_single_database(json_path: str) -> Dict[str, Any]:
     if not os.path.exists(bak_path):
         shutil.copy2(json_path, bak_path)
 
-    # 2. 剔除幽靈假題
+    # 2. 剔除幽靈假題 (Aggressive Purge)
     non_ghost_questions = []
+    
+    ghost_kws_extended = GHOST_KEYWORDS + [
+        "題目內容缺失", "題目闕如", "無法判定", "未包含第", 
+        "無實質試題", "免予計分", "不適用（此頁為試題封面", "內容缺失"
+    ]
+    
     for q in data:
         q_text = str(q.get("question_text", "")).strip()
         ans_text = str(q.get("answer", "")).strip()
+        cat_text = str(q.get("topic_category", "")) + " " + " ".join(q.get("topic_categories", []))
+        ana_text = str(q.get("question_analysis", ""))
         
-        # 判定是否為幽靈題特徵
         is_ghost = False
-        if not q_text and not q.get("has_image"):
+        # 條件A: 題幹太短且無圖
+        if len(q_text) < 5 and not q.get("has_image"):
             is_ghost = True
-        elif any(gk in q_text for gk in GHOST_KEYWORDS):
+            
+        # 條件B: 將題幹、答案、知識點、題意分析合併掃描，只要命中幽靈字眼直接拔除
+        combined_text = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
+        if any(gk in combined_text for gk in ghost_kws_extended):
             is_ghost = True
-        elif any(gk in ans_text for gk in ["本題不存在", "免予計分", "不適用（此頁為試題封面"]):
+            
+        # 條件C: 答案為純斜線且題幹極短 (如只寫 "第18題")
+        if ans_text in ["/", "／"] and len(q_text) < 15 and not q.get("has_image"):
             is_ghost = True
             
         if is_ghost:
@@ -254,6 +267,7 @@ def repair_single_database(json_path: str) -> Dict[str, Any]:
         json.dump(deduped, f, ensure_ascii=False, indent=4)
 
     return stats
+
 TICKETS_FILE = "exam_issue_tickets.json"
 
 def apply_user_feedback_tickets():
