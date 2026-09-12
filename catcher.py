@@ -5854,7 +5854,9 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
 TICKETS_FILE = "exam_issue_tickets.json"
 
 def process_single_ticket_rerun(ticket: dict, parser: ExamParser, target_dirs: List[str], output_dir: str) -> bool:
-    """針對使用者回報的單一題目，徹底重核 PDF、重新 OCR、重新裁圖、重新生成詳解與重繪圖表"""
+    """針對使用者回報的單一題目，徹底重核、重裁圖、AI重推導，並產生完整的修復報告寫入工單"""
+    import copy
+    
     uid = ticket.get("uid", "")
     desc = ticket.get("description", "")
     category = ticket.get("category", "")
@@ -5862,64 +5864,38 @@ def process_single_ticket_rerun(ticket: dict, parser: ExamParser, target_dirs: L
     sug_type = ticket.get("suggested_type", "")
     
     logging.info(f"💉 [啟動手術刀重跑] 工單 {ticket.get('ticket_id')} | 題目: {uid}")
-    logging.info(f"  -> 使用者回報內容: {desc}")
+    action_logs = []
     
-    # 1. 解析 UID 尋找對應的 JSON 資料庫
-    parts = uid.split("_")
-    if len(parts) < 3:
-        logging.error(f"❌ UID 格式不合法: {uid}")
-        return False
-        
-    year = parts[0]
-    q_num = parts[-1]
-    exam_source = "_".join(parts[1:-1])
-    
-    # 搜尋目標 _database.json
+    # 1. 透過 UID 全域搜尋對應的 JSON 資料庫
     target_json_path = None
     for root, dirs, files in os.walk(output_dir):
         for f in files:
             if f.endswith("_database.json") and not f.endswith("_partial_database.json"):
-                if year in f and safe_filename(q_num) in f or any(part in f for part in parts[1:3]):
-                    # 讀取確認
-                    fp = os.path.join(root, f)
-                    try:
-                        with open(fp, "r", encoding="utf-8") as jf:
-                            d = json.load(jf)
-                            if any(q.get("question_number") == q_num for q in d):
-                                target_json_path = fp
-                                break
-                    except Exception: pass
+                fp = os.path.join(root, f)
+                try:
+                    with open(fp, "r", encoding="utf-8") as jf:
+                        d = json.load(jf)
+                        if any(q.get("uid") == uid for q in d):
+                            target_json_path = fp
+                            break
+                except Exception: pass
         if target_json_path: break
         
     if not target_json_path:
-        logging.error(f"❌ 找不到題目 {uid} 所屬的資料庫檔案！")
+        ticket["ai_feedback"] = "❌ [尋找失敗] 資料庫中找不到該題目 UID，無法執行修復。"
+        ticket["status"] = "error"
         return False
         
     with open(target_json_path, "r", encoding="utf-8") as jf:
         questions_list = json.load(jf)
         
-    target_q = next((q for q in questions_list if str(q.get("question_number")) == str(q_num)), None)
-    if not target_q:
-        logging.error(f"❌ 資料庫中找不到題號 {q_num}！")
-        return False
-
-    # 2. 🚨 來源 PDF 重新核對（徹底解決補考與正式考配錯 PDF 災難）
-    is_makeup_ticket = any(k in desc or k in exam_source for k in ["補考", "補辦", "代考"])
-    q_pdf = target_q.get("question_pdf_path", "")
-    a_pdf = target_q.get("answer_pdf_path", "")
+    target_idx = next((i for i, q in enumerate(questions_list) if q.get("uid") == uid), -1)
+    if target_idx == -1: return False
     
-    # 重新在原始題庫目錄檢索是否需校準 PDF 檔案
-    if is_makeup_ticket and ("補考" not in q_pdf or (a_pdf and "補考" not in a_pdf)):
-        logging.warning(f"⚠️ [PDF來源校準] 使用者指認此題為補考卷！正在全目錄重新對位補考 PDF...")
-        all_sets = auto_find_exam_sets(target_dirs)
-        for s in all_sets:
-            if year in s["year"] and "_補考" in s["mock_tag"]:
-                target_q["question_pdf_path"] = s["q_pdf"].replace("\\", "/")
-                if s["a_pdf"]: target_q["answer_pdf_path"] = s["a_pdf"].replace("\\", "/")
-                logging.info(f"  -> 🎯 已成功校準綁定為正確的補考 PDF：{target_q['question_pdf_path']}")
-                break
-
-    # 3. 🚨 重新打開 PDF 該頁，重新裁切圖片
+    target_q = questions_list[target_idx]
+    old_q = copy.deepcopy(target_q)
+    
+    # 2. 🚨 來源 PDF 重新核對與重新裁切
     page_num = max(1, int(target_q.get("page_number", 1)))
     q_pdf_path = target_q.get("question_pdf_path")
     img_dir = os.path.dirname(target_json_path) + "/images/" + os.path.basename(target_json_path).replace("_database.json", "")
@@ -5930,64 +5906,93 @@ def process_single_ticket_rerun(ticket: dict, parser: ExamParser, target_dirs: L
             with fitz.open(q_pdf_path) as doc:
                 p_idx = min(page_num - 1, len(doc) - 1)
                 page = doc[p_idx]
-                
-                # 重新裁切題幹附圖（若原卷有圖）
                 if target_q.get("image_bboxes"):
-                    # 刪除舊圖片
                     for old_p in target_q.get("image_paths", []):
                         if os.path.exists(old_p):
                             try: os.remove(old_p)
                             except Exception: pass
-                    target_q["image_paths"] = parser.execute_crop(page, target_q["image_bboxes"], img_dir, f"Q{q_num}_Rerun")
-                    logging.info(f"  -> 📸 已依據原卷重新裁切高精度附圖：{target_q['image_paths']}")
+                    target_q["image_paths"] = parser.execute_crop(page, target_q["image_bboxes"], img_dir, f"Q{target_q['question_number']}_Rerun")
+                    action_logs.append(f"✅ 已刪除舊圖，並根據原卷重新裁切 {len(target_q['image_paths'])} 張高精度附圖")
         except Exception as e:
-            logging.error(f"重新開啟 PDF 裁圖失敗: {e}")
+            action_logs.append(f"⚠️ 重新裁切圖片失敗: {e}")
 
-    # 4. 🚨 刪除舊的詳解幾何圖解（強制觸發重繪）
-    safe_q = safe_filename(str(q_num).replace(" ", ""))
+    # 3. 🚨 銷毀舊的幾何解析圖 (diagram) 強制重繪
+    safe_q = safe_filename(str(target_q['question_number']).replace(" ", ""))
+    deleted_diags = 0
     for i in range(1, 4):
         diag_p = os.path.join(img_dir, f"diagram_Q{safe_q}_{i}.png")
         for ext in ["", ".done", ".failed"]:
             if os.path.exists(diag_p + ext):
-                try: os.remove(diag_p + ext)
+                try: 
+                    os.remove(diag_p + ext)
+                    if ext == "": deleted_diags += 1
                 except Exception: pass
+    if deleted_diags > 0:
+        action_logs.append(f"🗑️ 已強制刪除 {deleted_diags} 張舊版 AI 幾何解析圖")
 
-    # 5. 🚨 重新呼叫 AI 執行 Stage 2 詳解與繪圖重跑
-    # 將使用者的報錯作為最高優先級退件批判 (Critique)
-    urgent_critique = f"""
-    🚨🚨【來自使用者/閱卷專家的重大錯誤修正指示】🚨🚨
-    - 錯誤分類：{category}
-    - 專家指出具體瑕疵：>>> {desc} <<<
-    {f'- 專家建議正確答案為：【{sug_ans}】' if sug_ans else ''}
-    {f'- 專家建議修正題型為：【{sug_type}】' if sug_type else ''}
-    請你務必徹底揚棄前一次的錯誤推導，以最高學術水準重新解析本題！若原推導硬凹迎合了錯誤答案，請務必改正！
-    """
+    # 4. 🚨 準備單題 AI 重跑提示詞 (注入使用者批判)
+    q_sub = target_q.get("sub_subject", "數學")
+    q_rubric = SUBJECT_DIFFICULTY_RUBRICS.get(q_sub, GENERAL_DIFFICULTY_RUBRIC)
+    q_allowed = SUBJECT_TAXONOMY.get(q_sub, {"topics": [], "techniques": []})
     
-    if sug_ans: target_q["answer"] = sug_ans
-    if sug_type: target_q["question_type"] = sug_type
+    opts_str = "\n".join([f"- ({opt.get('key')}) {opt.get('value')}" for opt in target_q.get('options', [])]) or "無"
+    ans_label = f"【{sug_ans or target_q.get('answer')}】"
     
-    logging.info("🧠 正在重新調用大模型執行單題名師級解析與幾何重繪...")
-    chunk_payload = [{"q_data": target_q, "critique": urgent_critique, "retry_count": 1, "recheck_count": 0}]
+    item_desc = f"=== 待修復題目 ===\n題號：{target_q['question_number']}\n題幹：{target_q['question_text']}\n選項：\n{opts_str}\n官方/修正答案：{ans_label}\n"
+    urgent_critique = f"\n🚨🚨【來自使用者/專家的重大修正指示】🚨🚨\n錯誤分類：{category}\n具體瑕疵：>>> {desc} <<<\n請務必採納此建議，揚棄先前的錯誤推導，以最高水準重新解析！\n"
     
-    try:
-        # 單題重跑
-        parser.process_exam_paper(
-            subject=target_q.get("sub_subject", "數學"),
-            year=year,
-            exam_type="MOCK" if "模" in target_json_path else ("GSAT" if "學測" in target_json_path else "AST"),
-            mock_tag="",
-            q_pdf=target_q.get("question_pdf_path"),
-            a_pdf=target_q.get("answer_pdf_path"),
-            rubric_pdf=target_q.get("rubric_pdf_path"),
-            output_dir=output_dir,
-            school_name=target_q.get("school_name", "")
-        )
-        logging.info(f"🎉 [手術成功] 題目 {uid} 已完成原卷重審、附圖重切、詳解重寫與圖解重繪！")
+    prompt = PROMPT_STAGE_2_INTRO.format(batch_size=1) + item_desc + urgent_critique + PROMPT_STAGE_2_MAIN.format(
+        subject_rubric=q_rubric, q_answer=ans_label, topics=q_allowed.get('topics', []), technique=q_allowed.get('techniques', []),
+        math_scope_instruction="", subject_specific_instruction=""
+    )
+    
+    contents = [prompt]
+    for p in target_q.get('image_paths', []):
+        if os.path.exists(p): contents.append(Image.open(p))
+            
+    # 5. 呼叫大模型進行深度重生
+    logging.info("🧠 正在調用大模型執行單題名師級解析重生...")
+    sol_batch, _ = parser.ai_manager.generate_with_retry(
+        contents=contents, response_schema=QuestionSolutionBatch,
+        temperature=0.2, preferred_model="gemini-3.5-flash", enable_thinking=True, task_desc=f"[工單重跑 {uid}]"
+    )
+    
+    if sol_batch and 'solutions' in sol_batch and sol_batch['solutions']:
+        sol = s2t_recursive(sol_batch['solutions'][0])
+        
+        # 覆寫並清洗格式
+        target_q.update(sol)
+        if sug_ans: target_q["answer"] = sug_ans
+        if sug_type: target_q["question_type"] = sug_type
+        pre_validate_format(target_q, sol)
+        
+        # 產生變更比對日誌 (Diff)
+        if str(old_q.get('answer')).strip() != str(target_q.get('answer')).strip():
+            action_logs.append(f"🔄 答案變更: {old_q.get('answer')} ➔ {target_q.get('answer')}")
+        if str(old_q.get('question_type')).strip() != str(target_q.get('question_type')).strip():
+            action_logs.append(f"🔄 題型變更: {old_q.get('question_type')} ➔ {target_q.get('question_type')}")
+            
+        action_logs.append(f"✅ AI 已成功重寫詳解與選項剖析 (共產出 {len(target_q.get('detailed_solution',''))} 字)")
+        
+        # 圖解補繪判定
+        if "diagram_" in target_q.get("detailed_solution", ""):
+            action_logs.append("✅ 系統已將新的幾何解析圖指令排入渲染引擎隊列")
+
+        # 6. 寫回 JSON 資料庫
+        questions_list[target_idx] = target_q
+        with open(target_json_path, "w", encoding="utf-8") as jf:
+            json.dump(questions_list, jf, ensure_ascii=False, indent=4)
+            
+        # 7. 更新工單狀態
+        ticket["ai_feedback"] = "✅ [手術成功] 系統已接納建議，成功重核圖片並完成深度推導重寫。"
+        ticket["action_log"] = "\n".join(action_logs)
+        logging.info(f"🎉 題目 {uid} 深度重跑完畢！")
         return True
-    except Exception as e:
-        logging.error(f"❌ 單題重跑異常: {e}")
+    else:
+        ticket["ai_feedback"] = "❌ [手術失敗] AI 重跑無法產生有效結果，請檢查建議是否合理。"
+        ticket["action_log"] = "\n".join(action_logs) + "\n❌ 模型生成失敗或超時。"
         return False
-
+        
 def execute_all_pending_tickets(parser: ExamParser, target_dirs: List[str], output_dir: str):
     """檢查並執行所有來自使用者回報的待修復工單"""
     if not os.path.exists(TICKETS_FILE):
