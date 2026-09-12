@@ -11,6 +11,12 @@ on:
         required: false
         type: boolean
         default: false
+      process_reported_tickets_only:
+        description: '🎯 【精準重跑】僅針對使用者在網頁回報有問題的題目進行重新檢驗、重新裁圖與 AI 重解'
+        required: false
+        type: boolean
+        default: false
+
       run_repair_before_parse:
         description: '🧹 【修復+續跑】先執行資料庫離線修復，再啟動 catcher.py 進行新題目解析'
         required: false
@@ -160,6 +166,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
           REFRESH_DIAGRAMS: ${{ github.event.inputs.refresh_diagrams == 'true' && 'true' || 'false' }}
+          PROCESS_REPORTED_TICKETS_ONLY: ${{ github.event.inputs.process_reported_tickets_only == 'true' && 'true' || 'false' }}
         run: python catcher.py
 
       - name: Push Results to Google Drive
@@ -179,6 +186,14 @@ jobs:
             --transfers 16 \
             --checkers 32 \
             --config rclone.conf -v
+
+          echo "📦 [第 1.5 階段] 正在將正式完成的 JSON 資料庫打包為高速單一壓縮檔 exam_databases.zip..."
+          # 🚨 關鍵過濾：只納入 *_database.json，嚴格排除 *_partial_database.json 與 *_raw_extracted.json
+          find exam_database_output -name "*_database.json" ! -name "*_partial_database.json" ! -name "*_raw_extracted.json" | zip -q -1 exam_databases.zip -@
+          rclone copyto ./exam_databases.zip gdrive:exam_databases.zip \
+            --drive-chunk-size 64M \
+            --config rclone.conf -v
+          echo "🎉 [第 1.5 階段完成] 題庫純淨正式包打包完成（已剔除所有 partial 暫存檔）！"
 
           for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt telemetry_history.json; do
             if [ -f "./$state_file" ]; then
