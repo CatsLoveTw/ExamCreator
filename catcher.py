@@ -6055,6 +6055,46 @@ if __name__ == "__main__":
 
     # 🚨 優先執行使用者回報的單題重跑手術（重新核對來源PDF、重裁圖片、重跑詳解、重繪圖解）
     execute_all_pending_tickets(parser, TARGET_DIRECTORIES, output_directory)
+    
+    # =========================================================================
+    # 🚀 優先插隊：執行管理員新上傳的試卷排隊任務清單 (Priority Upload Tasks)
+    # =========================================================================
+    UPLOAD_TASKS_FILE = "exam_processing_tasks.json"
+    if os.path.exists(UPLOAD_TASKS_FILE):
+        try:
+            with open(UPLOAD_TASKS_FILE, "r", encoding="utf-8") as tf:
+                upload_tasks = json.load(tf)
+                
+            pending_upload_tasks = [t for t in upload_tasks if t.get("status") == "pending"]
+            if pending_upload_tasks:
+                logging.info(f"⚡ [優先插隊] 發現 {len(pending_upload_tasks)} 份由管理員新上傳的試卷任務，啟動最高優先級解析！")
+                for u_task in pending_upload_tasks:
+                    u_task["status"] = "processing"
+                    try:
+                        parser.process_exam_paper(
+                            subject=u_task["subject"],
+                            year=u_task["academic_year"],
+                            exam_type=u_task["exam_type"],
+                            mock_tag=u_task["mock_tag"],
+                            q_pdf=u_task["q_pdf"],
+                            a_pdf=u_task["a_pdf"],
+                            rubric_pdf=u_task["rubric_pdf"],
+                            output_dir=output_directory,
+                            school_name=u_task.get("school_name", "")
+                        )
+                        u_task["status"] = "completed"
+                        u_task["completed_at"] = time.strftime('%Y-%m-%d %H:%M:%S')
+                        logging.info(f"🎉 [優先任務完成] 試卷 {u_task['file_prefix']} 已成功產出資料庫！")
+                    except Exception as task_err:
+                        u_task["status"] = "failed"
+                        u_task["error_msg"] = str(task_err)
+                        logging.error(f"❌ [優先任務失敗] {u_task['file_prefix']}: {task_err}")
+                        
+                # 寫回已更新的任務狀態
+                with open(UPLOAD_TASKS_FILE, "w", encoding="utf-8") as tf:
+                    json.dump(upload_tasks, tf, ensure_ascii=False, indent=4)
+        except Exception as e:
+            logging.error(f"讀取或執行優先試卷任務清單失敗: {e}")
 
     # 🎯 若 GitHub Actions 開啟了「僅精準重跑工單」開關，完成後直接儲存並正常退出，不耗時跑全卷常規解析
     if os.environ.get("PROCESS_REPORTED_TICKETS_ONLY", "false").lower() == "true":
