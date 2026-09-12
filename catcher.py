@@ -4230,8 +4230,9 @@ class ExamParser:
                     return ""
 
                 gaps = []
-                # 🚨 防暴走過濾：大考數乙、數A、數甲通常只有 15~20 題左右，排除超出合理題號範圍或答案卷跨科殘留的幽靈題號
                 max_reasonable_q = 25 if "數" in subject else 60
+                
+                # 🚀 引擎一：基於官方解答的對位補漏 (Official Answer Map)
                 for num in expected_q_nums:
                     base_num = get_base_q_num(num)
                     # 如果題號是純數字且超出本科合理題數，絕不納入補漏清單！
@@ -4239,9 +4240,40 @@ class ExamParser:
                         continue
                     if not is_question_covered(base_num, all_extracted_questions):
                         if base_num not in gaps: gaps.append(base_num)
+
+                # 🚀 引擎二：基於題號連續性的智慧推斷補漏 (Sequence Inference)
+                # 專門對付「無官方解答」的學校段考，或者官方解答漏讀的情況
+                num_list = []
+                letter_list = []
+                for q_ext in all_extracted_questions:
+                    ext_num = str(q_ext.get("question_number", "")).strip()
+                    b_num = get_base_q_num(ext_num)
+                    if b_num.isdigit():
+                        num_list.append(int(b_num))
+                    elif len(b_num) == 1 and b_num.upper() in "ABCDEFGHJKLMNOPQRSTUVWXYZ":
+                        letter_list.append(b_num.upper())
+                
+                # 檢查數字連續性 (如 1, 2, 4 -> 漏了 3)
+                if num_list:
+                    min_n, max_n = min(num_list), max(num_list)
+                    if max_n <= max_reasonable_q:
+                        for n in range(min_n, max_n + 1):
+                            n_str = str(n)
+                            if n_str not in gaps and not is_question_covered(n_str, all_extracted_questions):
+                                gaps.append(n_str)
+                                
+                # 檢查字母連續性 (如 A, B, D -> 漏了 C)
+                if letter_list:
+                    start_ord, end_ord = ord(min(letter_list)), ord(max(letter_list))
+                    for o in range(start_ord, end_ord + 1):
+                        char = chr(o)
+                        if char not in gaps and not is_question_covered(char, all_extracted_questions):
+                            gaps.append(char)
                 
                 if gaps:
-                    logging.warning(f"⚠️ [補漏機制啟動] 偵測到有 {len(gaps)} 道題目在第一階段漏抓：{gaps}")
+                    # 按照自然排序重新整理缺口名單
+                    gaps = sorted(gaps, key=natural_sort_key)
+                    logging.warning(f"⚠️ [補漏雙引擎啟動] 結合解答對位與連續性推測，偵測到有 {len(gaps)} 道題目在第一階段漏抓：{gaps}")
                     for gap_num in gaps:
                         target_page_num = -1
                         
@@ -4898,7 +4930,7 @@ class ExamParser:
                             
                             # 💡 核心補件：若本試卷無官方解答（學校段考），自動將 AI 推導出的答案填入 answer 欄位中
                             if not q_data.get('has_official_answer', True):
-                                fallback_ans = sol_data.get('derived_answer', '').strip() or derived_ans
+                                fallback_ans = sol.get('derived_answer', '').strip() or derived_ans
                                 if fallback_ans:
                                     q_data['answer'] = fallback_ans
                                     logging.info(f"💡 [無官方解答自動填補] 題號 {q_data['question_number']} 已根據 AI 推導自動寫入答案: '{fallback_ans}'")
