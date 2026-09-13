@@ -2948,54 +2948,21 @@ class ExamParser:
     # 請在 ExamParser 類別中，精確替換此方法（注意縮排為 8 個空格）：
     # 🚨 將解析答案卷的提示詞抽離為類別變數，以利多個模型共用，保持代碼簡潔
     
-    def _run_single_ocr(self, a_pdf: str, model: str) -> dict:
-        """為共識機制設計的單次獨立 OCR 執行器"""
+    def _run_single_ocr(self, a_pdf: str, model: str) -> Tuple[dict, List[int]]:
+        """為共識機制設計的單次獨立 OCR 執行器（自動標定答案實體頁碼，支援純圖片掃描檔）"""
         try:
             doc = fitz.open(a_pdf)
             cat = doc.pdf_catalog()
             if cat > 0: doc.xref_set_key(cat, "StructTreeRoot", "null")
         except Exception as e:
             logging.error(f"無法開啟解答 PDF {a_pdf}: {e}")
-            return {}
+            return {}, []
             
         all_answers = {}
+        hit_page_indices = []
         task_id = uuid.uuid4().hex[:8]
         
-        # 🚨 [全科合一解答過濾核心]：先掃描全卷文字層，鎖定屬於本科目的目標頁碼
-        target_subject_keywords = [subject]
-        if "數" in subject:
-            if "乙" in subject: target_subject_keywords = ["數學乙", "數乙", "數學 乙"]
-            elif "甲" in subject: target_subject_keywords = ["數學甲", "數甲", "數學 甲"]
-            elif "A" in subject.upper(): target_subject_keywords = ["數學A", "數A", "數學 A"]
-            elif "B" in subject.upper(): target_subject_keywords = ["數學B", "數B", "數學 B"]
-            else: target_subject_keywords = ["數學考科", "數學科", "數學"]
-        elif "化" in subject: target_subject_keywords = ["化學考科", "化學科", "化學"]
-        elif "物" in subject: target_subject_keywords = ["物理考科", "物理科", "物理"]
-        elif "生" in subject: target_subject_keywords = ["生物考科", "生物科", "生物"]
-        elif "地科" in subject or "地球" in subject: target_subject_keywords = ["地球科學", "地科"]
-        elif "國" in subject: target_subject_keywords = ["國語文", "國文考科", "國文", "國綜"]
-        elif "英" in subject: target_subject_keywords = ["英文考科", "英文科", "英文"]
-        elif "歷" in subject: target_subject_keywords = ["歷史考科", "歷史科", "歷史"]
-        elif "地" in subject and "球" not in subject: target_subject_keywords = ["地理考科", "地理科", "地理"]
-        elif "公" in subject: target_subject_keywords = ["公民與社會", "公民"]
-
-        # 檢驗該答案 PDF 是否為跨學科全卷合一
-        is_multi_subject_pdf = len(doc) > 1
-        valid_pages = []
-        if is_multi_subject_pdf:
-            for p_idx, p in enumerate(doc):
-                p_text = p.get_text("text")
-                if any(kw in p_text for kw in target_subject_keywords):
-                    valid_pages.append(p_idx)
-            # 若無明確關鍵字匹配，退回全頁掃描
-            if not valid_pages:
-                valid_pages = list(range(len(doc)))
-            else:
-                logging.info(f"🎯 [全科解答篩選] 成功鎖定本科目 ({subject}) 答案位於第 {[p+1 for p in valid_pages]} 頁，排除其餘無關學科頁面！")
-        else:
-            valid_pages = [0]
-
-        for page_num in valid_pages:
+        for page_num in range(len(doc)):
             page = doc[page_num]
             pix = page.get_pixmap(dpi=300)
             img_path = os.path.abspath(f"temp_ans_{task_id}_p{page_num}_{model[:8]}.png")
@@ -3006,32 +2973,19 @@ class ExamParser:
                 if not os.path.exists(img_path):
                     continue
             
-            # 【優化機制 1】提取該頁的 PDF 數位文字層（文字對照組）
             page_text_layer = page.get_text("text").strip()
             
-            # 【優化機制 3】正則自動提取「預期題號與格位清單」作為提示詞地圖
-            import re
-            raw_keys = re.findall(r'\b\d+(?:-\d+)?\b|[A-G]\b', page_text_layer)
-            hint_keys = sorted(list(set(raw_keys)), key=natural_sort_key)
-            
-            hint_str = ""
-            if hint_keys:
-                hint_str = f"\n\n💡【本頁偵測到的預期答案鍵值提示】：{hint_keys}\n請務必以此結構化對照表為地圖，將解析到的答案填入對應的鍵值中，嚴禁跳格或遺漏任何一格。"
-            
-            text_layer_str = ""
-            if page_text_layer:
-                text_layer_str = f"\n\n=== 該頁數位文字層對照 ===\n{page_text_layer}"
-                
-            # 縫合優化後的複合 Prompt
-            combined_prompt = self.ANSWERS_OCR_PROMPT + text_layer_str + hint_str + "\n\n請務必結合提供的圖片排版與上述數位文字提示，進行交叉校驗，確保公式與數值完全一致。"
+            # 針對掃描檔（文字層為空）與數位檔的提示詞整合
+            text_layer_str = f"\n\n=== 該頁數位文字層對照 ===\n{page_text_layer}" if page_text_layer else "\n\n（註：本頁為純影像掃描檔，請完全依據圖片視覺排版精確辨識）"
+            combined_prompt = self.ANSWERS_OCR_PROMPT + text_layer_str
             
             try:
                 with Image.open(img_path) as pil_img:
                     from PIL import ImageEnhance
                     enhancer_contrast = ImageEnhance.Contrast(pil_img)
-                    pil_img_enhanced = enhancer_contrast.enhance(1.6)  # 提升 60% 對比度
+                    pil_img_enhanced = enhancer_contrast.enhance(1.6)
                     enhancer_sharp = ImageEnhance.Sharpness(pil_img_enhanced)
-                    pil_img_enhanced = enhancer_sharp.enhance(1.4)      # 提升 40% 銳利度
+                    pil_img_enhanced = enhancer_sharp.enhance(1.4)
                     
                     res_dict, err = self.ai_manager.generate_with_retry(
                         contents=[combined_prompt, pil_img_enhanced],
@@ -3040,20 +2994,24 @@ class ExamParser:
                         preferred_model=model,
                         enable_thinking=True
                     )
-                    if res_dict and 'answers' in res_dict:
+                    if res_dict and 'answers' in res_dict and res_dict['answers']:
+                        found_valid_ans = False
                         for item in res_dict['answers']:
                             raw_ans = item['standard_answer']
-                            # 🚨 清理多欄排版干擾下的格式污染與中文字洩漏
                             cleaned_ans = clean_ocr_answer_format(raw_ans)
-                            all_answers[item['question_number']] = cleaned_ans
+                            if cleaned_ans:
+                                all_answers[item['question_number']] = cleaned_ans
+                                found_valid_ans = True
+                        if found_valid_ans:
+                            hit_page_indices.append(page_num)
             except Exception as e:
-                logging.error(f"模型 {model} 解析解答卷第 {page_num} 頁出錯: {e}")
+                logging.error(f"模型 {model} 解析解答卷第 {page_num+1} 頁出錯: {e}")
             finally:
                 if os.path.exists(img_path):
                     try: os.remove(img_path)
                     except Exception: pass
         doc.close()
-        return all_answers
+        return all_answers, hit_page_indices
 
     def _resolve_ocr_conflict(self, a_pdf: str, dict_1: dict, dict_2: dict, mismatched_keys: list) -> dict:
         """
@@ -3134,15 +3092,17 @@ class ExamParser:
         logging.info(f"🧠 [共識投票] 啟動解答卷雙模型雙重驗證: {os.path.basename(a_pdf)}")
         
         # 1. 第一輪：使用主力模型 gemini-3.5-flash
-        ans_dict_1 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash")
+        ans_dict_1, pages_1 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash")
         
-        # 2. 第二輪：使用輕量模型 gemini-3.1-flash-lite 進行盲測對比
-        ans_dict_2 = self._run_single_ocr(a_pdf, model="gemini-3.1-flash-lite")
+        # 2. 第二輪：使用輕量模型 gemini-3.5-flash-lite 進行盲測對比
+        ans_dict_2, pages_2 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash-lite")
+        
+        hit_pages = sorted(list(set(pages_1 + pages_2)))
         
         if not ans_dict_1 and not ans_dict_2:
-            return "無官方解答。"
-        if not ans_dict_1: return json.dumps(ans_dict_2, ensure_ascii=False)
-        if not ans_dict_2: return json.dumps(ans_dict_1, ensure_ascii=False)
+            return "無官方解答。", []
+        if not ans_dict_1: return json.dumps(ans_dict_2, ensure_ascii=False), hit_pages
+        if not ans_dict_2: return json.dumps(ans_dict_1, ensure_ascii=False), hit_pages
         
         # 3. 在 Python 中進行精確的 Key-Value 比對，並在比對前統一空值、None、斜線與未作答標記為 "／"
         # 🚨 修正：不可將未辨識到的 Key 粗暴設為 "／"，這會導致沒讀到的題目全部被標為無效題
@@ -3166,7 +3126,7 @@ class ExamParser:
                 
         if not mismatched_keys:
             logging.info("🎉 [共識達成] 雙模型對位完全一致！答案卷數據 100% 信賴。")
-            return json.dumps(ans_dict_1, ensure_ascii=False)
+            return json.dumps(ans_dict_1, ensure_ascii=False), hit_pages
             
         logging.warning(f"⚠️ [共識衝突] 偵測到以下題號在雙模型解析中不一致: {mismatched_keys}")
         # 先在外面計算好子字典，再放入 f-string 輸出
@@ -3177,7 +3137,7 @@ class ExamParser:
         
         # 4. 啟動第三輪：終極仲裁
         resolved_dict = self._resolve_ocr_conflict(a_pdf, ans_dict_1, ans_dict_2, mismatched_keys)
-        return json.dumps(resolved_dict, ensure_ascii=False)
+        return json.dumps(resolved_dict, ensure_ascii=False), hit_pages
 
     def extract_text_from_pdf(self, pdf_path: Optional[str]) -> str:
         """提取文字 (用於讀取解答與評分標準)"""
@@ -3649,14 +3609,34 @@ class ExamParser:
 
         # 🆕 2. 只有在無快取時，才進入龐大的第一階段 PDF 轉圖與全套 OCR 掃描
         if not all_extracted_questions:
-            # 5. 一次性將原卷、解答、評分原則 PDF 轉換成高解析度整頁圖片
-            logging.info("📸 正在將原卷、解答、評分原則 PDF 轉換成黃金 300 DPI 整頁圖片...")
-            q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
-            a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300) 
-            rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
+            # 5. 判斷題目卷與解答卷是否為同一個 PDF（二合一試卷）
+            is_combined_pdf = (a_pdf is not None and os.path.abspath(q_pdf) == os.path.abspath(a_pdf))
+            
+            logging.info("📸 正在將原卷與解答 PDF 轉換成黃金 300 DPI 整頁圖片...")
+            if is_combined_pdf:
+                # 🚨 核心優化：同一檔案只轉一次圖片，命名為 page_xx.png，節省 50% 磁碟空間！
+                all_rendered_pages = self.pdf_to_images(q_pdf, "page", img_dir, dpi=300)
+                
+                # 執行解答 OCR 並獲取「真正包含答案的頁碼（0-indexed）」
+                ans_text, ans_page_indices = self.extract_clean_answers(a_pdf)
+                
+                if ans_page_indices:
+                    # 答案頁：僅包含命中答案表格的頁面（通常是最後 1~2 頁）
+                    a_image_paths = [all_rendered_pages[i] for i in ans_page_indices]
+                    # 題目頁：自動排除答案頁，僅保留純題目頁面（通常為前幾頁）
+                    q_image_paths = [all_rendered_pages[i] for i in range(len(all_rendered_pages)) if i not in ans_page_indices]
+                    logging.info(f"📑 [二合一試卷切分成功] 題目頁共 {len(q_image_paths)} 頁，答案頁鎖定為第 {[p+1 for p in ans_page_indices]} 頁！")
+                else:
+                    # 若為純題目卷（未掃描出答案），全數作為題目頁
+                    q_image_paths = all_rendered_pages
+                    a_image_paths = []
+            else:
+                q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
+                a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300)
+                ans_text, _ = self.extract_clean_answers(a_pdf)
+                ans_page_indices = []
 
-            # 6. 抓取全卷答案與手寫評分標準
-            ans_text = self.extract_clean_answers(a_pdf)
+            rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
             rubric_text = self.extract_text_from_pdf(rubric_pdf)
 
             doc = fitz.open(q_pdf)
@@ -3678,7 +3658,11 @@ class ExamParser:
             # =========================================================
             pages = []
             for page_num in range(len(doc)):
-                # 🚨 學校定期考（段考）絕對不跳過第一頁！只有大考在明確無題目時才跳過封面
+                # 🚨 若當前頁面已被 AI 辨識為「答案卷/解答頁」，絕對不排入題目掃描隊列！
+                if is_combined_pdf and page_num in ans_page_indices:
+                    logging.info(f"  -> ⏭️ [解答頁排除] 第 {page_num + 1} 頁為解答/評分表格頁，跳過試題擷取。")
+                    continue
+
                 if exam_type == "SCHOOL":
                     pages.append(page_num)
                     continue
