@@ -2948,7 +2948,7 @@ class ExamParser:
     # 請在 ExamParser 類別中，精確替換此方法（注意縮排為 8 個空格）：
     # 🚨 將解析答案卷的提示詞抽離為類別變數，以利多個模型共用，保持代碼簡潔
     
-    def _run_single_ocr(self, a_pdf: str, model: str) -> Tuple[dict, List[int]]:
+    def _run_single_ocr(self, a_pdf: str, model: str) -> tuple[dict, List[int]]:
         """為共識機制設計的單次獨立 OCR 執行器（自動標定答案實體頁碼，支援純圖片掃描檔）"""
         try:
             doc = fitz.open(a_pdf)
