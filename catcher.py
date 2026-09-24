@@ -2622,8 +2622,30 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 except Exception: pass
                 
     return os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0
+def is_strictly_valid_topic(topic_str: str) -> bool:
+    """知識點鋼鐵檢驗閘門：必須完全合規才准許寫入 subject.json"""
+    if not isinstance(topic_str, str): return False
+    t = topic_str.strip()
+    
+    # 1. 長度限制（排除單字碎屑與整段說明文字）
+    if len(t) < 4 or len(t) > 50: return False
+    
+    # 2. 排除換行符號、Markdown 標籤
+    if any(c in t for c in ["\n", "\r", "###", "```", "**", ">", "[", "]"]): return False
+    
+    # 3. 排除幽靈與無效詞彙
+    ghost_tokens = ["題目闕如", "無法判定", "placeholder", "內容缺失", "未包含", "無實質", "綜合主題", "待補充", "因題目"]
+    if any(gt in t for gt in ghost_tokens): return False
+    
+    # 4. 🚨 第一段必須且只能為「必修」或「選修」
+    parts = t.split("_")
+    if len(parts) < 3: return False # 至少要有 必修/選修_大單元_次單元
+    if parts[0] not in ["必修", "選修"]: return False
+    
+    return True
+
 def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
-    """動態比對 AI 新增的多維考點與解題技巧，即時更新並覆寫至 subject.json"""
+    """具備鋼鐵防禦閘門的動態知識庫更新器：杜絕一切單字碎屑、列表字串與非法前綴"""
     global SUBJECT_TAXONOMY
     with SUBJECT_FILE_LOCK:
         updated = False
@@ -2633,39 +2655,54 @@ def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
             SUBJECT_TAXONOMY[normalized_subject] = {"topics": [], "techniques": []}
             updated = True
             
-        # 1. 檢查並更新多個主題 (支援 topic_categories 列表與向下相容 topic_category)
-        topics_to_check = []
+        # 收集候選主題
+        candidate_topics = []
         if isinstance(solution_data.get("topic_categories"), list):
-            topics_to_check.extend(solution_data["topic_categories"])
+            candidate_topics.extend(solution_data["topic_categories"])
         if solution_data.get("topic_category"):
-            topics_to_check.append(solution_data["topic_category"])
+            candidate_topics.append(solution_data["topic_category"])
             
-        for t in topics_to_check:
-            if t and isinstance(t, str):
-                t_clean = s2t(t.strip())
-                if t_clean and t_clean not in SUBJECT_TAXONOMY[normalized_subject]["topics"]:
-                    SUBJECT_TAXONOMY[normalized_subject]["topics"].append(t_clean)
-                    logging.info(f"🆕 [動態考點] 已自動新增考點至 subject.json: {t_clean}")
-                    updated = True
+        for t in candidate_topics:
+            if not t: continue
+            clean_t = s2t(str(t).strip())
             
-        # 2. 檢查並更新解題技巧 (Technique)
-        new_techs = solution_data.get("techniques_used", [])
-        for tech in new_techs:
-            if tech:
-                tech = s2t(tech) # 🚨 確保轉為繁體
-                if tech not in SUBJECT_TAXONOMY[normalized_subject]["techniques"]:
-                    SUBJECT_TAXONOMY[normalized_subject]["techniques"].append(tech)
-                    logging.info(f"🆕 [動態技巧] 已自動新增解題技巧至 subject.json: {tech}")
-                    updated = True
+            # 生物前綴自動矯正
+            if clean_t.startswith("生物_"):
+                clean_t = "選修_" + clean_t[3:]
                 
-        # 3. 存回檔案前，進行一次全局規範化合併與去重
+            # 🚨 必須通過鋼鐵防禦檢驗
+            if is_strictly_valid_topic(clean_t):
+                if clean_t not in SUBJECT_TAXONOMY[normalized_subject]["topics"]:
+                    SUBJECT_TAXONOMY[normalized_subject]["topics"].append(clean_t)
+                    logging.info(f"🆕 [合規考點入庫] 已新增黃金考點至 subject.json: {clean_t}")
+                    updated = True
+
+        # 收集解題技巧 (嚴格型別檢查，杜絕字串迭代單字碎屑 Bug！)
+        raw_techs = solution_data.get("techniques_used", [])
+        if isinstance(raw_techs, str):
+            # 若 AI 誤傳單一字串，包裝成列表，絕對不可直接 for char 迭代！
+            raw_techs = [raw_techs]
+            
+        if isinstance(raw_techs, list):
+            for tech in raw_techs:
+                if not tech or not isinstance(tech, str): continue
+                clean_tech = s2t(str(tech).strip())
+                # 技巧同樣必須合規（長度 > 3，無換行，無幽靈詞）
+                if len(clean_tech) >= 4 and len(clean_tech) <= 60 and not any(c in clean_tech for c in ["\n", "\r", "闕如", "無法判定"]):
+                    if clean_tech not in SUBJECT_TAXONOMY[normalized_subject]["techniques"]:
+                        SUBJECT_TAXONOMY[normalized_subject]["techniques"].append(clean_tech)
+                        logging.info(f"🆕 [合規技巧入庫] 已新增解題技巧至 subject.json: {clean_tech}")
+                        updated = True
+
         if updated:
             try:
-                SUBJECT_TAXONOMY = normalize_and_merge_subject_taxonomy(SUBJECT_TAXONOMY)
+                # 寫回前進行排序去重
+                SUBJECT_TAXONOMY[normalized_subject]["topics"] = sorted(list(dict.fromkeys(SUBJECT_TAXONOMY[normalized_subject]["topics"])))
+                SUBJECT_TAXONOMY[normalized_subject]["techniques"] = sorted(list(dict.fromkeys(SUBJECT_TAXONOMY[normalized_subject]["techniques"])))
                 with open("subject.json", "w", encoding="utf-8") as f:
                     json.dump(SUBJECT_TAXONOMY, f, ensure_ascii=False, indent=4)
             except Exception as e:
-                logging.error(f"無法寫入更新的 subject.json: {e}")
+                logging.error(f"寫入 subject.json 失敗: {e}")
 
 def safe_filename(name: str) -> str:
     """過濾掉 Windows 檔案系統不允許的特殊字元，確保存檔安全"""
@@ -3401,28 +3438,41 @@ class ExamParser:
         raw_extracted_json_path = json_path.replace("_database.json", "_raw_extracted.json") # 🆕 第一階段題目快取檔路徑
         validation_log_path = json_path.replace("_database.json", "_validator_log.txt") # 🚨 全域頂層初始化，保證快取命中時 100% 可存取
         
-        if os.path.exists(json_path):
-            try:
-                with open(json_path, "r", encoding="utf-8") as f:
-                    existing_data = json.load(f)
-                
-                # 1. 繁簡轉換檢查
-                existing_data = s2t_recursive(existing_data)
-                
-                # 2. 🚨 核心品質巡檢：檢查現有 Database 是否包含「超時失敗」或「無效詳解」
-                has_corrupted_solution = False
-                valid_items = []
-                
-                for q_item in existing_data:
-                    sol_text = str(q_item.get("detailed_solution", ""))
-                    if is_valid_solution(sol_text):
-                        valid_items.append(q_item)
-                    else:
-                        has_corrupted_solution = True
-                        logging.warning(f"🔍 [發現殘損題目] {json_path} 中的題號 {q_item.get('question_number')} 詳解為超時或無效狀態！")
-
-                # 若所有題目都是高品質解答，檢查是否有「詳解有引用但實體圖片丟失」的情況
-                if not has_corrupted_solution and len(valid_items) == len(existing_data):
+        # 🚨 [狀態機嚴格巡檢]：融合檢查 database 與 partial，杜絕「早產假死 (只有1~2題即跳過)」
+        db_exists = os.path.exists(json_path)
+        partial_exists = os.path.exists(partial_json_path)
+        
+        if db_exists or partial_exists:
+            merged_checkpoint_map = {}
+            for fp in [json_path, partial_json_path]:
+                if os.path.exists(fp):
+                    try:
+                        with open(fp, "r", encoding="utf-8") as jf:
+                            for item in json.load(jf):
+                                if is_valid_solution(item.get("detailed_solution")):
+                                    k = (str(item.get("question_number")), str(item.get("question_type")))
+                                    if k not in merged_checkpoint_map or len(str(item.get("detailed_solution"))) > len(str(merged_checkpoint_map[k].get("detailed_solution"))):
+                                        merged_checkpoint_map[k] = item
+                    except Exception: pass
+                    
+            merged_checkpoint_list = list(merged_checkpoint_map.values())
+            min_expected_q = 8 if any(k in subject for k in ["數", "math"]) else 15
+            
+            # 只有在已生成 database 且題目數量達到正常合理門檻時，才允許安全跳過！
+            if db_exists and len(merged_checkpoint_list) >= min_expected_q:
+                logging.info(f"⏭️  {json_path} 已存在且題數完整 ({len(merged_checkpoint_list)} 題)，自動跳過。")
+                if partial_exists:
+                    try: os.remove(partial_json_path)
+                    except Exception: pass
+                return
+            else:
+                # 題數不足（如只有1~2題）！判定為未完工殘卷，強制刪除假完成 database，將成果轉入 partial 接力！
+                logging.warning(f"⚠️ [未完工校正] 發現 {json_path} 題數異常殘缺 (僅 {len(merged_checkpoint_list)} 題)，強制降級為 partial 觸發接力補跑！")
+                with open(partial_json_path, "w", encoding="utf-8") as pf:
+                    json.dump(merged_checkpoint_list, pf, ensure_ascii=False, indent=4)
+                if db_exists:
+                    try: os.remove(json_path)
+                    except Exception: pass
                     # 🔍 啟動圖片完整性巡檢 (Diagram Integrity Check)
                     missing_diagram_count = 0
                     base_dir = os.path.dirname(json_path)
@@ -3794,6 +3844,12 @@ class ExamParser:
                        - 這類微小的上標橫線極易被低解析度 OCR 遺漏並誤讀為普通小數（如 $1.5$）。
                        - 請你**仔細盯住原卷圖片上的每一個小數點與數字上方**！若看到數字上方有任何橫線、波浪號或圓點，**必須且強制**將其識別為標準 LaTeX 的循環小數格式，例如 `$1.\\bar{{5}}$`、`$7.\\bar{{7}}$` 或 `$1.\\dot{{5}}$`。
                        - 絕對禁止遺漏這些符號並將其簡化為普通小數，這會導致整道題目的數論邏輯與選項對照徹底崩潰！
+                    10-3. **🚨【對數 log 底數與真數防看錯剛性規則（極度重要）】🚨**：
+                       - 數學中的對數符號 $\log_a b$，「底數 $a$」是較小且靠下方的下標，而「真數 $b$」是正常大小的主字體！
+                       - 例如：$\log_2 3$（底數為 2，真數為 3）、$\log_3 2$（底數為 3，真數為 2）、$\log_4 6$（底數為 4，真數為 6）。
+                       - **【禁止看反】**：絕對嚴禁將底數與真數看反（例如不可將 $\log_2 3$ 誤讀為 $\log_3 2$）！
+                       - **【禁止將底數誤認為倍數】**：絕對嚴禁將下標 $2$ 看成前面的乘數（例如不可把 $\log_2 3$ 誤寫為 $2\log 3$）！
+                       - 若有數位文字層對照，請強制比對文字層中緊跟在 `log` 後面的小數字，確保 LaTeX 語法一律寫成 `\log_{a} b`！
                     11. **【防錯位與防遺漏警告】**：大考的題目偶爾會分欄排版。請務必遵循正常的閱讀順序（先左後右，先上後下）完整提取 `question_text`。若題目包含附表，請確保 Markdown Table 欄位數與原圖完全一致，絕不可漏掉任何一行數據！
                     12. **【防選項合併】**：請確保 `options` 欄位中，每個選項是獨立的物件，絕對不可以把選項 A 和選項 B 融合成一個選項輸出。
                     13. **頁碼追蹤（極度重要）**：你必須在 `page_number` 欄位中，填入該題目在原卷 PDF 中的真實頁碼（從 1 開始計數）。這對於裁切考題附圖與表格至關重要。
@@ -3918,17 +3974,40 @@ class ExamParser:
                         return inter_area / union_area if union_area > 0 else 0.0
 
                     for q_data in result_dict_1.get('questions', []):
-                        try:
-                            parsed_page = int(q_data.get('page_number', 1))
-                            target_page_idx = max(0, min(parsed_page - 1, len(doc) - 1))
+                        # 🚨 實體文字錨點校準：以題幹關鍵字搜尋真實所屬頁碼，杜絕 AI 報錯頁碼導致裁圖錯位
+                        q_text_sample = re.sub(r'[^\w\u4e00-\u9fa5]', '', q_data.get('question_text', ''))[:20]
+                        q_num_tag = str(q_data.get('question_number', '')).strip()
+                        
+                        real_page_idx = -1
+                        # 優先在當前批次的頁面中搜尋文字錨點
+                        for p_cand in batch_pages:
+                            p_raw = doc[p_cand].get_text("text")
+                            p_clean = re.sub(r'[^\w\u4e00-\u9fa5]', '', p_raw)
+                            if q_text_sample and q_text_sample in p_clean:
+                                real_page_idx = p_cand
+                                break
+                            # 若題幹過短，比對題號特徵（如行首題號）
+                            if re.search(rf'(?:^|\n)\s*(?:第\s*{q_num_tag}\s*題|{q_num_tag}\s*[.．、\s)]|\({q_num_tag}\))', p_raw):
+                                real_page_idx = p_cand
+                                break
+                                
+                        if real_page_idx != -1:
+                            target_page_idx = real_page_idx
                             q_data['page_number'] = target_page_idx + 1
-                        except Exception:
-                            target_page_idx = batch_pages[0]
+                        else:
+                            # 保底：若搜尋不到（如純圖片掃描檔），限制在當前批次範圍內
+                            try:
+                                parsed_page = int(q_data.get('page_number', 1))
+                                if (parsed_page - 1) in batch_pages:
+                                    target_page_idx = parsed_page - 1
+                                else:
+                                    target_page_idx = batch_pages[0]
+                            except Exception:
+                                target_page_idx = batch_pages[0]
                             q_data['page_number'] = target_page_idx + 1
 
                         page = doc[target_page_idx]
                         full_page_filepath = q_image_paths[target_page_idx]
-
                         q_data['full_page_image_path'] = full_page_filepath.replace("\\", "/")
                         q_data['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
                         q_data['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
