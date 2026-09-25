@@ -59,7 +59,7 @@ def clean_latex_corruptions(text: str) -> str:
 # 2. 知識點鋼鐵淨化器
 # -------------------------------------------------------------------------
 def sanitize_knowledge_point(cat_str: str) -> str:
-    cat_str = str(cat_str).strip()
+    cat_str = re.sub(r'^[\[\"\'\s]+|[\]\"\'\s]+$', '', str(cat_str)).strip()
     if any(gk in cat_str for gk in PURGE_TOPIC_KEYWORDS):
         return "必修_綜合主題_核心概念應用"
         
