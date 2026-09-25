@@ -3443,50 +3443,37 @@ class ExamParser:
         partial_exists = os.path.exists(partial_json_path)
         
         if db_exists or partial_exists:
-            merged_checkpoint_map = {}
-            for fp in [json_path, partial_json_path]:
-                if os.path.exists(fp):
-                    try:
-                        with open(fp, "r", encoding="utf-8") as jf:
-                            for item in json.load(jf):
-                                if is_valid_solution(item.get("detailed_solution")):
-                                    k = (str(item.get("question_number")), str(item.get("question_type")))
-                                    if k not in merged_checkpoint_map or len(str(item.get("detailed_solution"))) > len(str(merged_checkpoint_map[k].get("detailed_solution"))):
-                                        merged_checkpoint_map[k] = item
-                    except Exception: pass
-                    
-            merged_checkpoint_list = list(merged_checkpoint_map.values())
-            min_expected_q = 8 if any(k in subject for k in ["數", "math"]) else 15
-            
-            # 只有在已生成 database 且題目數量達到正常合理門檻時，才允許安全跳過！
-            if db_exists and len(merged_checkpoint_list) >= min_expected_q:
-                logging.info(f"⏭️  {json_path} 已存在且題數完整 ({len(merged_checkpoint_list)} 題)，自動跳過。")
-                if partial_exists:
-                    try: os.remove(partial_json_path)
-                    except Exception: pass
-                return
-            else:
-                # 題數不足（如只有1~2題）！判定為未完工殘卷，強制刪除假完成 database，將成果轉入 partial 接力！
-                logging.warning(f"⚠️ [未完工校正] 發現 {json_path} 題數異常殘缺 (僅 {len(merged_checkpoint_list)} 題)，強制降級為 partial 觸發接力補跑！")
-                with open(partial_json_path, "w", encoding="utf-8") as pf:
-                    json.dump(merged_checkpoint_list, pf, ensure_ascii=False, indent=4)
-                if db_exists:
-                    try: os.remove(json_path)
-                    except Exception: pass
+            try:
+                merged_checkpoint_map = {}
+                for fp in [json_path, partial_json_path]:
+                    if os.path.exists(fp):
+                        try:
+                            with open(fp, "r", encoding="utf-8") as jf:
+                                for item in json.load(jf):
+                                    if is_valid_solution(item.get("detailed_solution")):
+                                        k = (str(item.get("question_number")), str(item.get("question_type")))
+                                        if k not in merged_checkpoint_map or len(str(item.get("detailed_solution"))) > len(str(merged_checkpoint_map[k].get("detailed_solution"))):
+                                            merged_checkpoint_map[k] = item
+                        except Exception:
+                            pass
+                        
+                merged_checkpoint_list = list(merged_checkpoint_map.values())
+                min_expected_q = 8 if any(k in subject for k in ["數", "math"]) else 15
+                
+                # 只有在已生成 database 且題目數量達到正常合理門檻時，才進行圖形巡檢並安全跳過！
+                if db_exists and len(merged_checkpoint_list) >= min_expected_q:
                     # 🔍 啟動圖片完整性巡檢 (Diagram Integrity Check)
                     missing_diagram_count = 0
                     base_dir = os.path.dirname(json_path)
                     
-                    for q_item in existing_data:
+                    for q_item in merged_checkpoint_list:
                         detailed_text = str(q_item.get("detailed_solution", ""))
                         safe_q_num = safe_filename(str(q_item.get('question_number', 'X')).replace(" ", ""))
                         
-                        # 🚨 剛性約束：僅匹配檔名以 diagram_ 開頭的圖片，排除所有題目原卷裁切圖
+                        # 剛性約束：僅匹配檔名以 diagram_ 開頭的圖片
                         img_matches = re.findall(r'!\[.*?\]\((?:\./)?((?:images/|images\\)?[^)]*?diagram_[^)]+?\.png)\)', detailed_text, re.IGNORECASE)
                         for raw_img_path in img_matches:
                             file_name = os.path.basename(raw_img_path)
-                            
-                            # 1. 安全防護：非 diagram_ 開頭的圖片直接跳過
                             if not file_name.startswith("diagram_"):
                                 continue
                                 
@@ -3495,13 +3482,10 @@ class ExamParser:
                                 clean_rel_path = f"images/{spec_name}/{file_name}"
                             
                             full_img_path = os.path.abspath(os.path.join(base_dir, clean_rel_path)).replace("\\", "/")
-                            
-                            # 2. 標記檔案路徑
                             done_marker = f"{full_img_path}.done"
                             fail_marker = f"{full_img_path}.failed"
                             force_refresh = os.environ.get("REFRESH_DIAGRAMS", "false").lower() == "true"
 
-                            # 🚨 狀態清理：只要實體 .png 存在且大於 0 byte，代表已經成功，強制刪除殘留的 .failed 標記！
                             if os.path.exists(full_img_path) and os.path.getsize(full_img_path) > 0:
                                 if os.path.exists(fail_marker):
                                     try: os.remove(fail_marker)
@@ -3512,19 +3496,16 @@ class ExamParser:
                                             f_mk.write("done\n")
                                     except Exception: pass
                                 if not force_refresh:
-                                    continue  # 圖片已存在且完美，直接秒級跳過！
+                                    continue
 
-                            # 🚨 若開啟強制重繪，自動清理所有舊標記
                             if force_refresh and os.path.exists(fail_marker):
                                 try: os.remove(fail_marker)
                                 except Exception: pass
 
                             needs_draw = False
                             if force_refresh:
-                                # 強制重繪模式
                                 needs_draw = True
                             else:
-                                # 一般模式：實體檔案不存在或大小為 0 均執行補繪
                                 if not os.path.exists(full_img_path) or os.path.getsize(full_img_path) == 0:
                                     needs_draw = True
 
@@ -3561,39 +3542,36 @@ class ExamParser:
                                 
                                 if draw_success:
                                     missing_diagram_count += 1
-                                    # 🚨 成功後建立 .done 標記，並立即刪除 .failed 標記！
                                     if os.path.exists(fail_marker):
                                         try: os.remove(fail_marker)
                                         except Exception: pass
                                     try:
                                         with open(done_marker, "w", encoding="utf-8") as f_mk:
                                             f_mk.write(f"done_at: {time.time()}\n")
-                                    except Exception:
-                                        pass
+                                    except Exception: pass
                                 else:
-                                    # 若繪製失敗，建立 failed 標記
                                     try:
                                         with open(fail_marker, "w", encoding="utf-8") as f_mk:
                                             f_mk.write(f"failed_at: {time.time()}\n")
-                                    except Exception:
-                                        pass
+                                    except Exception: pass
                                     
                     if missing_diagram_count > 0:
                         logging.info(f"🎉 [補繪完成] 已成功為 {spec_name} 補齊了 {missing_diagram_count} 張遺失的圖表！")
 
-                    logging.info(f"⏭️  {json_path} 已存在且題意與圖表 100% 完整，自動跳過。")
+                    logging.info(f"⏭️  {json_path} 已存在且題數完整 ({len(merged_checkpoint_list)} 題)，自動跳過。")
+                    if partial_exists:
+                        try: os.remove(partial_json_path)
+                        except Exception: pass
                     return
                 else:
-                    # 發現有瑕疵/超時題目！自動降級為 partial 暫存檔，並刪除無效的 database.json 觸發重新修復
-                    logging.warning(f"⚠️ [觸發自動修復重算] {json_path} 發現含有未完成或超時的題目，自動降級為 partial 檔案並重新解題！")
-                    with open(partial_json_path, "w", encoding="utf-8") as f_part:
-                        json.dump(valid_items, f_part, ensure_ascii=False, indent=4)
-                    
-                    try:
-                        os.remove(json_path)
-                    except Exception:
-                        pass
-                        
+                    # 題數不足（如只有1~2題）！判定為未完工殘卷，強制刪除假完成 database，將成果轉入 partial 接力！
+                    logging.warning(f"⚠️ [未完工校正] 發現 {json_path} 題數異常殘缺 (僅 {len(merged_checkpoint_list)} 題)，強制降級為 partial 觸發接力補跑！")
+                    with open(partial_json_path, "w", encoding="utf-8") as pf:
+                        json.dump(merged_checkpoint_list, pf, ensure_ascii=False, indent=4)
+                    if db_exists:
+                        try: os.remove(json_path)
+                        except Exception: pass
+
             except Exception as e:
                 logging.error(f"讀取現有資料庫 {json_path} 進行品質巡檢失敗: {e}")
             
