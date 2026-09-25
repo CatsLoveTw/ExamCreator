@@ -2625,7 +2625,7 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
 def is_strictly_valid_topic(topic_str: str) -> bool:
     """知識點鋼鐵檢驗閘門：必須完全合規才准許寫入 subject.json"""
     if not isinstance(topic_str, str): return False
-    t = topic_str.strip()
+    t = re.sub(r'^[\[\"\'\s]+|[\]\"\'\s]+$', '', str(topic_str)).strip()
     
     # 1. 長度限制（排除單字碎屑與整段說明文字）
     if len(t) < 4 or len(t) > 50: return False
@@ -4163,29 +4163,40 @@ class ExamParser:
                     "本題於原試卷中不存在", "全卷掃描漏失", "無完整題目文本", 
                     "題目文字未在影像中提供", "此頁面為試卷封面", "本頁為「大學入學考試中心",
                     "作答注意事項", "無實質試題文字", "本題不存在", "題目內容缺失", 
-                    "題目闕如", "無法判定", "未包含第"
+                    "題目闕如", "無法判定", "未包含第", "題目內容未提供", "無法從提供的影像中",
+                    "漏掉之第", "選項內容未提供", "請補充"
                 ]
+                dummy_opt_values = {"選項A", "選項B", "選項C", "選項D", "選項E", "A", "B", "C", "D", "E", "選項A說明", "選項B說明", "選項C說明", "選項D說明", "(選項內容未提供)"}
+
                 for q in q_list:
                     q_text = str(q.get("question_text", "")).strip()
                     ans_text = str(q.get("answer", "")).strip()
                     cat_text = str(q.get("topic_category", "")).strip()
                     ana_text = str(q.get("question_analysis", "")).strip()
+                    opts = q.get("options", [])
                     
                     combined_text = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
                     
-                    # 1. 題幹為空或長度過短且無附圖
-                    if len(q_text) < 5 and not q.get("has_image"):
-                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 題幹過短且無附圖，已自動剔除。")
-                        continue
-                    # 2. 全欄位雷達掃描命中幽靈佔位字樣
+                    # 1. 命中任何佔位關鍵字
                     if any(gk in combined_text for gk in ghost_keywords):
-                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 命中封面/無效題目特徵，已自動剔除。")
-                        continue
-                    # 3. 答案為斜線且題幹極短 (如只寫 "第18題")
-                    if ans_text in ["/", "／"] and len(q_text) < 15 and not q.get("has_image"):
-                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 疑似佔位符，已自動剔除。")
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 命中佔位特徵，已剔除。")
                         continue
                         
+                    # 2. 題幹只是單純題號重複 (如:「九十六學年度指定科目考試物理考科第40題」或「第51題」)
+                    if re.match(r'^(?:[一二三四五六七八九十\d]+學年度)?(?:[^\n]{2,15}考科)?第?\s*\d+\s*題$', q_text):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 題幹僅為純題號標題，已剔除。")
+                        continue
+
+                    # 3. 選項全為虛擬假選項 (選項A, 選項B...)
+                    if opts and all(str(opt.get("value", "")).strip() in dummy_opt_values for opt in opts):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 所有選項均為佔位符 (選項A/B/C/D)，已剔除。")
+                        continue
+                        
+                    # 4. 題幹為空或長度小於 6 且無圖
+                    if len(q_text) < 6 and not q.get("has_image"):
+                        logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 題幹過短且無附圖，已剔除。")
+                        continue
+
                     valid_q.append(q)
                 return valid_q
 
@@ -4271,19 +4282,14 @@ class ExamParser:
                     return ""
 
                 gaps = []
-                max_reasonable_q = 25 if "數" in subject else 60
                 
-                # 🚀 引擎一：基於官方解答的對位補漏 (Official Answer Map)
+                # 🚀 引擎一：僅以「官方解答明確存在的題號」進行補漏
                 for num in expected_q_nums:
                     base_num = get_base_q_num(num)
-                    # 如果題號是純數字且超出本科合理題數，絕不納入補漏清單！
-                    if base_num.isdigit() and int(base_num) > max_reasonable_q:
-                        continue
                     if not is_question_covered(base_num, all_extracted_questions):
                         if base_num not in gaps: gaps.append(base_num)
 
-                # 🚀 引擎二：基於題號連續性的智慧推斷補漏 (Sequence Inference)
-                # 專門對付「無官方解答」的學校段考，或者官方解答漏讀的情況
+                # 🚀 引擎二：題號連續性補漏（不設死題數上限，但範圍嚴格限制在當前已抓到的最小～最大題號之間）
                 num_list = []
                 letter_list = []
                 for q_ext in all_extracted_questions:
@@ -4294,14 +4300,13 @@ class ExamParser:
                     elif len(b_num) == 1 and b_num.upper() in "ABCDEFGHJKLMNOPQRSTUVWXYZ":
                         letter_list.append(b_num.upper())
                 
-                # 檢查數字連續性 (如 1, 2, 4 -> 漏了 3)
                 if num_list:
                     min_n, max_n = min(num_list), max(num_list)
-                    if max_n <= max_reasonable_q:
-                        for n in range(min_n, max_n + 1):
-                            n_str = str(n)
-                            if n_str not in gaps and not is_question_covered(n_str, all_extracted_questions):
-                                gaps.append(n_str)
+                    # 僅補齊中間斷號（例如有 1~24 題，漏了 3 題才補；絕不往上擴張猜測第 25~60 題）
+                    for n in range(min_n, max_n + 1):
+                        n_str = str(n)
+                        if n_str not in gaps and not is_question_covered(n_str, all_extracted_questions):
+                            gaps.append(n_str)
                                 
                 # 檢查字母連續性 (如 A, B, D -> 漏了 C)
                 if letter_list:
@@ -4378,6 +4383,12 @@ class ExamParser:
                                         if new_q.get('has_image') and new_q.get('image_bboxes'):
                                             new_q['image_paths'] = self.execute_crop(gap_page, new_q['image_bboxes'], img_dir, f"Q{gap_num}_Gap")
                                         
+                                        # 🚨 補漏安全防禦：檢視是否為 AI 捏造的佔位題，是則拒收！
+                                        test_list = filter_ghost_questions([new_q])
+                                        if not test_list:
+                                            logging.warning(f"⚠️ [捏造攔截] 題號 {gap_num} AI 回傳佔位假題或捏造內容，已被拒絕收錄！")
+                                            continue
+
                                         new_q['_cropped_pil_images'] = [Image.open(p) for p in new_q['image_paths'] if os.path.exists(p)]
                                         all_extracted_questions.append(new_q)
                                         logging.info(f"🎯 [補漏成功] 已成功補回第 {gap_num} 題，並完成影像高精裁切與 PIL 緩衝。")
