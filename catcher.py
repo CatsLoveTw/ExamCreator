@@ -2912,7 +2912,9 @@ class ExamParser:
                         continue
                         
                     # 主線程安全裁切
-                    new_imgs = self.execute_crop(page, bboxes, img_dir, f"Rubric_{q_num}_p{page_num}")
+                    # 主線程安全裁切（過濾 N/A 等非法斜線路徑字元）
+                    safe_q = safe_filename(str(q_num)).replace(" ", "")
+                    new_imgs = self.execute_crop(page, bboxes, img_dir, f"Rubric_{safe_q}_p{page_num}")
                     
                     if q_num in rubric_data_map:
                         rubric_data_map[q_num]["text"] += "\n(續前頁)\n" + criteria_text
@@ -3119,14 +3121,14 @@ class ExamParser:
                 
         return merged_dict
 
-    def extract_clean_answers(self, a_pdf: Optional[str]) -> str:
+    def extract_clean_answers(self, a_pdf: Optional[str]):
         """
         [方案 3]：雙重答案卷 OCR 投票機制 (Consensus Voting)
         使用兩個不同的模型分別獨立解析答案，並在 Python 中比對。
         若發現不一致，由第 3 個模型進行裁決，確保 100% 精確度。
         """
         if not a_pdf or not os.path.exists(a_pdf):
-            return "無官方解答。"
+            return "無官方解答。", []
 
         logging.info(f"🧠 [共識投票] 啟動解答卷雙模型雙重驗證: {os.path.basename(a_pdf)}")
         
@@ -3829,7 +3831,7 @@ class ExamParser:
                        - 例如：$\log_2 3$（底數為 2，真數為 3）、$\log_3 2$（底數為 3，真數為 2）、$\log_4 6$（底數為 4，真數為 6）。
                        - **【禁止看反】**：絕對嚴禁將底數與真數看反（例如不可將 $\log_2 3$ 誤讀為 $\log_3 2$）！
                        - **【禁止將底數誤認為倍數】**：絕對嚴禁將下標 $2$ 看成前面的乘數（例如不可把 $\log_2 3$ 誤寫為 $2\log 3$）！
-                       - 若有數位文字層對照，請強制比對文字層中緊跟在 `log` 後面的小數字，確保 LaTeX 語法一律寫成 `\log_{a} b`！
+                       - 若有數位文字層對照，請強制比對文字層中緊跟在 `log` 後面的小數字，確保 LaTeX 語法一律寫成 `\\log_{{a}} b`！
                     11. **【防錯位與防遺漏警告】**：大考的題目偶爾會分欄排版。請務必遵循正常的閱讀順序（先左後右，先上後下）完整提取 `question_text`。若題目包含附表，請確保 Markdown Table 欄位數與原圖完全一致，絕不可漏掉任何一行數據！
                     12. **【防選項合併】**：請確保 `options` 欄位中，每個選項是獨立的物件，絕對不可以把選項 A 和選項 B 融合成一個選項輸出。
                     13. **頁碼追蹤（極度重要）**：你必須在 `page_number` 欄位中，填入該題目在原卷 PDF 中的真實頁碼（從 1 開始計數）。這對於裁切考題附圖與表格至關重要。
