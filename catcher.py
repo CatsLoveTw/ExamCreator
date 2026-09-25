@@ -861,7 +861,9 @@ PROMPT_STAGE_3_VALIDATOR = """
 1. **無中生有**：AI 沒有去解題目的「共同資訊」或方程式，自己憑空捏造數字。
 2. **邏輯斷層硬湊**：AI 算到一半算不出結果，突然神來一筆。
 3. **知識性錯誤與計算失誤**：AI 的代數推導、英文文法、化學結構有明顯硬傷。
-4. **自動圖解邏輯核對（若有）**：若詳解末端附帶了自動生成的幾何圖解（Markdown 圖片連結），請檢視其推導文字與座標邏輯是否符合前述的代數運算，若產生嚴重矛盾，請指出並退回。
+4. **自動圖解與題目附圖吻合度審查（極重要）**：
+   - 仔細比對傳入的題目裁切附圖與題目文字！
+   - 🚨【圖文張冠李戴即刻退件】：如果題幹提到的是「等電位線、圖 9」，但裁切附圖中出現的卻是「腳踏車、煞車片、圖 7」等完全不相干的圖片，**【必須】判定 is_valid = false**，並將 suspects_ocr_error 設為 true，在 error_critique 中註明：「題目附圖錯誤（題幹為等電位線圖9，附圖卻抓成腳踏車煞車片圖7），要求重新框選並重掃描！」
 5. **放寬結論句限制**：若 AI 的『過程分析』已經 100% 正確，僅僅是最後沒有總結字眼，請判定為 is_valid = true。
 🚨 6. **持續重掃描判定（連續報警）**：若你發現雖然上一輪重掃描更新了數據，但詳解中依然存在嚴重的化學式/數學結構矛盾（這代表上一次重掃描依然沒有看清楚、或者重掃描也看錯了），你【必須繼續將 suspects_ocr_error 設為 true】！引導系統進行更精確的二次或三次重掃描比對，絕對不要輕易放棄！
 """
@@ -3848,8 +3850,10 @@ class ExamParser:
                     - 此時，個別選項的 `has_image` 設為 false，其文字內容填寫「【請參見題幹附圖中的選項內容】」。
                     3. **表格與圖表標籤**：必須包含「圖15」或「表7」等標籤。
                     4. **表格邊界**：框選表格時請多留 50 個單位的空白邊緣，嚴禁切到表格的框線或標題。
-                    5. **題號對位**：確保 `question_number` 欄位與你框選的 `image_bboxes` 屬於同一個邏輯區塊。絕對禁止將第 15 題的文字配上第 16 題的圖。
-
+                    5. 題號與圖號絕對對位（極度重要）：
+                       - 確保 question_number 與框選的 image_bboxes 嚴格屬於同一個題目！
+                       - 🚨【圖號交叉檢驗】：若題目文字提到「如圖 9 所示」或「圖 9 中有...」，你所框選的圖片 Bounding Box 內部【必須包含圖 9 的標籤或圖像】，絕對嚴禁把同頁或相鄰題目的「圖 7」、「圖 8」框進來！若本頁根本找不到該題提到的圖（例如該圖在上一頁或引言），請留空 []，由題組背景處理，嚴禁張冠李戴！
+                    
 
                     【二、題組與附圖剛性規則】
                     1. **題組共同題幹處理**：若本頁有「X-Y 為題組」（如閱讀測驗文章、實驗情境敘述），請務必將「共同引言/文章/數據表」**只填入 `shared_context` 欄位中**。`question_text` 絕對保持乾淨，只保留該單一子題的問句！
@@ -4545,10 +4549,11 @@ class ExamParser:
                 matched_sc = None
                 for existing_sc in group_pools.keys():
                     prev_questions = group_pools[existing_sc]["questions"]
-                    is_nearby = (i - prev_questions[-1]["index"] <= 4)
+                    is_adjacent = (i - prev_questions[-1]["index"] <= 2) # 收緊至緊鄰的 2 題以內
                     similarity = get_context_similarity(sc, existing_sc)
                     
-                    if similarity >= 0.92 or (is_nearby and len(sc) > 100 and len(existing_sc) > 100):
+                    # 🚨 只有當引言相似度高達 95% 以上，且確為緊鄰子題時才合併，嚴禁跨題組盲目擴散
+                    if similarity >= 0.95 and is_adjacent:
                         matched_sc = existing_sc
                         break
                             
@@ -5181,11 +5186,21 @@ class ExamParser:
                     
                     validator_batch_prompt = llama_cot_instruction + PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
                     
-                    # 🚀 Stage 3 審查模型亦交錯輪替，與解題模型錯開
+                    # 🚨 審查必須帶上本批次所有裁切圖片，徹底杜絕「文字盲審」！
+                    validator_contents = [validator_batch_prompt]
+                    for item in valid_batch:
+                        q_d = item["q_data"]
+                        for img_p in q_d.get('image_paths', []):
+                            if os.path.exists(img_p):
+                                try:
+                                    validator_contents.append(Image.open(img_p))
+                                except Exception:
+                                    pass
+                    
                     dynamic_val_model = tier1_pool[(q_num_int + 1) % len(tier1_pool)]
 
                     val_dict, val_err = self.ai_manager.generate_with_retry(
-                        contents=[validator_batch_prompt], 
+                        contents=validator_contents, 
                         response_schema=SolutionValidatorBatch,
                         temperature=0.0, 
                         preferred_model=dynamic_val_model, 
