@@ -59,25 +59,36 @@ def clean_latex_corruptions(text: str) -> str:
 # 2. 知識點鋼鐵淨化器
 # -------------------------------------------------------------------------
 def sanitize_knowledge_point(cat_str: str) -> str:
-    cat_str = re.sub(r'^[\[\"\'\s]+|[\]\"\'\s]+$', '', str(cat_str)).strip()
-    if any(gk in cat_str for gk in PURGE_TOPIC_KEYWORDS):
+    if not isinstance(cat_str, str):
+        return "必修_綜合主題_核心概念"
+        
+    # 1. 徹底剝除開頭與結尾殘留的 ['、["、']、"]、引號、斜線等符號
+    cat_str = re.sub(r'^[\[\]\'\"\s\\]+|[\[\]\'\"\s\\]+$', '', cat_str).strip()
+    
+    # 2. 徹底消除內部殘留的 ['必修、["必修 等重複污染 (例如：必修_['必修 -> 必修)
+    cat_str = re.sub(r'^[\[\]\'\"]*(?:必修|選修)[_/\\]+[\[\]\'\"]*(必修|選修)', r'\1', cat_str)
+    cat_str = re.sub(r'[_/\\]+[\[\]\'\"]*(?:必修|選修)[_/\\]+', '_', cat_str)
+    cat_str = re.sub(r'[\[\]\'\"]+', '', cat_str) # 清除所有內部殘留括號引號
+
+    if any(gk in cat_str for gk in PURGE_TOPIC_KEYWORDS) or "考試作答規範" in cat_str or "讀卡格式" in cat_str:
         return "必修_綜合主題_核心概念應用"
         
     if cat_str.startswith("生物_"):
         cat_str = "選修_" + cat_str[3:]
         
-    parts = cat_str.split("_")
-    if len(parts) >= 2 and parts[0] not in ["必修", "選修"]:
-        if any(kw in cat_str for kw in ["細胞", "遺傳", "演化", "生態", "植物", "動物", "生理"]):
-            cat_str = "必修_" + "_".join(parts[1:])
-        elif any(kw in cat_str for kw in ["多項式", "微積分", "機率", "向量", "矩陣", "曲線", "三角"]):
-            cat_str = "必修_" + "_".join(parts[1:])
-        else:
-            cat_str = "必修_" + "_".join(parts)
-    elif len(parts) < 2:
-        cat_str = "必修_綜合主題_核心概念"
+    parts = [p.strip() for p in cat_str.split("_") if p.strip()]
+    
+    # 3. 確保第一段必須且只能是「必修」或「選修」
+    if not parts:
+        return "必修_綜合主題_核心概念"
         
-    return cat_str
+    if parts[0] in ["必修", "選修"]:
+        if len(parts) >= 2:
+            return "_".join(parts)
+        return f"{parts[0]}_綜合主題_核心概念"
+    else:
+        # 第一段不是必修或選修，根據領域補上正規前綴，絕不產生重複層級
+        return "必修_" + "_".join(parts)
 
 def sanitize_subject_json():
     """自動清理並規範化 subject.json，杜絕單字碎屑"""
@@ -161,11 +172,46 @@ def is_valid_question(q: dict) -> bool:
     ans_text = str(q.get("answer", "")).strip()
     cat_text = str(q.get("topic_category", "")) + " " + " ".join(q.get("topic_categories", []))
     ana_text = str(q.get("question_analysis", ""))
+    opts = q.get("options", [])
     
-    if len(q_text) < 5 and not q.get("has_image"): return False
     combined = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
-    if any(gk in combined for gk in GHOST_KEYWORDS_EXTENDED): return False
-    if ans_text in ["/", "／"] and len(q_text) < 15 and not q.get("has_image"): return False
+    
+    # 1. 攔截作答規範、說明頁、讀卡範例（精準對應截圖一）
+    instruction_keywords = [
+        "作答示例", "作答注意事項", "劃記方式之說明", "作答說明", "答案卡第", 
+        "考試作答規範", "讀卡格式與欄位", "選填題電子讀卡", "例：若第", "答題卷劃記",
+        "本試題共", "作答範例", "範例題"
+    ]
+    if any(ik in combined for ik in instruction_keywords):
+        return False
+
+    # 2. 攔截所有幽靈與未提供題（精準對應截圖三）
+    ghost_patterns = [
+        "題目內容未提供", "題目文字未在影像中提供", "選項內容未提供", "無完整題目文本",
+        "本題於原試卷中不存在", "無法從提供的影像中識別出", "本題為全卷掃描中漏掉之",
+        "題目內容缺失", "題目闕如", "無法判定", "未包含第", "請補充"
+    ]
+    if any(gp in combined for gp in ghost_patterns):
+        return False
+        
+    # 3. 攔截題幹純粹是「考科標題重複」（例如：91年指考物理第32題、第51題）
+    if re.match(r'^(?:[一二三四五六七八九十\d]+年?學?年?度?)?(?:[^\n]{2,15}考科)?第?\s*\d+\s*題$', q_text):
+        return False
+
+    # 4. 攔截所有虛擬假選項 (選項A/B/C/D、A/B/C/D)
+    dummy_opt_values = {
+        "選項A", "選項B", "選項C", "選項D", "選項E", 
+        "A", "B", "C", "D", "E", 
+        "選項A說明", "選項B說明", "選項C說明", "選項D說明", 
+        "(選項內容未提供)", "選項內容未提供"
+    }
+    if opts and all(str(opt.get("value", "")).strip() in dummy_opt_values for opt in opts):
+        return False
+
+    # 5. 題幹過短且無附圖
+    if len(q_text) < 6 and not q.get("has_image"):
+        return False
+        
     return True
 
 def natural_sort_key(s):
