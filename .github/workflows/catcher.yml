@@ -136,7 +136,6 @@ jobs:
           if [ ! -f "./model_limits.json" ]; then echo "{}" > ./model_limits.json; fi
 
       - name: 🛠️ 執行資料庫離線無損修復與重漏題仲裁
-        if: ${{ github.event.inputs.repair_only == 'true' || github.event.inputs.run_repair_before_parse == 'true' }}
         run: |
           echo "=========================================================="
           echo "🚀 啟動 100+ 份試卷資料庫離線無損修復引擎 (Zero-API Cost)..."
@@ -187,7 +186,6 @@ jobs:
             --include "*.json" \
             --include "*_validator_log.txt" \
             --fast-list \
-            --size-only \
             --transfers 16 \
             --checkers 32 \
             --config rclone.conf -v
@@ -227,7 +225,6 @@ jobs:
           echo "🖼️ [第三階段] 散裝圖片增量同步..."
           rclone copy ./exam_database_output gdrive:exam_database_output \
             --fast-list \
-            --size-only \
             --transfers 16 \
             --checkers 32 \
             --drive-chunk-size 64M \
