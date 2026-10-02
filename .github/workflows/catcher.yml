@@ -230,5 +230,17 @@ jobs:
             --drive-chunk-size 64M \
             --config rclone.conf -v || true
 
+          # 批次銷毀已完工試卷的雲端暫存檔（高效且不洩漏目錄路徑）
+          if [ -f "pending_cloud_purges.txt" ]; then
+            echo "🧹 [批次銷毀] 正在清理雲端已完工暫存檔..."
+            while IFS= read -r cloud_target; do
+              if [ -n "$cloud_target" ]; then
+                rclone deletefile "$cloud_target" --config rclone.conf --drive-use-trash=false >/dev/null 2>&1 || true
+              fi
+            done < pending_cloud_purges.txt
+            rm -f pending_cloud_purges.txt
+            echo "✅ 雲端暫存檔清理完畢！"
+          fi
+
           # 清除敏感金鑰與設定檔
           rm -f rclone.conf key.txt exam_images.zip
