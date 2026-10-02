@@ -3038,7 +3038,7 @@ class ExamParser:
             本試卷目標考科：【{target_subject}】，目標學年度：【{target_year}】。
             大考或模考的解答 PDF 常常是多科合一（包含國文、英文、數學、物理、化學、生物、歷史等）。
             請務必先檢視本頁上方之【考科名稱標題】與【學年度】！
-            若本頁為其他科目的答案（例如目標是物理，本頁標題卻是數學乙、化學、國文等），你【必須且只能】輸出空列表 `{"answers": []}`！
+            若本頁為其他科目的答案（例如目標是物理，本頁標題卻是數學乙、化學、國文等），你【必須且只能】輸出空列表 `{{"answers": []}}`！
             絕對禁止跨科目提取任何答案！
             """
             combined_prompt = subject_guard_prompt + "\n" + self.ANSWERS_OCR_PROMPT + text_layer_str
