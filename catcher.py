@@ -2200,12 +2200,17 @@ class GeminiFreeTierManager:
                     # 多 Key 智慧備援分流
                     fallback_threshold = max(5, int(len(self.keys) * 0.8))
                     if attempts >= fallback_threshold and not has_pil_images:
-                        logging.info(f"🔄 [429 智慧避險] 已充分輪詢 {attempts} 把金鑰皆遇限流，切換至備援平台處理...")
-                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
+                        logging.info(f"🔄 [429 智慧避險] 已輪詢 {attempts} 把金鑰皆遇限流，切換至備援大模型 (CF/OpenRouter)...")
+                        res_fallback, fb_err = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [429自動分流]")
                         if res_fallback:
                             return res_fallback, None
+                        else:
+                            # 🚨 備援模型也耗盡額度或失敗時，平滑切回 Gemini，重置懲罰並等待冷卻解鎖
+                            logging.warning("⚠️ [備援通道皆失敗或額度耗盡] 自動回退至 Gemini 叢集，重新激活輪詢...")
+                            attempts = max(0, attempts - 2) # 給予 Gemini 更多輪換機會
+                            smart_sleep(6.0) # 等待 6 秒使 Gemini 金鑰的滑動冷卻窗口解鎖
 
-                    wait_time = random.uniform(1.8, 3.5)
+                    wait_time = random.uniform(2.0, 4.0)
                     logging.warning(f"⏳ [429 階梯平滑降級] 金鑰 {key_obj.api_key[:8]}... 進入冷卻，模型切換至 {candidate_models[0]}，等待 {wait_time:.1f} 秒...")
                     smart_sleep(wait_time)
                     continue
@@ -2989,7 +2994,7 @@ class ExamParser:
     # 請在 ExamParser 類別中，精確替換此方法（注意縮排為 8 個空格）：
     # 🚨 將解析答案卷的提示詞抽離為類別變數，以利多個模型共用，保持代碼簡潔
     
-    def _run_single_ocr(self, a_pdf: str, model: str) -> tuple[dict, List[int]]:
+    def _run_single_ocr(self, a_pdf: str, model: str, target_subject: str = "", target_year: str = "") -> tuple[dict, List[int]]:
         """為共識機制設計的單次獨立 OCR 執行器（自動標定答案實體頁碼，支援純圖片掃描檔）"""
         try:
             doc = fitz.open(a_pdf)
@@ -3018,7 +3023,15 @@ class ExamParser:
             
             # 針對掃描檔（文字層為空）與數位檔的提示詞整合
             text_layer_str = f"\n\n=== 該頁數位文字層對照 ===\n{page_text_layer}" if page_text_layer else "\n\n（註：本頁為純影像掃描檔，請完全依據圖片視覺排版精確辨識）"
-            combined_prompt = self.ANSWERS_OCR_PROMPT + text_layer_str
+            subject_guard_prompt = f"""
+            🚨【考科與學年度嚴格過濾警報（最高優先級）】🚨
+            本試卷目標考科：【{target_subject}】，目標學年度：【{target_year}】。
+            大考或模考的解答 PDF 常常是多科合一（包含國文、英文、數學、物理、化學、生物、歷史等）。
+            請務必先檢視本頁上方之【考科名稱標題】與【學年度】！
+            若本頁為其他科目的答案（例如目標是物理，本頁標題卻是數學乙、化學、國文等），你【必須且只能】輸出空列表 `{"answers": []}`！
+            絕對禁止跨科目提取任何答案！
+            """
+            combined_prompt = subject_guard_prompt + "\n" + self.ANSWERS_OCR_PROMPT + text_layer_str
             
             try:
                 with Image.open(img_path) as pil_img:
@@ -3121,22 +3134,17 @@ class ExamParser:
                 
         return merged_dict
 
-    def extract_clean_answers(self, a_pdf: Optional[str]):
-        """
-        [方案 3]：雙重答案卷 OCR 投票機制 (Consensus Voting)
-        使用兩個不同的模型分別獨立解析答案，並在 Python 中比對。
-        若發現不一致，由第 3 個模型進行裁決，確保 100% 精確度。
-        """
+    def extract_clean_answers(self, a_pdf: Optional[str], target_subject: str = "", target_year: str = ""):
         if not a_pdf or not os.path.exists(a_pdf):
             return "無官方解答。", []
 
-        logging.info(f"🧠 [共識投票] 啟動解答卷雙模型雙重驗證: {os.path.basename(a_pdf)}")
+        logging.info(f"🧠 [共識投票] 啟動解答卷雙模型雙重驗證 (目標: {target_year} {target_subject}): {os.path.basename(a_pdf)}")
         
-        # 1. 第一輪：使用主力模型 gemini-3.5-flash
-        ans_dict_1, pages_1 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash")
+        # 1. 第一輪：帶入目標科目與學年驗證
+        ans_dict_1, pages_1 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash", target_subject=target_subject, target_year=target_year)
         
-        # 2. 第二輪：使用輕量模型 gemini-3.5-flash-lite 進行盲測對比
-        ans_dict_2, pages_2 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash-lite")
+        # 2. 第二輪：帶入目標科目與學年盲測驗證
+        ans_dict_2, pages_2 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash-lite", target_subject=target_subject, target_year=target_year)
         
         hit_pages = sorted(list(set(pages_1 + pages_2)))
         
@@ -3650,7 +3658,7 @@ class ExamParser:
                 all_rendered_pages = self.pdf_to_images(q_pdf, "page", img_dir, dpi=300)
                 
                 # 執行解答 OCR 並獲取「真正包含答案的頁碼（0-indexed）」
-                ans_text, ans_page_indices = self.extract_clean_answers(a_pdf)
+                ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
                 
                 if ans_page_indices:
                     # 答案頁：僅包含命中答案表格的頁面（通常是最後 1~2 頁）
@@ -3665,7 +3673,7 @@ class ExamParser:
             else:
                 q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
                 a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300)
-                ans_text, _ = self.extract_clean_answers(a_pdf)
+                ans_text, _ = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
                 ans_page_indices = []
 
             rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
@@ -4290,12 +4298,40 @@ class ExamParser:
 
                 gaps = []
                 
-                # 🚀 引擎一：僅以「官方解答明確存在的題號」進行補漏
+                # 🔍 步驟 A：直接從「題目卷全卷文字層」提取實體存在的最大題號與所有題號清單 (Ground Truth)
+                paper_physical_q_nums = set()
+                max_paper_q_val = 0
+                for p_idx in range(len(doc)):
+                    p_txt = doc[p_idx].get_text("text")
+                    # 排除封面與作答範例干擾
+                    if "作答注意事項" in p_txt or "作答示例" in p_txt or "示例中" in p_txt:
+                        lines = [l for l in p_txt.splitlines() if not any(k in l for k in ["作答注意事項", "作答示例", "例：", "答案卡第"])]
+                        p_txt = "\n".join(lines)
+                    
+                    found_nums = re.findall(r'(?:^|\n)\s*(?:第?\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、\s)])(?!\d)', p_txt)
+                    for fn in found_nums:
+                        n_str = fn[0] or fn[1]
+                        if n_str:
+                            val = int(n_str)
+                            if val <= 80: # 正常台灣高中考卷題號範圍
+                                paper_physical_q_nums.add(str(val))
+                                if val > max_paper_q_val:
+                                    max_paper_q_val = val
+
+                logging.info(f"📑 [題目卷真理校驗] 題目卷文字層偵測到實體最大題號為: 第 {max_paper_q_val} 題 (題號集合: {sorted([int(x) for x in paper_physical_q_nums])})")
+
+                # 🚀 引擎一：官方解答對位補漏（嚴格受限於題目卷真實存在的最大題號）
                 for num in expected_q_nums:
                     base_num = get_base_q_num(num)
+                    # 🚨 若解答卷題號超過題目卷實體最大題號，判定為跨科污染或答案卷溢出，立刻丟棄！
+                    if base_num.isdigit() and max_paper_q_val > 0 and int(base_num) > max_paper_q_val:
+                        logging.warning(f"🛡️ [攔截跨科答案] 解答卷題號 {base_num} 超出題目卷實體最大題號 ({max_paper_q_val})，判定為跨科污染，予以忽略。")
+                        continue
                     if not is_question_covered(base_num, all_extracted_questions):
-                        if base_num not in gaps: gaps.append(base_num)
-
+                        # 該題必須在題目卷實體文字層中有出現痕跡才允許補漏
+                        if not paper_physical_q_nums or base_num in paper_physical_q_nums or not base_num.isdigit():
+                            if base_num not in gaps: gaps.append(base_num)
+                                
                 # 🚀 引擎二：題號連續性補漏（不設死題數上限，但範圍嚴格限制在當前已抓到的最小～最大題號之間）
                 num_list = []
                 letter_list = []
@@ -5888,12 +5924,15 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     matched_global = None
                     for gf in global_answer_files:
                         gf_base = os.path.basename(gf)
-                        if subj in ["物理", "化學", "生物", "自然"] and "自然" in gf_base:
+                        # 嚴格匹配科目關鍵字，絕不盲目跨科抓取
+                        if subj in gf_base:
                             matched_global = gf; break
-                        elif subj in ["歷史", "地理", "公民與社會", "社會"] and "社會" in gf_base:
+                        elif subj in ["物理", "化學", "生物", "地球科學"] and any(k in gf_base for k in ["自然", "理綜"]):
                             matched_global = gf; break
-                    if not matched_global:
-                        matched_global = global_answer_files[0]
+                        elif subj in ["歷史", "地理", "公民與社會"] and any(k in gf_base for k in ["社會", "文綜"]):
+                            matched_global = gf; break
+                    
+                    # 🚨 若完全無吻合科目，設為 None，由 AI 依據原卷自行嚴謹推導，絕不抓其他科目的解答表！
                     final_a_file = matched_global
                 elif key[1] == "SCHOOL":
                     # 學校段考保底機制：答案常直接附在題目 PDF 的最後一頁（如北一女試題）
