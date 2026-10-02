@@ -312,7 +312,7 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     min_threshold = 8 if any(k in db_path for k in ["數", "math"]) else 15
     is_complete = (current_count >= expected_total) if expected_total > 0 else (current_count >= min_threshold)
 
-    if is_complete:
+ if is_complete:
         with open(db_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
         if os.path.exists(partial_path): os.remove(partial_path)
@@ -320,8 +320,19 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     else:
         with open(partial_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
-        if os.path.exists(db_path): os.remove(db_path)
-        stats["status"] = f"⏳ 題數不足 ({current_count}/{expected_total or min_threshold} 題)，保留 partial 並清除假完成 database"
+        if os.path.exists(db_path): 
+            try: os.remove(db_path)
+            except Exception: pass
+            
+        # 🚨 關鍵自癒機制：若剔除假題後題數不足，必須銷毀對應的 _raw_extracted.json 舊快取！
+        # 這樣 catcher.py 才會強制重新掃描原卷 PDF，將真正漏掉的題目完整補回，杜絕假題殘留！
+        if os.path.exists(raw_path):
+            try:
+                os.remove(raw_path)
+                logging.info(f"🧹 [清除髒快取] 已自動刪除未完工之原始快取：{os.path.basename(raw_path)}")
+            except Exception: pass
+
+        stats["status"] = f"⏳ 題數不足 ({current_count}/{expected_total or min_threshold} 題)，已降級 partial、清除假 database 與髒快取，待 catcher.py 自動補回真題！"
 
     return stats
 
