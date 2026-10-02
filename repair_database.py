@@ -312,7 +312,7 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     min_threshold = 8 if any(k in db_path for k in ["數", "math"]) else 15
     is_complete = (current_count >= expected_total) if expected_total > 0 else (current_count >= min_threshold)
 
- if is_complete:
+    if is_complete:
         with open(db_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
         if os.path.exists(partial_path): os.remove(partial_path)
