@@ -5620,17 +5620,16 @@ class ExamParser:
                     except Exception:
                         pass
                         
-            # ☁️ 2. 🚨 即時清除 Google Drive 上的雲端 partial 與 raw 暫存檔
-            if os.path.exists("rclone.conf"):
-                import subprocess
-                rel_parent = type_folder.replace("\\", "/")
-                for tmp_name in [os.path.basename(partial_json_path), os.path.basename(raw_extracted_json_path)]:
-                    cloud_target = f"gdrive:exam_database_output/{rel_parent}/{tmp_name}"
-                    try:
-                        subprocess.run(["rclone", "deletefile", cloud_target, "--config", "rclone.conf"], capture_output=True, timeout=15)
-                        logging.info(f"☁️ [雲端暫存銷毀] 已同步從 Google Drive 刪除過期暫存：{cloud_target}")
-                    except Exception as rclone_del_err:
-                        logging.warning(f"⚠️ 無法刪除雲端暫存檔 {cloud_target}: {rclone_del_err}")
+            # ☁️ 2. 登記待清理之雲端暫存檔，稍後於 GitHub Action 結尾統一高速批次銷毀（零等待、不洩漏路徑）
+            rel_parent = type_folder.replace("\\", "/")
+            for tmp_name in [os.path.basename(partial_json_path), os.path.basename(raw_extracted_json_path)]:
+                cloud_target = f"gdrive:exam_database_output/{rel_parent}/{tmp_name}"
+                try:
+                    with open("pending_cloud_purges.txt", "a", encoding="utf-8") as f_purge:
+                        f_purge.write(f"{cloud_target}\n")
+                except Exception:
+                    pass
+            logging.info(f"🧹 [暫存登記] 考卷 {spec_name} 已登記完工暫存清理任務。")
         
         
         # 🚨 新增：若有審查未通過的歷史紀錄，自動儲存至專屬的詳細 JSON 日誌中
