@@ -140,11 +140,11 @@ jobs:
           echo "=========================================================="
           echo "🚀 啟動 100+ 份試卷資料庫離線無損修復引擎 (Zero-API Cost)..."
           echo "=========================================================="
+          # 🚨 預先清理 Google Drive 下載產生的 .1.json / .2.json 同名衝突副本
+          find ./exam_database_output -name "*_database.*.json" -type f -delete
           python repair_database.py
-          
-          # 🚨 資安與儲存優化：刪除本機自動生成的 .bak 備份檔案，防止冗餘備份檔同步到 Google Drive 浪費空間
           find ./exam_database_output -name "*.bak" -type f -delete
-          echo "✅ 資料庫修復完畢，已就緒！"
+          echo "✅ 資料庫洗淨與修復完畢，已就緒！"
 
       - name: 🌐 啟動 Cloudflare Tunnel 即時儀表板穿透
         if: ${{ github.event.inputs.repair_only != 'true' }}
