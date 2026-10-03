@@ -231,20 +231,23 @@ jobs:
             --drive-chunk-size 64M \
             --config rclone.conf -v || true
 
-          # 批次銷毀已完工試卷的雲端暫存檔（高效且不洩漏目錄路徑）
+          # =========================================================
+          # 🧹 [終極清理] 批次銷毀雲端暫存，並消除 Google Drive 重複同名檔案
+          # =========================================================
           if [ -f "pending_cloud_purges.txt" ]; then
-            echo "🧹 檢測到待清理清單，正在同步銷毀 Google Drive 上的舊檔與暫存..."
-            # 去除重複項後逐行刪除
+            echo "🧹 正在同步銷毀 Google Drive 上的舊檔與暫存..."
             sort -u pending_cloud_purges.txt | while IFS= read -r cloud_file; do
               if [ -n "$cloud_file" ]; then
                 rclone deletefile "$cloud_file" --config rclone.conf --drive-use-trash=false >/dev/null 2>&1 || true
               fi
             done
             rm -f pending_cloud_purges.txt
-            echo "✅ Google Drive 雲端舊檔與暫存已徹底銷毀！"
-          else
-            echo "ℹ️ 無待清理之雲端暫存檔。"
+            echo "✅ 雲端舊檔與暫存已徹底銷毀！"
           fi
 
+          echo "🔄 [消除雲端同名副本] 正在檢測並合併 Google Drive 上的重複同名檔案..."
+          rclone dedupe newest gdrive:exam_database_output --config rclone.conf -v || true
+          echo "✅ 雲端同名副本已強制保留最新版本！"
+
           # 清除敏感金鑰與設定檔
-          rm -f rclone.conf key.txt exam_images.zip
+          rm -f rclone.conf key.txt exam_images.zip exam_databases.zip
