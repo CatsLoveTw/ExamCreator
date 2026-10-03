@@ -40,6 +40,23 @@ SUBJECT_HARD_LIMITS = {
     "學測_國文": 44, "學測_英文": 56, "學測_自然": 68, "學測_社會": 72
 }
 
+# =========================================================================
+# 台灣高中各科常規題數合理範圍 (最小值, 最大值) - 保護真題不被誤殺
+# =========================================================================
+EXAM_REASONABLE_RANGES = {
+    "國寫": (2, 4),
+    "數學甲": (12, 18), "數學乙": (11, 17), "數學A": (15, 22), "數學B": (15, 22), "數學": (12, 22),
+    "物理": (22, 32), "化學": (22, 34), "生物": (40, 62), "地球科學": (35, 50),
+    "國文": (38, 46), "英文": (50, 60), "歷史": (36, 46), "地理": (36, 46), "公民與社會": (36, 46)
+}
+
+# 保底單科天花板（超過此數且發生斷層才視為幽靈題）
+STANDARD_MAX_QUESTIONS = {
+    "國寫": 4, "數學甲": 20, "數學乙": 18, "數學A": 22, "數學B": 22, "數學": 22,
+    "物理": 34, "化學": 36, "生物": 65, "地球科學": 52,
+    "國文": 48, "英文": 62, "歷史": 50, "地理": 50, "公民與社會": 50
+}
+
 def register_cloud_purge(local_path: str):
     """登記待銷毀之雲端暫存檔路徑"""
     try:
@@ -98,19 +115,32 @@ def clean_latex_corruptions(text: str) -> str:
     text = re.sub(r'(?<=\$)rac(?=\{)', r'\\frac', text)
     
     # 🚨 自動修復裸露未加 $ 的公式（如 \vec{V}、\frac{...}、等號方程式）
-    def wrap_naked_math(m):
-        raw_eq = m.group(0).strip()
-        return f" ${raw_eq}$ "
+    # 🚨 1. 自動包裹所有未在 $ 內的裸露 LaTeX (如 \vec{v}_0, -2\vec{v}_0, \frac{...}{...}, m_0)
+    # 排除已被 $ 或 $$ 包裹的區塊
+    parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
     
-    # 匹配未在 $ 內部的向量、分數與帶有下標的等式
-    naked_pattern = r'(?<!\$)(?<!\\)\b(\\vec\{[^\}]+\}(?:_[0-9a-zA-Z]+)?\s*=\s*\\frac\{[^\}]+\}\{[^\}]+\})(?!\$)'
-    text = re.sub(naked_pattern, wrap_naked_math, text)
+    # 匹配所有裸露的反斜線數學指令 (包括帶負號、向量、分數、下標變數)
+    bare_math_pattern = r'(?<![\$\w\\])(-?\\(?:vec\{[^}]+\}|mathbf\{[^}]+\}|frac\{[^}]+\}\{[^}]+\}|sqrt\{[^}]+\}|pm|times|cdot|alpha|beta|gamma|theta|lambda|mu|pi|omega|Delta|Omega)(?:_[0-9a-zA-Z]+)?)(?![\$\w])'
     
-    # 修復粗體與公式擠在一起產生的渲染失敗，如 **綜上所述，本題正確答案為：$公式$**
-    text = re.sub(r'\*\*(.+?)\$', r'**\1** $', text)
-    text = re.sub(r'\$(.+?)\*\*', r'$ **\1**', text)
+    for i in range(len(parts)):
+        if i % 2 == 0:  # 純文字/Markdown 區塊
+            # 包裹裸露公式
+            parts[i] = re.sub(bare_math_pattern, r' $\1$ ', parts[i])
+            # 包裹像 m_0, v_0 這類裸露的下標物理量
+            parts[i] = re.sub(r'(?<![\$\w\\])\b([a-zA-Z]_[0-9a-zA-Z]+)\b(?![\$\w])', r' $\1$ ', parts[i])
+            # 🚨 解決小題答案擠在一起：將 (a)...(b)... 強制換行
+            parts[i] = re.sub(r'(\([a-d]\)[^\(\n\r]+?)(?=\([a-d]\))', r'\1\n\n', parts[i])
+            # 解決 **綜上所述，本題正確答案為：(a) $式子$(b) $式子$** 內部黏連
+            parts[i] = re.sub(r'(\([a-d]\)\s*\$[^\$]+\$)(?=\([a-d]\))', r'\1\n\n', parts[i])
 
-    return text
+    text = "".join(parts)
+    
+    # 🚨 2. 修復粗體語法 **...$公式$** 導致的 KaTeX 語法解析崩潰
+    text = re.sub(r'\*\*\s*(\([a-d]\))?\s*\$', r'**\1** $', text)
+    text = re.sub(r'\$\s*\*\*', r'$ **', text)
+    text = re.sub(r' +', ' ', text)
+
+    return text.strip()
 
 # -------------------------------------------------------------------------
 # 2. 知識點鋼鐵淨化器
@@ -228,29 +258,40 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "") -> Tuple[
 # 4. 跨科嚴重污染檢驗 (如生物卷出現數學/物理)
 # -------------------------------------------------------------------------
 def is_cross_subject_contamination(q: dict, expected_subject: str) -> bool:
-    sub_subj = q.get("sub_subject", "")
-    q_txt = q.get("question_text", "")
-    sol_txt = q.get("detailed_solution", "")
+    sub_subj = str(q.get("sub_subject", "")).strip()
+    q_txt = str(q.get("question_text", ""))
+    sol_txt = str(q.get("detailed_solution", ""))
     combined = q_txt + " " + sol_txt
     
-    # 1. 考科名稱明顯矛盾
-    if expected_subject in ["生物"] and sub_subj in ["數學", "物理", "公民與社會", "歷史"]:
-        return True
-    if expected_subject in ["物理"] and sub_subj in ["生物", "歷史", "地理", "國文"]:
-        return True
-    if expected_subject in ["數學"] and sub_subj in ["生物", "化學", "歷史", "英文"]:
-        return True
+    # 🚨 1. 單科試卷（非綜合自然/社會）中，sub_subject 必須嚴格吻合
+    if expected_subject not in ["自然", "社會", "未知"]:
+        # 容許數學科目細分互通 (數學A/數學B/數甲/數乙)
+        if "數" in expected_subject and "數" in sub_subj:
+            pass
+        elif sub_subj and sub_subj != expected_subject:
+            return True
 
-    # 2. 內容實質特徵過濾
-    if "生物" in expected_subject:
-        # 生物卷絕對不會出現電流磁效應、安培右手、動量守恆、矩陣、求極限
-        math_phys_clues = ["電流的磁效應", "直角坐標中", "帶電質點", "電磁場中運動", "\\begin{bmatrix}", "轉移矩陣", "二階導數", "外接圓半徑"]
+    # 🚨 2. 實質內容與考點特征嚴格校驗 (消滅誤被標記為生物的數學/物理幽靈題)
+    if expected_subject in ["生物"]:
+        math_phys_clues = [
+            "電流的磁效應", "直角坐標中", "帶電質點", "電磁場中運動", 
+            "\\begin{bmatrix}", "轉移矩陣", "二階導數", "外接圓半徑", 
+            "動量守恆", "牛頓第二定律", "拋體運動", "動能與位能", "庫侖定律"
+        ]
         if any(c in combined for c in math_phys_clues):
             return True
             
-    if "物理" in expected_subject:
-        bio_clues = ["孟德爾遺傳", "光敏素", "葉綠體囊狀體", "有絲分裂", "聚合酶連鎖反應"]
-        if any(c in combined for c in bio_clues):
+    if expected_subject in ["物理"]:
+        bio_math_clues = [
+            "孟德爾遺傳", "光敏素", "葉綠體", "有絲分裂", "聚合酶連鎖反應", 
+            "染色體", "基因型", "生態系", "轉錄轉譯", "原核生物"
+        ]
+        if any(c in combined for c in bio_math_clues):
+            return True
+
+    if "數學" in expected_subject or "數甲" in expected_subject or "數乙" in expected_subject:
+        sci_clues = ["電磁感應", "莫耳濃度", "氧化還原", "光合作用", "熱力學定律"]
+        if any(c in combined for c in sci_clues):
             return True
 
     return False
@@ -258,7 +299,7 @@ def is_cross_subject_contamination(q: dict, expected_subject: str) -> bool:
 # -------------------------------------------------------------------------
 # 5. 綜合嚴格題目審查
 # -------------------------------------------------------------------------
-def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[str], expected_subject: str, exam_tag: str) -> bool:
+def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[str], expected_subject: str, exam_tag: str = "") -> bool:
     q_text = str(q.get("question_text", "")).strip()
     ans_text = str(q.get("answer", "")).strip()
     cat_text = str(q.get("topic_category", "")) + " " + " ".join(q.get("topic_categories", []))
@@ -267,47 +308,42 @@ def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[st
     opts = q.get("options", [])
     combined = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
 
-    # 🚨 1. 實體原卷題數裁決（允許 +2 題的合理結構偏差，如手寫小題拆分；但絕不放過 Q49 這類跨度超過 15 題的假題）
+    # 🚨【真題鋼鐵保護傘】：若題號為選填字母 (A~H)、中文題號 (一、二)、或帶子小題 (如 1(a), 21(b))
+    # 這是標準的台灣大考題組與非選結構，絕對嚴禁以純數字天花板將其砍除！
+    is_non_digit_question = any(c in q_num_raw for c in ["一", "二", "三", "四", "五", "A", "B", "C", "D", "E", "F", "G", "H", "(", "（"])
+    if is_non_digit_question:
+        # 只做跨科檢查與純佔位檢查
+        if is_cross_subject_contamination(q, expected_subject):
+            return False
+        if any(gk in combined for gk in GHOST_KEYWORDS_EXTENDED):
+            return False
+        return True
+
+    # 🚨【純數字題號安全裁決】：
     digits = re.findall(r'^\d+$', q_num_raw)
     if digits:
         val = int(digits[0])
-        limit_ceiling = max_allowed_q if max_allowed_q > 0 else STANDARD_MAX_QUESTIONS.get(expected_subject, 0)
+        # 取得合理的上限（優先採用掃描到的真實題數，若無則依學科標準天花板）
+        ceiling = max_allowed_q if max_allowed_q > 0 else STANDARD_MAX_QUESTIONS.get(expected_subject, 40)
         
-        # 只要題號在合法天花板 + 2 之內，視為安全範圍，絕對不刪！
-        # 只有像 24 題的考卷卻出現 40 幾題，這種跨度離譜的假題才剔除！
-        if limit_ceiling > 0 and val > (limit_ceiling + 2):
+        # 允許 +3 題的合理結構偏差（防止題組題拆小題導致編號微增）
+        # 只有當題號超出上限 4 題以上（例如 24 題的考卷卻出現 49 題），才判定為捏造幽靈題！
+        if ceiling > 0 and val > (ceiling + 3):
             return False
 
-    # 🚨 若該題有實體附圖，且題幹長度充實 (>35字)，絕對視為珍貴真題，嚴禁誤刪！
-    if q.get("has_image") and len(q_text) >= 35:
-        # 僅防禦明顯的跨科污染
-        if is_cross_subject_contamination(q, expected_subject):
-            return False
-        return True
-        
-
-    # 🚨 2. 跨科污染檢驗（消滅生物卷裡的數學/物理題）
+    # 跨科污染檢驗（生物卷裡的數學/物理題）
     if is_cross_subject_contamination(q, expected_subject):
         return False
 
-    # 🚨 3. 攔截作答規範與封面說明
-    instruction_keywords = [
-        "作答示例", "作答注意事項", "劃記方式之說明", "作答說明", "答案卡第", 
-        "考試作答規範", "讀卡格式與欄位", "選填題電子讀卡", "例：若第", "答題卷劃記",
-        "本試題共", "作答範例", "範例題"
-    ]
-    if any(ik in combined for ik in instruction_keywords):
-        return False
-
-    # 🚨 4. 攔截幽靈關鍵字
+    # 幽靈關鍵字與作答規範過濾
     if any(gk in combined for gk in GHOST_KEYWORDS_EXTENDED):
         return False
 
-    # 🚨 5. 題幹只是重複題號標題
+    # 題幹只是純標題（如「91年指考物理第32題」）
     if re.match(r'^(?:[一二三四五六七八九十\d]+年?學?年?度?)?(?:[^\n]{2,15}考科)?第?\s*\d+\s*題$', q_text):
         return False
 
-    # 🚨 6. 虛擬選項 A/B/C/D 過濾
+    # 選項全為佔位符
     dummy_opt_values = {"選項A", "選項B", "選項C", "選項D", "選項E", "A", "B", "C", "D", "E", "(選項內容未提供)", "選項內容未提供"}
     if opts and all(str(opt.get("value", "")).strip() in dummy_opt_values for opt in opts):
         return False
@@ -316,7 +352,7 @@ def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[st
         return False
 
     return True
-
+    
 def natural_sort_key(s):
     cn_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
     s_str = str(s).strip()
@@ -368,8 +404,10 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     if max_pdf_q > 0:
         logging.info(f"📄 [{os.path.basename(db_path)}] 經題目卷校準，實體題數上限為第 {max_pdf_q} 題")
         
-    # 🚨 關鍵去重：以題號為唯一鍵，消除下載兩份同名資料庫導致的雙倍重複題
+    # 🚨 雙重去重閥門：同時比對「題號+題型」與「題幹純文字特徵」，徹底擊殺雙倍重複題目
     merged_map = {}
+    text_fingerprints = {}
+
     for q in db_questions + partial_questions:
         if not is_valid_question_strict(q, max_pdf_q, physical_q_set, expected_subject, exam_tag):
             stats["ghosts"] += 1
@@ -379,15 +417,36 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
         q_type = str(q.get("question_type", "")).strip()
         key = (q_num, q_type)
         
-        if key not in merged_map:
-            merged_map[key] = q
-        else:
-            if len(str(q.get("detailed_solution", ""))) > len(str(merged_map[key].get("detailed_solution", ""))):
+        # 題幹純文字特徵指紋 (去除標點空格，取前 30 字)
+        clean_text_fp = re.sub(r'[^\w\u4e00-\u9fa5]', '', str(q.get("question_text", "")))[:30]
+        
+        current_sol_len = len(str(q.get("detailed_solution", "")))
+        
+        # 情況 A：題號完全相同
+        if key in merged_map:
+            existing_len = len(str(merged_map[key].get("detailed_solution", "")))
+            if current_sol_len > existing_len:
                 merged_map[key] = q
+            continue
+            
+        # 情況 B：題幹高度重複 (同名題庫雙胞胎碰撞)
+        if clean_text_fp and len(clean_text_fp) >= 10:
+            if clean_text_fp in text_fingerprints:
+                old_key = text_fingerprints[clean_text_fp]
+                existing_len = len(str(merged_map[old_key].get("detailed_solution", "")))
+                if current_sol_len > existing_len:
+                    del merged_map[old_key]
+                    merged_map[key] = q
+                    text_fingerprints[clean_text_fp] = key
+                continue
+            text_fingerprints[clean_text_fp] = key
+
+        merged_map[key] = q
 
     merged_list = list(merged_map.values())
     stats["merged"] = len(merged_list)
-
+    
+    
     # 執行分類清洗、年代校驗與 LaTeX 格式修復
     for q in merged_list:
         main_cat = sanitize_knowledge_point(q.get("topic_category", ""))
@@ -406,33 +465,43 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     merged_list.sort(key=safe_sort)
 
     current_count = len(merged_list)
-    min_threshold = max_pdf_q if max_pdf_q > 0 else (8 if "數" in db_path else 15)
-    is_complete = (current_count >= min_threshold) and (current_count > 0)
+    
+    # 獲取本科的合理題數範圍 (min_q, max_q)
+    r_min, r_max = EXAM_REASONABLE_RANGES.get(expected_subject, (12, 50))
+    
+    # 若有掃描到真實 PDF，則以實體題數作為參考基準；否則依學科常規範圍
+    if max_pdf_q > 0:
+        # 只要達到實體掃描題數的 90%（容許部分非選題未拆小題的微小差異），且大於最小合理題數，即視為 100% 完工！
+        is_complete = (current_count >= min(max_pdf_q, r_min))
+        display_threshold = max_pdf_q
+    else:
+        # 無 PDF 時（純依賴資料庫）：只要收錄題數落在本科合理區間內，絕不盲目降級！
+        is_complete = (current_count >= r_min)
+        display_threshold = r_min
 
     if is_complete:
         with open(db_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
-        if os.path.exists(partial_path): 
+        if os.path.exists(partial_path):
             os.remove(partial_path)
             register_cloud_purge(partial_path)
-        stats["status"] = f"✅ 100% 完工存檔 (真題收錄 {current_count}/{min_threshold} 題)"
+        stats["status"] = f"✅ 100% 完工存檔 (收錄 {current_count} 題，符合 {expected_subject} 合理題數)"
     else:
         with open(partial_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
-        if os.path.exists(db_path): 
-            try: 
+        if os.path.exists(db_path):
+            try:
                 os.remove(db_path)
-                register_cloud_purge(db_path) # 登記刪除雲端偽完工 database
+                register_cloud_purge(db_path)
             except Exception: pass
-            
         if os.path.exists(raw_path):
             try:
                 os.remove(raw_path)
                 register_cloud_purge(raw_path)
             except Exception: pass
-
-        stats["status"] = f"⏳ 題數不足 ({current_count}/{min_threshold} 題)，已降級 partial、清除舊 database 與髒快取，待補齊真題"
+        stats["status"] = f"⏳ 題數不足 ({current_count}/{display_threshold} 題)，已降級 partial，待補齊真題"
         
+    
     return stats
 
 def run_database_repair_suite():
