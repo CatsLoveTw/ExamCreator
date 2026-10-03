@@ -50,6 +50,31 @@ def register_cloud_purge(local_path: str):
     except Exception:
         pass
 
+def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
+    """若 JSON 記錄的路徑失效，跨目錄自動搜尋真正的實體 PDF"""
+    if candidate_pdf_path and os.path.exists(candidate_pdf_path):
+        return candidate_pdf_path
+        
+    base_file = os.path.basename(db_path).replace("_database.json", "").replace("_partial_database.json", "")
+    year_m = re.search(r'(\d+)', base_file)
+    year_str = year_m.group(1) if year_m else ""
+    
+    subj_kw = ""
+    for s_name in ["數學", "數甲", "數乙", "物理", "化學", "生物", "地科", "地球科學", "國文", "國寫", "英文", "歷史", "地理", "公民"]:
+        if s_name in base_file:
+            subj_kw = s_name; break
+
+    search_dirs = ["ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only", "school_exam_papers_only"]
+    for s_dir in search_dirs:
+        if os.path.exists(s_dir):
+            for root, dirs, files in os.walk(s_dir):
+                for f in files:
+                    if f.endswith(".pdf"):
+                        if year_str and year_str in f:
+                            if subj_kw and (subj_kw in f or subj_kw in root):
+                                return os.path.join(root, f)
+    return ""
+    
 # -------------------------------------------------------------------------
 # 1. 深度 LaTeX 與 Markdown 格式修復器
 # -------------------------------------------------------------------------
@@ -327,15 +352,22 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
             with open(partial_path, "r", encoding="utf-8") as f: partial_questions = json.load(f)
         except Exception: pass
 
-    # 尋找實體 PDF 進行真理上限掃描
-    pdf_path = ""
+    # 尋找實體 PDF（確保 actual_pdf 一定被定義）
+    actual_pdf = ""
     for q_cand in db_questions + partial_questions:
-        if q_cand.get("question_pdf_path") and os.path.exists(q_cand.get("question_pdf_path")):
-            pdf_path = q_cand.get("question_pdf_path")
+        cand_p = q_cand.get("question_pdf_path", "")
+        if cand_p and os.path.exists(cand_p):
+            actual_pdf = cand_p
             break
             
+    # 若 JSON 內記錄的路徑失效（例如換了環境），自動跨資料夾搜尋實體 PDF
+    if not actual_pdf:
+        actual_pdf = find_actual_pdf(db_path, "")
+
     max_pdf_q, physical_q_set = get_real_pdf_max_question_info(actual_pdf, exam_name=os.path.basename(db_path))
-    
+    if max_pdf_q > 0:
+        logging.info(f"📄 [{os.path.basename(db_path)}] 經題目卷校準，實體題數上限為第 {max_pdf_q} 題")
+        
     # 🚨 關鍵去重：以題號為唯一鍵，消除下載兩份同名資料庫導致的雙倍重複題
     merged_map = {}
     for q in db_questions + partial_questions:
