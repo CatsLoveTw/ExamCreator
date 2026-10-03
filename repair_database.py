@@ -140,32 +140,64 @@ def sanitize_subject_json():
 # -------------------------------------------------------------------------
 # 3. 實體 PDF 題數真理掃描器 (Ground Truth Scanner)
 # -------------------------------------------------------------------------
-def get_real_pdf_max_question_info(pdf_path: str) -> Tuple[int, Set[str]]:
-    """打開實體題目卷 PDF，透過純文字層掃描真正存在的實體題目集合與最大題號"""
+def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "") -> Tuple[int, Set[str]]:
+    """以極度嚴謹的段落排版分析真實題目卷題數（自動排除 80分鐘、100分、年份等雜訊）"""
     if not pdf_path or not os.path.exists(pdf_path):
         return 0, set()
-    
-    physical_nums = set()
-    max_q = 0
+        
+    # 國寫專用防禦：國寫永遠只有 2 大題
+    if "國寫" in exam_name or "寫作" in exam_name:
+        return 2, {"1", "2", "一", "二"}
+
+    detected_nums = set()
     try:
-        with fitz.open(pdf_path) as doc:
-            for p_idx in range(len(doc)):
-                txt = doc[p_idx].get_text("text")
-                # 排除封面注意事項或範例干擾
-                lines = [l for l in txt.splitlines() if not any(k in l for k in ["作答注意事項", "作答示例", "例：", "答案卡第", "劃記範例"])]
-                clean_txt = "\n".join(lines)
-                
-                found = re.findall(r'(?:^|\n)\s*(?:第?\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、\s)])(?!\d)', clean_txt)
-                for f_item in found:
-                    n_str = f_item[0] or f_item[1]
-                    if n_str:
-                        val = int(n_str)
-                        if val <= 80:
-                            physical_nums.add(str(val))
-                            if val > max_q: max_q = val
+        doc = fitz.open(pdf_path)
+        for p_idx in range(len(doc)):
+            # 封面頁（通常含大考作答範例與考試時間80分鐘）一律不納入題號計算
+            if p_idx == 0 and len(doc) > 1 and "作答注意事項" in doc[0].get_text("text"):
+                continue
+
+            txt = doc[p_idx].get_text("text")
+            for line in txt.splitlines():
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                    
+                # 🚨 剛性過濾：凡是包含時間、總分、配分說明的行，絕不是題號！
+                if any(bad in line_str for bad in ["分鐘", "考試時間", "滿分", "總分", "學年度", "共計", "作答示例", "答案卡"]):
+                    continue
+
+                # 匹配行首標準題號：如 "1."、"12．"、"第 5 題"、"24 "
+                m = re.match(r'^(?:第\s*)?(\d{1,2})\s*(?:題|[.．、\s])', line_str)
+                if m:
+                    # 確保緊接著數字後面的不是「分」或「秒」（防止 "1. 10分" 抓成 10）
+                    rest = line_str[m.end():].strip()
+                    if not rest.startswith(("分", "％", "%")):
+                        val = int(m.group(1))
+                        # 排除 0 或明顯是日期的數字
+                        if 1 <= val <= 75:
+                            detected_nums.add(val)
+        doc.close()
     except Exception as e:
         logging.warning(f"掃描 PDF {pdf_path} 實體題數失敗: {e}")
-    return max_q, physical_nums
+
+    if not detected_nums:
+        return 0, set()
+
+    # 🚨 連續性濾網：找出真實考題的最大題號（杜絕中間斷層 30 題的假數字，例如有 1~24 題，後面突然跳出一個 75）
+    sorted_nums = sorted(list(detected_nums))
+    real_max = sorted_nums[0]
+    for i in range(len(sorted_nums) - 1):
+        curr_n = sorted_nums[i]
+        next_n = sorted_nums[i+1]
+        # 正常考卷題號連續或頂多題組跳 1~3 題；若突然跨度大於 12，代表後面是雜訊（如分數或圖表編號）
+        if next_n - curr_n <= 12:
+            real_max = next_n
+        else:
+            break
+
+    valid_q_set = {str(n) for n in sorted_nums if n <= real_max}
+    return real_max, valid_q_set
 
 # -------------------------------------------------------------------------
 # 4. 跨科嚴重污染檢驗 (如生物卷出現數學/物理)
@@ -210,17 +242,24 @@ def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[st
     opts = q.get("options", [])
     combined = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
 
-    # 🚨 1. 實體 PDF 題數裁決（最核心：直接消滅如 91 指考物理 Q49）
+    # 🚨 1. 實體原卷題數裁決（允許 +2 題的合理結構偏差，如手寫小題拆分；但絕不放過 Q49 這類跨度超過 15 題的假題）
     digits = re.findall(r'^\d+$', q_num_raw)
     if digits:
         val = int(digits[0])
-        # A. 若原卷 PDF 存在且掃描出最大題數，超過最大題數直接處死
-        if max_allowed_q > 0 and val > max_allowed_q:
+        limit_ceiling = max_allowed_q if max_allowed_q > 0 else STANDARD_MAX_QUESTIONS.get(expected_subject, 0)
+        
+        # 只要題號在合法天花板 + 2 之內，視為安全範圍，絕對不刪！
+        # 只有像 24 題的考卷卻出現 40 幾題，這種跨度離譜的假題才剔除！
+        if limit_ceiling > 0 and val > (limit_ceiling + 2):
             return False
-        # B. 若無 PDF 但匹配到大考學科硬性上限（如指考物理絕不可能超過 28 題）
-        for hard_k, hard_limit in SUBJECT_HARD_LIMITS.items():
-            if hard_k in exam_tag and val > hard_limit:
-                return False
+
+    # 🚨 若該題有實體附圖，且題幹長度充實 (>35字)，絕對視為珍貴真題，嚴禁誤刪！
+    if q.get("has_image") and len(q_text) >= 35:
+        # 僅防禦明顯的跨科污染
+        if is_cross_subject_contamination(q, expected_subject):
+            return False
+        return True
+        
 
     # 🚨 2. 跨科污染檢驗（消滅生物卷裡的數學/物理題）
     if is_cross_subject_contamination(q, expected_subject):
@@ -295,8 +334,8 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
             pdf_path = q_cand.get("question_pdf_path")
             break
             
-    max_pdf_q, physical_q_set = get_real_pdf_max_question_info(pdf_path)
-
+    max_pdf_q, physical_q_set = get_real_pdf_max_question_info(actual_pdf, exam_name=os.path.basename(db_path))
+    
     # 🚨 關鍵去重：以題號為唯一鍵，消除下載兩份同名資料庫導致的雙倍重複題
     merged_map = {}
     for q in db_questions + partial_questions:
