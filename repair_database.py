@@ -30,6 +30,16 @@ PURGE_TOPIC_KEYWORDS = [
     "以下為", "注意**", "待確認", "重新判定"
 ]
 
+def register_cloud_purge(local_path: str):
+    """將本地已銷毀的檔案登記到待刪除清單，以便 GHA 稍後同步銷毀 Google Drive 上的舊檔"""
+    try:
+        rel_path = os.path.relpath(local_path, DATABASE_DIR).replace("\\", "/")
+        cloud_target = f"gdrive:exam_database_output/{rel_path}"
+        with open("pending_cloud_purges.txt", "a", encoding="utf-8") as f:
+            f.write(f"{cloud_target}\n")
+    except Exception:
+        pass
+
 # -------------------------------------------------------------------------
 # 1. LaTeX 深層語法與 \log 格式清洗器
 # -------------------------------------------------------------------------
@@ -315,25 +325,28 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     if is_complete:
         with open(db_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
-        if os.path.exists(partial_path): os.remove(partial_path)
+        if os.path.exists(partial_path): 
+            os.remove(partial_path)
+            register_cloud_purge(partial_path) # 登記刪除雲端 partial
         stats["status"] = f"✅ 100% 完工存檔 (共 {current_count} 題，已銷毀 partial)"
     else:
         with open(partial_path, "w", encoding="utf-8") as f:
             json.dump(merged_list, f, ensure_ascii=False, indent=4)
         if os.path.exists(db_path): 
-            try: os.remove(db_path)
+            try: 
+                os.remove(db_path)
+                register_cloud_purge(db_path) # 🚨 登記刪除雲端假 database，防止下次下載又復活！
             except Exception: pass
             
-        # 🚨 關鍵自癒機制：若剔除假題後題數不足，必須銷毀對應的 _raw_extracted.json 舊快取！
-        # 這樣 catcher.py 才會強制重新掃描原卷 PDF，將真正漏掉的題目完整補回，杜絕假題殘留！
         if os.path.exists(raw_path):
             try:
                 os.remove(raw_path)
+                register_cloud_purge(raw_path) # 登記刪除雲端髒快取
                 logging.info(f"🧹 [清除髒快取] 已自動刪除未完工之原始快取：{os.path.basename(raw_path)}")
             except Exception: pass
 
         stats["status"] = f"⏳ 題數不足 ({current_count}/{expected_total or min_threshold} 題)，已降級 partial、清除假 database 與髒快取，待 catcher.py 自動補回真題！"
-
+        
     return stats
 
 def run_database_repair_suite():
