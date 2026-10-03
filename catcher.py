@@ -3586,12 +3586,17 @@ class ExamParser:
                         except Exception: pass
                     return
                 else:
-                    # 題數不足（如只有1~2題）！判定為未完工殘卷，強制刪除假完成 database，將成果轉入 partial 接力！
-                    logging.warning(f"⚠️ [未完工校正] 發現 {json_path} 題數異常殘缺 (僅 {len(merged_checkpoint_list)} 題)，強制降級為 partial 觸發接力補跑！")
+                    # 題數不足！判定為未完工殘卷，強制刪除假完成 database，將成果轉入 partial 接力！
+                    logging.warning(f"⚠️ [未完工校正] 發現 {json_path} 題數異常殘缺 (僅 {len(merged_checkpoint_list)} 題)，強制降級為 partial 接力！")
                     with open(partial_json_path, "w", encoding="utf-8") as pf:
                         json.dump(merged_checkpoint_list, pf, ensure_ascii=False, indent=4)
                     if db_exists:
-                        try: os.remove(json_path)
+                        try: 
+                            os.remove(json_path)
+                            # 🚨 立即登記雲端銷毀，保證 GDrive 假 database 被移除
+                            rel_p = os.path.relpath(json_path, output_dir).replace("\\", "/")
+                            with open("pending_cloud_purges.txt", "a", encoding="utf-8") as f_pg:
+                                f_pg.write(f"gdrive:exam_database_output/{rel_p}\n")
                         except Exception: pass
 
             except Exception as e:
@@ -5453,8 +5458,12 @@ class ExamParser:
                                     blanks_desc = ", ".join([f"第 {idx+1} 空格為「{val}」" for idx, val in enumerate(formatted_parts)])
                                     q_data['detailed_solution'] += f"\n\n**綜上所述，本題選填題各畫卡格答案為：{effective_ans}（即 {blanks_desc}）**"
                                 else:
-                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確答案為：{effective_ans}**"
-                            
+                                    clean_ans_disp = effective_ans
+                                    # 🚨 若答案中含有 LaTeX 指令但未包裹 $，自動為其補全 $，防止 Markdown 粗體損毀公式
+                                    if any(c in clean_ans_disp for c in ["\\", "^", "_"]) and not clean_ans_disp.startswith("$"):
+                                        clean_ans_disp = f"${clean_ans_disp}$"
+                                    q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確答案為：** {clean_ans_disp}"
+                                    
                             # 🚨 多維知識點自動補齊與主副關聯校正
                             raw_cats = q_data.get("topic_categories", [])
                             if isinstance(raw_cats, list) and raw_cats:
