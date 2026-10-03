@@ -192,6 +192,7 @@ jobs:
 
           echo "📦 [第 1.5 階段] 正在將正式完成的 JSON 資料庫打包為高速單一壓縮檔 exam_databases.zip..."
           # 🚨 關鍵過濾：只納入 *_database.json，嚴格排除 *_partial_database.json 與 *_raw_extracted.json
+          rm -f exam_databases.zip
           find exam_database_output -name "*_database.json" ! -name "*_partial_database.json" ! -name "*_raw_extracted.json" | zip -q -1 exam_databases.zip -@
           rclone copyto ./exam_databases.zip gdrive:exam_databases.zip \
             --drive-chunk-size 64M \
@@ -232,14 +233,17 @@ jobs:
 
           # 批次銷毀已完工試卷的雲端暫存檔（高效且不洩漏目錄路徑）
           if [ -f "pending_cloud_purges.txt" ]; then
-            echo "🧹 [批次銷毀] 正在清理雲端已完工暫存檔..."
-            while IFS= read -r cloud_target; do
-              if [ -n "$cloud_target" ]; then
-                rclone deletefile "$cloud_target" --config rclone.conf --drive-use-trash=false >/dev/null 2>&1 || true
+            echo "🧹 檢測到待清理清單，正在同步銷毀 Google Drive 上的舊檔與暫存..."
+            # 去除重複項後逐行刪除
+            sort -u pending_cloud_purges.txt | while IFS= read -r cloud_file; do
+              if [ -n "$cloud_file" ]; then
+                rclone deletefile "$cloud_file" --config rclone.conf --drive-use-trash=false >/dev/null 2>&1 || true
               fi
-            done < pending_cloud_purges.txt
+            done
             rm -f pending_cloud_purges.txt
-            echo "✅ 雲端暫存檔清理完畢！"
+            echo "✅ Google Drive 雲端舊檔與暫存已徹底銷毀！"
+          else
+            echo "ℹ️ 無待清理之雲端暫存檔。"
           fi
 
           # 清除敏感金鑰與設定檔
