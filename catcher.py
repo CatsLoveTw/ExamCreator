@@ -3420,36 +3420,45 @@ class ExamParser:
             year_digits = year
 
         # 1. 決定大類資料夾名稱與學校獨立目錄（注入上下學期標籤，防止 114上 與 114下 同名覆蓋）
-        sem_tag = "上" if "上學期" in year else ("下" if "下學期" in year else "")
+        # 🚨 全面統一考科名稱（拔除「考科」、「科」等干擾字，避免前端分裂卡片）
+        clean_subj_name = re.sub(r'(?:考科|科)$', '', str(subject).strip())
+        if clean_subj_name in ["高中數學甲", "數甲"]: clean_subj_name = "數學甲"
+        elif clean_subj_name in ["高中數學乙", "數乙"]: clean_subj_name = "數學乙"
+        elif clean_subj_name in ["高中數學A", "數A"]: clean_subj_name = "數學A"
+        elif clean_subj_name in ["高中數學B", "數B"]: clean_subj_name = "數學B"
+        elif clean_subj_name in ["國綜", "國語文"]: clean_subj_name = "國文"
+        elif clean_subj_name in ["國語文寫作", "寫作測驗"]: clean_subj_name = "國寫"
+
+        is_makeup = any(k in str(mock_tag) or k in str(year) for k in ["補考", "補辦", "代考"])
+        makeup_tag = "_補考" if is_makeup else ""
+        makeup_src = "補考_" if is_makeup else ""
+        sem_tag = "上" if "上學期" in str(year) else ("下" if "下學期" in str(year) else "")
+
+        try: y_val = int(year_digits)
+        except ValueError: y_val = 111
+
         if exam_type == "SCHOOL":
             safe_school = safe_filename(school_name) if school_name else "通用學校"
             type_folder = os.path.join("學校定期考", safe_school)
-            spec_name = f"{safe_year}_{safe_school}{mock_tag}_{safe_subject}"
-            standard_academic_year = f"{year_digits}{sem_tag}定期考"
-            standard_exam_source = f"{year_digits}學年度{sem_tag+'學期' if sem_tag else ''}{school_name if school_name else ''}定期考{mock_tag}_{subject}"
+            spec_name = f"{y_val}學年度_{safe_school}{mock_tag}_{clean_subj_name}"
+            standard_academic_year = f"{y_val}{sem_tag}定期考"
+            standard_exam_source = f"{y_val}學年度{sem_tag+'學期' if sem_tag else ''}{school_name if school_name else ''}定期考{mock_tag}_{clean_subj_name}"
         elif exam_type == "MOCK":
             type_folder = "模擬考"
-            spec_name = f"{safe_year}_模擬考{mock_tag}_{safe_subject}"
-            standard_academic_year = f"{year_digits}模考"
-            standard_exam_source = f"{year_digits}學年度模擬考{mock_tag}_{subject}"
+            spec_name = f"{y_val}學年度_模擬考{mock_tag}_{clean_subj_name}"
+            standard_academic_year = f"{y_val}模考{mock_tag}"
+            standard_exam_source = f"{y_val}學年度模擬考{mock_tag}_{clean_subj_name}"
         elif exam_type == "GSAT":
             type_folder = "學測"
-            spec_name = f"{safe_year}_學測_{safe_subject}"
-            standard_academic_year = f"{year_digits}學測"
-            standard_exam_source = f"{year_digits}學年度學科能力測驗{subject}"
+            spec_name = f"{y_val}學年度_學測{makeup_tag}_{clean_subj_name}"
+            standard_academic_year = f"{y_val}學測{makeup_tag}"
+            standard_exam_source = f"{y_val}學年度學科能力測驗{makeup_src}{clean_subj_name}"
         else: # AST（大考指考 / 分科測驗）
-            type_folder = "分科指考"
-            # 🚨 嚴謹依據學制歷史判定：民國 111 年起實施 108 課綱稱為「分科測驗」，110 年以前一律為「指定科目考試（指考）」
-            try:
-                y_val = int(year_digits)
-            except ValueError:
-                y_val = 111
             ast_short = "分科" if y_val >= 111 else "指考"
             ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
-
-            spec_name = f"{safe_year}_{ast_short}{mock_tag}_{safe_subject}"
-            standard_academic_year = f"{year_digits}{ast_short}{mock_tag}"
-            standard_exam_source = f"{year_digits}學年度{ast_full}{mock_tag.strip('_')}{subject}"
+            spec_name = f"{y_val}學年度_{ast_short}{makeup_tag}_{clean_subj_name}"
+            standard_academic_year = f"{y_val}{ast_short}{makeup_tag}"
+            standard_exam_source = f"{y_val}學年度{ast_full}{makeup_src}{clean_subj_name}"
             
         spec_name = re.sub(r'[\s\n\r\t]+', '', spec_name)
 
