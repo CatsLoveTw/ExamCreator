@@ -3478,8 +3478,9 @@ class ExamParser:
             standard_academic_year = f"{y_val}學測{makeup_tag}"
             standard_exam_source = f"{y_val}學年度學科能力測驗{makeup_src}{clean_subj_name}"
         else: # AST（大考指考 / 分科測驗）
+            type_folder = "分科指考"
             ast_short = "分科" if y_val >= 111 else "指考"
-            ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
+            ask_full = "分科測驗" if y_val >= 111 else "指定科目考試"
             spec_name = f"{y_val}學年度_{ast_short}{makeup_tag}_{clean_subj_name}"
             standard_academic_year = f"{y_val}{ast_short}{makeup_tag}"
             standard_exam_source = f"{y_val}學年度{ast_full}{makeup_src}{clean_subj_name}"
