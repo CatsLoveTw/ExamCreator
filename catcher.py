@@ -1383,14 +1383,6 @@ def start_dashboard_web_server(port=8080, manager=None):
                     tot_http = sum(sum(cat.values()) for cat in GLOBAL_METRICS.proxy_stats.values())
                     ok_http = sum(cat.get("2xx", 0) for cat in GLOBAL_METRICS.proxy_stats.values())
                     success_rate = f"{(ok_http / tot_http * 100):.1f}%" if tot_http > 0 else "100%"
-                    
-                    # 🚀 讀取最新融合的歷史總統計
-                    h_base = GLOBAL_METRICS.history_base
-                    cum_q = h_base.get("cumulative_questions", 0) + GLOBAL_METRICS.completed_questions
-                    cum_p = h_base.get("cumulative_papers", 0) + GLOBAL_METRICS.completed_papers
-                    cum_runs = h_base.get("total_runs", 1)
-                    cum_http_200 = h_base.get("cumulative_http_counts", {}).get("200", 0) + GLOBAL_METRICS.http_counts.get("200", 0)
-                    cum_http_429 = h_base.get("cumulative_http_counts", {}).get("429", 0) + GLOBAL_METRICS.http_counts.get("429", 0)
 
                     data = {
                         "uptime_formatted": str(datetime.timedelta(seconds=uptime_sec)),
@@ -1398,7 +1390,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "current_paper": GLOBAL_METRICS.current_paper,
                         "paper_progress": f"{GLOBAL_METRICS.completed_papers}/{GLOBAL_METRICS.total_papers}",
                         "progress": f"{GLOBAL_METRICS.completed_questions}/{GLOBAL_METRICS.total_questions}",
-                        "time_per_q_str": time_per_q_str,  # 🆕 新的速度指標
+                        "time_per_q_str": time_per_q_str,
                         "success_rate": success_rate,
                         "disk_str": disk_str,
                         "key_health": key_health,
@@ -1410,7 +1402,6 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "exam_progress": GLOBAL_METRICS.exam_progress,
                         "key_statuses": key_statuses,
                         "recent_logs": GLOBAL_METRICS.recent_logs,
-                        # 📜 傳遞完整的時間序列歷史資料
                         "history_data": GLOBAL_METRICS.history_data
                     }
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
