@@ -1234,12 +1234,15 @@ class LiveDashboardMetrics:
         self.current_paper = "準備就緒，等待任務..."
         self.total_papers = 0
         self.completed_papers = 0
-        self.total_questions = 0
-        self.completed_questions = 0
+        
+        # 🚨 關鍵分離：當前考卷進度 vs 本次運行實質新解題數
+        self.paper_total_questions = 0
+        self.paper_completed_questions = 0
+        self.session_new_solved_questions = 0 # 累計新解題目，換考卷絕對不歸零！
+        
         self.diagram_count = 0
         self.arbitration_count = 0
         
-        # 🚨 全新精細化追蹤字典
         self.proxy_stats = {}   # {proxy: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
         self.model_stats = {}   # {model: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
         self.key_stats = {}     # {masked_key: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
@@ -1250,30 +1253,41 @@ class LiveDashboardMetrics:
         self.history_data = self.load_history()
         self.save_history()
 
+    def set_current_paper(self, paper_name: str, total_q: int, existing_partial_q: int):
+        """切換考卷時呼叫：更新單卷進度，但【絕對不重置】本次運行的累計新解題數！"""
+        with self.lock:
+            self.current_paper = paper_name
+            self.paper_total_questions = total_q
+            self.paper_completed_questions = existing_partial_q
+        self.save_history()
+
+    def record_new_solved_question(self):
+        """只有在真正呼叫 AI 且驗證通過新題目時才呼叫：增加實質解題數"""
+        with self.lock:
+            self.session_new_solved_questions += 1
+            self.paper_completed_questions += 1
+        self.save_history()
+
     def load_history(self) -> dict:
-        """載入基於時間序列的全新歷史資料結構"""
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    # 確保相容舊格式，轉為時間序列
                     if "runs" not in data:
                         data = {"runs": []}
                     return data
             except Exception as e:
-                logging.warning(f"讀取歷史紀錄失敗，將初始化新紀錄: {e}")
+                pass
         return {"runs": []}
 
     def save_history(self):
-        """將當前 session 無損寫入歷史資料庫，形成時間序列，供前端篩選起止時間"""
         with self.lock:
             try:
-                # 構建當前 Session 的快照
                 current_session = {
                     "session_id": self.session_id,
                     "start_time": self.run_start_str,
                     "last_update": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "completed_questions": self.completed_questions,
+                    "completed_questions": self.session_new_solved_questions, # 只記錄實質解題數！
                     "completed_papers": self.completed_papers,
                     "diagram_count": self.diagram_count,
                     "proxy_stats": self.proxy_stats,
@@ -1282,7 +1296,6 @@ class LiveDashboardMetrics:
                     "exam_progress": self.exam_progress
                 }
 
-                # 尋找是否已有此 session，有則更新，無則新增
                 existing_idx = next((i for i, r in enumerate(self.history_data["runs"]) if r.get("session_id") == self.session_id), -1)
                 if existing_idx >= 0:
                     self.history_data["runs"][existing_idx] = current_session
@@ -1291,31 +1304,25 @@ class LiveDashboardMetrics:
 
                 with open(self.history_file, "w", encoding="utf-8") as f:
                     json.dump(self.history_data, f, ensure_ascii=False, indent=4)
-            except Exception as e:
+            except Exception:
                 pass
 
     def record_http(self, proxy_name: str, model_name: str, masked_key: str, code: int):
-        """高精度記錄各維度的 HTTP 狀態 (分類為 2xx, 4xx, 5xx)"""
         with self.lock:
             code_str = str(code)
             category = "2xx" if code_str.startswith("2") else ("4xx" if code_str.startswith("4") else ("5xx" if code_str.startswith("5") else "other"))
-            
             short_p = proxy_name.split("//")[-1].split("/")[0] if "//" in proxy_name else proxy_name
             
-            # 初始化結構
             if short_p not in self.proxy_stats: self.proxy_stats[short_p] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
             if model_name not in self.model_stats: self.model_stats[model_name] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
             if masked_key not in self.key_stats: self.key_stats[masked_key] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
 
-            # 計數
             self.proxy_stats[short_p][category] += 1
             self.model_stats[model_name][category] += 1
             self.key_stats[masked_key][category] += 1
-            
         self.save_history()
 
     def update_exam_progress(self, exam_name: str, completed: int, total: int, status: str):
-        """更新單張考卷的解題進度"""
         with self.lock:
             self.exam_progress[exam_name] = {
                 "completed": completed,
@@ -1370,15 +1377,17 @@ def start_dashboard_web_server(port=8080, manager=None):
                     time_limit_sec = int(MAX_EXECUTION_TIME_SECONDS)
                     time_pct = min(100, int((uptime_sec / time_limit_sec) * 100))
                     
-                    # 🚀 計算「平均完成一題要花多少時間」
+                    # 🚀 計算「平均完成一題要花多少時間」（嚴格排除 partial 題目干擾！）
                     time_per_q_str = "計算中..."
-                    if GLOBAL_METRICS.completed_questions > 0:
-                        sec_per_q = uptime_sec / GLOBAL_METRICS.completed_questions
+                    if GLOBAL_METRICS.session_new_solved_questions > 0:
+                        sec_per_q = uptime_sec / GLOBAL_METRICS.session_new_solved_questions
                         if sec_per_q >= 60:
                             time_per_q_str = f"{int(sec_per_q // 60)} 分 {int(sec_per_q % 60)} 秒 / 題"
                         else:
                             time_per_q_str = f"{int(sec_per_q)} 秒 / 題"
-
+                    else:
+                        time_per_q_str = "等待新題目完成..."
+                        
                     # 計算 2xx 成功率 (從 proxy_stats 總和推算)
                     tot_http = sum(sum(cat.values()) for cat in GLOBAL_METRICS.proxy_stats.values())
                     ok_http = sum(cat.get("2xx", 0) for cat in GLOBAL_METRICS.proxy_stats.values())
@@ -1389,7 +1398,8 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "time_pct": time_pct,
                         "current_paper": GLOBAL_METRICS.current_paper,
                         "paper_progress": f"{GLOBAL_METRICS.completed_papers}/{GLOBAL_METRICS.total_papers}",
-                        "progress": f"{GLOBAL_METRICS.completed_questions}/{GLOBAL_METRICS.total_questions}",
+                        "progress": f"{GLOBAL_METRICS.paper_completed_questions}/{GLOBAL_METRICS.paper_total_questions}",
+                        "session_solved": GLOBAL_METRICS.session_new_solved_questions, # 🆕 本次運行實質總題數
                         "time_per_q_str": time_per_q_str,
                         "success_rate": success_rate,
                         "disk_str": disk_str,
@@ -1404,6 +1414,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "recent_logs": GLOBAL_METRICS.recent_logs,
                         "history_data": GLOBAL_METRICS.history_data
                     }
+                    
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
             else:
                 self.send_response(200)
@@ -1413,15 +1424,15 @@ def start_dashboard_web_server(port=8080, manager=None):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Exam Parser 遙測中心</title>
+                    <title>Exam Parser 終極遙測中心</title>
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
                         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-                        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
+                        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #334155; padding-bottom: 15px; flex-wrap: wrap; gap: 15px; }
                         h1 { color: #38bdf8; margin: 0; }
-                        .filter-box { background: #1e293b; padding: 10px 15px; border-radius: 8px; border: 1px solid #475569; display: flex; gap: 10px; align-items: center; }
-                        .filter-box input[type="date"] { background: #0f172a; color: #f8fafc; border: 1px solid #334155; padding: 5px; border-radius: 4px; }
+                        .filter-box { background: #1e293b; padding: 12px 18px; border-radius: 8px; border: 1px solid #475569; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+                        .filter-box input[type="date"], .filter-box select { background: #0f172a; color: #f8fafc; border: 1px solid #334155; padding: 6px 10px; border-radius: 6px; font-size: 0.9rem; }
                         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; max-width: 1400px; margin: 0 auto; }
                         .card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; overflow: hidden; }
                         h2 { margin-top: 0; color: #38bdf8; font-size: 1.1rem; border-bottom: 1px solid #334155; padding-bottom: 10px; }
@@ -1437,46 +1448,50 @@ def start_dashboard_web_server(port=8080, manager=None):
                         .log-box { background: #020617; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #a7f3d0; max-height: 200px; overflow-y: auto; }
                         .progress-bar-bg { background: #334155; border-radius: 8px; height: 8px; width: 100%; margin-top: 5px; }
                         .progress-bar-fill { background: linear-gradient(90deg, #38bdf8, #4ade80); height: 100%; border-radius: 8px;}
+                        .record-hint { color: #38bdf8; font-weight: bold; margin-left: 5px; }
                     </style>
                 </head>
                 <body>
                     <div class="header-container" style="max-width: 1400px; margin: 0 auto 25px auto;">
                         <h1>⚡ Exam Parser 終極遙測儀表板</h1>
                         <div class="filter-box">
-                            <label>歷史資料篩選起訖：</label>
-                            <input type="date" id="start-date"> 
+                            <label>📅 篩選起訖：</label>
+                            <input type="date" id="start-date" onchange="onDateRangeChange()"> 
                             <span>至</span> 
-                            <input type="date" id="end-date">
-                            <button onclick="updateDisplay()" style="background:#38bdf8;color:#0f172a;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;">套用</button>
+                            <input type="date" id="end-date" onchange="onDateRangeChange()">
+                            
+                            <label style="margin-left: 10px;">🎯 選擇檢視紀錄：</label>
+                            <select id="session-select" onchange="renderSelectedSession()">
+                                <option value="all">載入紀錄中...</option>
+                            </select>
                         </div>
                     </div>
 
                     <div class="grid">
-                        <!-- 即時監控區塊 -->
                         <div class="card">
-                            <h2>📌 即時任務與速度指標 (Live)</h2>
+                            <h2>📌 當前運行與即時速度 (Live Session)</h2>
                             <div>目前考卷：<span id="live-paper" style="color:#f1f5f9;font-weight:bold;">-</span></div>
-                            <div style="margin-top:6px;">當前解題進度：<span id="live-progress" class="stat-val" style="font-size:1.4rem;">0/0</span></div>
-                            <div style="margin-top:6px;">平均解題速度：<span id="live-speed" style="color:#f59e0b;font-weight:bold;font-size:1.2rem;">計算中...</span></div>
+                            <div style="margin-top:6px;">當前考卷進度：<span id="live-progress" class="stat-val" style="font-size:1.3rem;">0/0</span></div>
+                            <div style="margin-top:6px;">本次累計新解題數：<span id="live-session-solved" style="color:#38bdf8;font-weight:bold;font-size:1.2rem;">0</span> 題</div>
+                            <div style="margin-top:6px;">實質單題耗時：<span id="live-speed" style="color:#f59e0b;font-weight:bold;font-size:1.2rem;">計算中...</span></div>
                             <div style="margin-top:6px;font-size:0.85rem;color:#94a3b8;">運行時間：<span id="uptime">-</span> | 題庫資產：<span id="disk-size" style="color:#4ade80;">0 MB</span></div>
                         </div>
 
-                        <!-- 歷史彙總區塊 -->
                         <div class="card">
-                            <h2>📊 篩選區間總結 (Aggregated)</h2>
+                            <h2>📊 檢視目標統計總結 (<span id="view-target-title" class="record-hint">區間綜合加總</span>)</h2>
                             <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-                                <div>總解題數：<span id="agg-questions" class="stat-val">0</span> 題</div>
+                                <div>實質新解題數：<span id="agg-questions" class="stat-val">0</span> 題</div>
                                 <div>完工考卷：<span id="agg-papers" class="stat-val">0</span> 份</div>
                                 <div>繪製圖解：<span id="agg-diagrams" class="stat-val" style="color:#38bdf8;">0</span> 張</div>
                                 <div style="width:100%;margin-top:5px;">
-                                    總體 HTTP 成功率：<span id="agg-success-rate" style="font-size:1.2rem;font-weight:bold;color:#38bdf8;">100%</span>
+                                    HTTP 請求成功率：<span id="agg-success-rate" style="font-size:1.2rem;font-weight:bold;color:#38bdf8;">100%</span>
                                 </div>
                             </div>
+                            <div style="margin-top: 10px; font-size: 0.8rem; color: #94a3b8;" id="session-detail-info">正在匯總所有符合區間的紀錄</div>
                         </div>
 
-                        <!-- 考卷進度表 -->
                         <div class="card" style="grid-column: span 2;">
-                            <h2>📑 考卷完成度狀態追蹤 (Exam Progress)</h2>
+                            <h2>📑 考卷進度狀態追蹤 (Exam Progress)</h2>
                             <div class="table-container">
                                 <table>
                                     <thead><tr><th>考卷名稱</th><th>總題數</th><th>已完成</th><th>進度條</th><th>狀態</th></tr></thead>
@@ -1485,9 +1500,8 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
-                        <!-- 代理 Proxy 狀態 -->
                         <div class="card">
-                            <h2>🚀 多雲代理出口戰報 (Proxy Stats)</h2>
+                            <h2>🚀 代理節點出口戰報 (Proxy Stats)</h2>
                             <div class="table-container">
                                 <table>
                                     <thead><tr><th>Proxy 節點</th><th><span class="badge badge-2xx">2xx</span></th><th><span class="badge badge-4xx">4xx</span></th><th><span class="badge badge-5xx">5xx</span></th></tr></thead>
@@ -1496,9 +1510,8 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
-                        <!-- 模型 Model 狀態 -->
                         <div class="card">
-                            <h2>🤖 各模型負載統計 (Model Stats)</h2>
+                            <h2>🤖 各模型調用統計 (Model Stats)</h2>
                             <div class="table-container">
                                 <table>
                                     <thead><tr><th>模型名稱</th><th><span class="badge badge-2xx">2xx</span></th><th><span class="badge badge-4xx">4xx</span></th><th><span class="badge badge-5xx">5xx</span></th></tr></thead>
@@ -1507,7 +1520,6 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
-                        <!-- 金鑰 Key 狀態 -->
                         <div class="card" style="grid-column: span 2;">
                             <h2>🔑 API 金鑰損耗深度監控 (Key Stats)</h2>
                             <div class="table-container">
@@ -1518,7 +1530,6 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
-                        <!-- 即時動態日誌 -->
                         <div class="card" style="grid-column: span 2;">
                             <h2>📜 即時處理動態日誌 (Live Activity)</h2>
                             <div class="log-box" id="log-box">等待動態更新中...</div>
@@ -1527,8 +1538,9 @@ def start_dashboard_web_server(port=8080, manager=None):
 
                     <script>
                         let lastFetchedData = null;
+                        let matchedRuns = [];
 
-                        // 預設篩選區間：過去 7 天
+                        // 預設篩選區間：過去 7 天到今天
                         const today = new Date();
                         const pastWeek = new Date(today);
                         pastWeek.setDate(pastWeek.getDate() - 7);
@@ -1539,11 +1551,25 @@ def start_dashboard_web_server(port=8080, manager=None):
                             try {
                                 const res = await fetch('/api/data');
                                 lastFetchedData = await res.json();
-                                updateDisplay();
+                                updateLiveStatus();
+                                onDateRangeChange(false); // 更新篩選清單
                             } catch(e) { console.error("Fetch error:", e); }
                         }
 
+                        function updateLiveStatus() {
+                            if (!lastFetchedData) return;
+                            const d = lastFetchedData;
+                            document.getElementById('live-paper').innerText = d.current_paper;
+                            document.getElementById('live-progress').innerText = d.progress;
+                            document.getElementById('live-session-solved').innerText = d.session_solved || 0;
+                            document.getElementById('live-speed').innerText = d.time_per_q_str || "計算中...";
+                            document.getElementById('uptime').innerText = d.uptime_formatted;
+                            document.getElementById('disk-size').innerText = d.disk_str;
+                            document.getElementById('log-box').innerHTML = (d.recent_logs || []).join('<br>') || '尚無動態';
+                        }
+
                         function mergeStats(target, source) {
+                            if (!source) return;
                             for (const [key, stats] of Object.entries(source)) {
                                 if (!target[key]) target[key] = { "2xx": 0, "4xx": 0, "5xx": 0, "other": 0 };
                                 target[key]["2xx"] += (stats["2xx"] || 0);
@@ -1553,63 +1579,94 @@ def start_dashboard_web_server(port=8080, manager=None):
                             }
                         }
 
-                        function updateDisplay() {
+                        // 當使用者變更起訖日期時，動態列出符合該起訖日期的所有執行紀錄
+                        function onDateRangeChange(forceReset = true) {
                             if (!lastFetchedData) return;
                             const d = lastFetchedData;
-                            
-                            // 1. 更新即時指標
-                            document.getElementById('live-paper').innerText = d.current_paper;
-                            document.getElementById('live-progress').innerText = `${d.progress}`;
-                            document.getElementById('live-speed').innerText = d.time_per_q_str || "計算中...";
-                            document.getElementById('uptime').innerText = d.uptime_formatted;
-                            document.getElementById('disk-size').innerText = d.disk_str;
-                            document.getElementById('log-box').innerHTML = (d.recent_logs || []).join('<br>') || '尚無動態';
 
-                            // 2. 獲取篩選日期
                             const sDateStr = document.getElementById('start-date').value;
                             const eDateStr = document.getElementById('end-date').value;
                             const sTime = sDateStr ? new Date(sDateStr + "T00:00:00").getTime() : 0;
                             const eTime = eDateStr ? new Date(eDateStr + "T23:59:59").getTime() : Infinity;
 
-                            // 3. 聚合資料結構準備
-                            let aggQ = 0, aggP = 0, aggD = 0;
-                            let aggProxy = {}, aggModel = {}, aggKey = {}, aggExams = {};
+                            const selectEl = document.getElementById('session-select');
+                            const prevVal = selectEl.value;
 
-                            // 4. 融合歷史資料 (History Runs)
+                            matchedRuns = [];
                             if (d.history_data && d.history_data.runs) {
                                 d.history_data.runs.forEach(run => {
-                                    const runTime = new Date(run.start_time.replace(" ", "T")).getTime();
-                                    if (runTime >= sTime && runTime <= eTime) {
-                                        aggQ += (run.completed_questions || 0);
-                                        aggP += (run.completed_papers || 0);
-                                        aggD += (run.diagram_count || 0);
-                                        if (run.proxy_stats) mergeStats(aggProxy, run.proxy_stats);
-                                        if (run.model_stats) mergeStats(aggModel, run.model_stats);
-                                        if (run.key_stats) mergeStats(aggKey, run.key_stats);
-                                        if (run.exam_progress) {
-                                            for(const [exam, prog] of Object.entries(run.exam_progress)){
-                                                aggExams[exam] = prog; // 覆寫為最新狀態
-                                            }
-                                        }
+                                    const rTime = new Date(run.start_time.replace(" ", "T")).getTime();
+                                    if (rTime >= sTime && rTime <= eTime) {
+                                        matchedRuns.push(run);
                                     }
                                 });
                             }
 
-                            // 5. 融合當前即時 Session 資料 (若當前時間符合篩選區間)
-                            const nowTime = new Date().getTime();
-                            if (nowTime >= sTime && nowTime <= eTime) {
-                                aggQ += (d.completed_questions || 0); // 注意：若即時資料已寫入 history_data 的最後一筆，此處可能需防連加。目前的 Python 設計是覆寫最後一筆，所以此處不累加即時的 Q 數量，僅覆寫統計字典。
-                                mergeStats(aggProxy, d.proxy_stats || {});
-                                mergeStats(aggModel, d.model_stats || {});
-                                mergeStats(aggKey, d.key_stats || {});
-                                if (d.exam_progress) {
-                                    for(const [exam, prog] of Object.entries(d.exam_progress)){
-                                        aggExams[exam] = prog;
+                            // 重新產生下拉選項
+                            let optionsHTML = `<option value="all">📌 [區間綜合加總] (共 ${matchedRuns.length} 筆紀錄)</option>`;
+                            matchedRuns.forEach((run, idx) => {
+                                const qCnt = run.completed_questions || 0;
+                                const pCnt = run.completed_papers || 0;
+                                optionsHTML += `<option value="${run.session_id}">🕒 [${run.start_time}] 解題: ${qCnt} 題 | 完工: ${pCnt} 卷</option>`;
+                            });
+
+                            selectEl.innerHTML = optionsHTML;
+
+                            if (!forceReset && Array.from(selectEl.options).some(o => o.value === prevVal)) {
+                                selectEl.value = prevVal;
+                            } else {
+                                selectEl.value = "all";
+                            }
+
+                            renderSelectedSession();
+                        }
+
+                        // 使用者點選下拉選單切換檢視特定紀錄
+                        function renderSelectedSession() {
+                            if (!lastFetchedData) return;
+                            const d = lastFetchedData;
+                            const selectedVal = document.getElementById('session-select').value;
+
+                            let aggQ = 0, aggP = 0, aggD = 0;
+                            let aggProxy = {}, aggModel = {}, aggKey = {}, aggExams = {};
+                            let detailInfo = "";
+
+                            if (selectedVal === "all") {
+                                // 區間全部加總
+                                document.getElementById('view-target-title').innerText = "區間綜合加總";
+                                detailInfo = `已匯總起訖範圍內共 ${matchedRuns.length} 次執行的完整統計`;
+
+                                matchedRuns.forEach(run => {
+                                    aggQ += (run.completed_questions || 0);
+                                    aggP += (run.completed_papers || 0);
+                                    aggD += (run.diagram_count || 0);
+                                    mergeStats(aggProxy, run.proxy_stats);
+                                    mergeStats(aggModel, run.model_stats);
+                                    mergeStats(aggKey, run.key_stats);
+                                    if (run.exam_progress) {
+                                        for(const [exam, prog] of Object.entries(run.exam_progress)){
+                                            aggExams[exam] = prog;
+                                        }
                                     }
+                                });
+                            } else {
+                                // 檢視特定的一次 Session 紀錄！
+                                const targetRun = matchedRuns.find(r => r.session_id === selectedVal);
+                                if (targetRun) {
+                                    document.getElementById('view-target-title').innerText = `紀錄 #${targetRun.session_id}`;
+                                    detailInfo = `啟動時間：${targetRun.start_time} | 最後更新：${targetRun.last_update || targetRun.start_time}`;
+                                    
+                                    aggQ = targetRun.completed_questions || 0;
+                                    aggP = targetRun.completed_papers || 0;
+                                    aggD = targetRun.diagram_count || 0;
+                                    mergeStats(aggProxy, targetRun.proxy_stats);
+                                    mergeStats(aggModel, targetRun.model_stats);
+                                    mergeStats(aggKey, targetRun.key_stats);
+                                    aggExams = targetRun.exam_progress || {};
                                 }
                             }
 
-                            // 6. 渲染彙總數字
+                            document.getElementById('session-detail-info').innerText = detailInfo;
                             document.getElementById('agg-questions').innerText = aggQ;
                             document.getElementById('agg-papers').innerText = aggP;
                             document.getElementById('agg-diagrams').innerText = aggD;
@@ -1621,21 +1678,21 @@ def start_dashboard_web_server(port=8080, manager=None):
                             }
                             document.getElementById('agg-success-rate').innerText = totAll > 0 ? ((tot2xx / totAll) * 100).toFixed(1) + "%" : "100%";
 
-                            // 7. 渲染 Proxy 表格
+                            // 渲染 Proxy 表格
                             let pHTML = '';
                             for (const [p, s] of Object.entries(aggProxy)) {
                                 pHTML += `<tr><td><b>${p}</b></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td></tr>`;
                             }
                             document.getElementById('proxy-rows').innerHTML = pHTML || '<tr><td colspan="4">無資料</td></tr>';
 
-                            // 8. 渲染 Model 表格
+                            // 渲染 Model 表格
                             let mHTML = '';
                             for (const [m, s] of Object.entries(aggModel)) {
                                 mHTML += `<tr><td><b>${m}</b></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td></tr>`;
                             }
                             document.getElementById('model-rows').innerHTML = mHTML || '<tr><td colspan="4">無資料</td></tr>';
 
-                            // 9. 渲染 Key 表格
+                            // 渲染 Key 表格
                             let kHTML = '';
                             for (const [k, s] of Object.entries(aggKey)) {
                                 const kTotal = s["2xx"] + s["4xx"] + s["5xx"] + s["other"];
@@ -1644,7 +1701,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             }
                             document.getElementById('key-rows').innerHTML = kHTML || '<tr><td colspan="5">無資料</td></tr>';
 
-                            // 10. 渲染考卷進度表格
+                            // 渲染 考卷進度表格
                             let eHTML = '';
                             for (const [exam, s] of Object.entries(aggExams)) {
                                 const total = s.total || 1;
@@ -1659,7 +1716,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                                     <td style="color:${statusColor}">${s.status}</td>
                                 </tr>`;
                             }
-                            document.getElementById('exam-rows').innerHTML = eHTML || '<tr><td colspan="5">尚未開始解析考卷</td></tr>';
+                            document.getElementById('exam-rows').innerHTML = eHTML || '<tr><td colspan="5">此紀錄無考卷資訊</td></tr>';
                         }
 
                         setInterval(fetchData, 3000);
@@ -1669,6 +1726,8 @@ def start_dashboard_web_server(port=8080, manager=None):
                 </html>
                 """
                 self.wfile.write(html.encode("utf-8"))
+                    
+
 
     server = HTTPServer(('0.0.0.0', port), DashboardHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -5011,13 +5070,11 @@ class ExamParser:
         # 💡 將已加載的【有效詳解】建立成對位索引表（以題號+題型為複合鍵，防止跨大題碰撞）
         partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
-        # 📊 連動更新遠端 Web 儀表板當前考卷與題目進度
-        with GLOBAL_METRICS.lock:
-            GLOBAL_METRICS.current_paper = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
-            GLOBAL_METRICS.total_questions = len(all_extracted_questions)
-            GLOBAL_METRICS.completed_questions = len(loaded_partial_questions)
-        GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(loaded_partial_questions), len(all_extracted_questions), "解題中...")
-        GLOBAL_METRICS.add_log(f"🚀 開始解析考卷：{GLOBAL_METRICS.current_paper} (總題數：{len(all_extracted_questions)})")
+        # 📊 連動更新遠端 Web 儀表板當前考卷與題目進度 (確保不污染總累計題數)
+        paper_label = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+        GLOBAL_METRICS.set_current_paper(paper_label, len(all_extracted_questions), len(loaded_partial_questions))
+        GLOBAL_METRICS.update_exam_progress(paper_label, len(loaded_partial_questions), len(all_extracted_questions), "解題中...")
+        GLOBAL_METRICS.add_log(f"🚀 開始解析考卷：{paper_label} (總題數：{len(all_extracted_questions)})")
         
         task_queue = []
         for q in all_extracted_questions:
@@ -5660,9 +5717,8 @@ class ExamParser:
                                 update_subject_taxonomy(q_data.get("sub_subject", subject), q_data)
                                 all_final_questions.append(q_data)
                                 
-                                # 📊 即時更新網頁儀表板進度與滾動日誌
-                                with GLOBAL_METRICS.lock:
-                                    GLOBAL_METRICS.completed_questions = len(all_final_questions)
+                                # 📊 即時更新網頁儀表板進度（實質新解題目計數 +1）
+                                GLOBAL_METRICS.record_new_solved_question()
                                 GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(all_final_questions), len(all_extracted_questions), "解題中...")
                                 GLOBAL_METRICS.add_log(f"✅ 題號 {q_data['question_number']} 詳解與圖解通過審查！")
                                 
