@@ -1414,7 +1414,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "history_data": GLOBAL_METRICS.history_data
                     }
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
-           else:
+            else:
                 self.send_response(200)
                 self.send_header("Content-type", "text/html; charset=utf-8")
                 self.end_headers()
