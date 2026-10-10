@@ -235,17 +235,40 @@ def deduplicate_questions(questions: list) -> list:
                 logging.warning(f"🔄 [智能重題仲裁] 偵測到重複題目：題號 {q_num} (相似度: {similarity:.2f})")
                 logging.warning(f"  -> 現存版本品質分: {score_old} | 新版本品質分: {score_new}")
                 
-                # 保留品質評分更高、推導更豐富的版本
-                if score_new > score_old:
-                    logging.info(f"  -> 🏆 新版本詳解品質更佳，執行覆寫保留！")
-                    existing.clear()
-                    existing.update(q)
-                else:
-                    logging.info(f"  -> 🛡️ 現存版本詳解品質更佳，保留現有成果。")
-                    # 若新題目含有圖片而舊題目沒有，補充圖片資訊
-                    if not existing.get("image_paths") and q.get("image_paths"):
-                        existing["image_paths"] = q["image_paths"]
-                        existing["has_image"] = True
+                # 🚨 詳解精華融合：吸收兩者之長，將另一版的獨特另解/速解無損拼接
+                higher_q = q if score_new > score_old else existing
+                lower_q = existing if score_new > score_old else q
+                
+                h_sol = str(higher_q.get("detailed_solution", "")).strip()
+                l_sol = str(lower_q.get("detailed_solution", "")).strip()
+                
+                # 檢查次要版本是否有獨特另解
+                for alt_kw in ["### 【另解", "### 【速解", "### 【座標化", "### 【幾何直覺"]:
+                    if alt_kw in l_sol and alt_kw not in h_sol:
+                        part = l_sol.split(alt_kw, 1)[1]
+                        end_idx = part.find("\n### ")
+                        alt_text = alt_kw + (part[:end_idx].strip() if end_idx != -1 else part.strip())
+                        if "**綜上所述" in alt_text:
+                            alt_text = alt_text.split("**綜上所述")[0].strip()
+                        if len(alt_text) > 40:
+                            if "**綜上所述" in h_sol:
+                                sp = h_sol.split("**綜上所述", 1)
+                                h_sol = sp[0].strip() + "\n\n" + alt_text + "\n\n**綜上所述" + sp[1]
+                            else:
+                                h_sol += "\n\n" + alt_text
+                            logging.info(f"  -> 💡 [另解精華融合] 成功將另一版本的獨創另解融入主詳解！")
+                            
+                higher_q["detailed_solution"] = h_sol
+                
+                # 圖片與考點聯集
+                if lower_q.get("image_paths"):
+                    higher_q["image_paths"] = list(dict.fromkeys(higher_q.get("image_paths", []) + lower_q["image_paths"]))
+                    higher_q["has_image"] = len(higher_q["image_paths"]) > 0
+                if lower_q.get("techniques_used"):
+                    higher_q["techniques_used"] = list(dict.fromkeys(higher_q.get("techniques_used", []) + lower_q["techniques_used"]))
+                    
+                existing.clear()
+                existing.update(higher_q)
                 break
                 
         if not is_duplicate:
