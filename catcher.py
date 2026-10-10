@@ -1094,14 +1094,15 @@ class SolutionValidatorBatch(BaseModel):
 class FreeTierKey:
     def __init__(self, api_key: str, custom_base_url: Optional[str] = None):
         self.api_key = api_key
-        # 🚀 核心修復：快取連線池並加上執行緒鎖，確保多線程併發存取安全
+        # 快取連線池並加上執行緒鎖
         self.clients_cache: Dict[str, genai.Client] = {}
         self.cache_lock = threading.Lock()
         self.client = self.get_client(custom_base_url)
-        self.rpd_exhausted = False
-        self.rpd_reset_time = 0.0
+        
+        # 🚨 升級：改為「各模型獨立記錄 RPD 耗盡狀態」，拒絕跨模型連坐！
+        self.model_rpd_exhausted: Dict[str, float] = {}
 
-        # 🚨 各模型獨立冷卻與請求紀錄字典
+        # 各模型獨立冷卻與請求紀錄字典
         self.model_cooldowns: Dict[str, float] = {}
         self.model_last_request: Dict[str, float] = {}
         self.model_request_times: Dict[str, List[float]] = {}
@@ -1147,15 +1148,16 @@ class FreeTierKey:
         }
 
     def can_request_model(self, model: str, current_time: float, estimated_tokens: int) -> bool:
-        """精準判定該 Key 是否能對【特定模型】發起請求（拒絕跨模型連坐）"""
-        if self.rpd_exhausted:
-            if current_time < self.rpd_reset_time:
+        """精準判定該 Key 是否能對【特定模型】發起請求（各模型 RPD 獨立判斷）"""
+        # 🚨 檢查【當前模型】的每日配額是否耗盡（其他模型不受影響）
+        if model in self.model_rpd_exhausted:
+            if current_time < self.model_rpd_exhausted[model]:
                 return False
             else:
-                self.rpd_exhausted = False
-                self.daily_request_count = 0
+                # 已過午夜重置時間，解除該模型的每日冷卻
+                del self.model_rpd_exhausted[model]
                 
-        # 1. 檢查該模型是否在獨立 429 冷卻中
+        # 1. 檢查該模型是否在短暫的 429 滑動冷卻中
         if current_time < self.model_cooldowns.get(model, 0.0):
             return False
             
@@ -1197,9 +1199,8 @@ class FreeTierKey:
         jitter = random.uniform(5.0, 25.0)  # 動態錯開 5~25 秒
         self.model_cooldowns[model] = time.time() + cooldown_seconds + jitter
 
-    def mark_rpd_exhausted(self):
-        self.rpd_exhausted = True
-        self.rpd_reset_time = get_next_rpd_reset_timestamp()
+    def mark_rpd_exhausted(self, model: str):
+        self.model_rpd_exhausted[model] = get_next_rpd_reset_timestamp()
         
 class LiveDashboardMetrics:
     def __init__(self):
@@ -1980,8 +1981,8 @@ class GeminiFreeTierManager:
             is_rpd = any(k in msg for k in ["per day", "perday", "daily", "requests per day", "rpd", "day limit"])
             
             if is_rpd:
-                key.mark_rpd_exhausted()
-                logging.warning(f"🚨 [RPD 每日上限] 金鑰 {key.api_key[:8]}... 已達每日總配額上限，轉入每日冷卻。")
+                key.mark_rpd_exhausted(model)
+                logging.warning(f"🚨 [獨立模型 RPD 上限] 金鑰 {key.api_key[:8]}... 僅模型【{model}】達到每日配額上限")
             else:
                 # 🚀 精確只鎖定該模型 40 秒，其餘 3.6/3.5/lite 模型依然暢通無阻！
                 key.mark_model_rate_limited(model, cooldown_seconds=40.0)
