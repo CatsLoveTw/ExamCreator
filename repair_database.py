@@ -125,6 +125,88 @@ def standardize_exam_metadata(year_str: str, exam_type: str, subject: str, mock_
         "type_folder": type_folder
     }
 
+# -------------------------------------------------------------------------
+# 詳解互補與多解融合
+# -------------------------------------------------------------------------
+def fuse_duplicate_question_solutions(q_base: dict, q_incoming: dict) -> dict:
+    """當同一題存在多個版本時，進行欄位互補，並將獨特另解/速解無損拼接為一題多解"""
+    # 1. 決定基礎版本：以詳解長度與結構更完整者為主體
+    sol_base = str(q_base.get("detailed_solution", "")).strip()
+    sol_inc = str(q_incoming.get("detailed_solution", "")).strip()
+    
+    if len(sol_inc) > len(sol_base):
+        primary = dict(q_incoming)
+        secondary = dict(q_base)
+    else:
+        primary = dict(q_base)
+        secondary = dict(q_incoming)
+        
+    p_sol = str(primary.get("detailed_solution", "")).strip()
+    s_sol = str(secondary.get("detailed_solution", "")).strip()
+
+    # 2. 🚨 多元另解/速解拼接：若次要版本含有獨特標題區塊，追加至主解答
+    if s_sol and s_sol != p_sol and len(s_sol) > 50:
+        # 尋找次要版本中的另解/速解區塊
+        sub_headers = ["### 【另解", "### 【速解", "### 【直覺解", "### 【坐標化", "### 【幾何直覺"]
+        for header in sub_headers:
+            if header in s_sol and header not in p_sol:
+                # 擷取該獨立解法區塊
+                extracted_part = s_sol.split(header, 1)[1]
+                # 截取到下一個大標題之前
+                next_header_idx = extracted_part.find("\n### ")
+                if next_header_idx != -1:
+                    extracted_sol = header + extracted_part[:next_header_idx].strip()
+                else:
+                    extracted_sol = header + extracted_part.strip()
+                
+                # 排除原卷無效說明與總結句干擾
+                for fake_foot in ["**綜上所述", "【手寫題評分對照】"]:
+                    if fake_foot in extracted_sol:
+                        extracted_sol = extracted_sol.split(fake_foot)[0].strip()
+                        
+                if len(extracted_sol) > 40:
+                    # 巧妙將其插入到主解答的「綜上所述」總結句之前
+                    if "**綜上所述" in p_sol:
+                        parts = p_sol.split("**綜上所述", 1)
+                        p_sol = parts[0].strip() + "\n\n" + extracted_sol + "\n\n**綜上所述" + parts[1]
+                    else:
+                        p_sol += "\n\n" + extracted_sol
+                        
+    primary["detailed_solution"] = p_sol
+
+    # 3. 圖片互補：合併題幹附圖與幾何圖形
+    p_imgs = primary.get("image_paths", []) or []
+    s_imgs = secondary.get("image_paths", []) or []
+    merged_imgs = list(dict.fromkeys(p_imgs + s_imgs))
+    primary["image_paths"] = merged_imgs
+    primary["has_image"] = len(merged_imgs) > 0
+
+    # 4. 選項深入剖析互補：取字數較長、分析更詳細的版本
+    p_opt_ana = str(primary.get("options_analysis", "")).strip()
+    s_opt_ana = str(secondary.get("options_analysis", "")).strip()
+    if len(s_opt_ana) > len(p_opt_ana) and "本題為非選擇題" not in s_opt_ana:
+        primary["options_analysis"] = secondary["options_analysis"]
+
+    # 5. 非選擇題評分標準互補
+    if not primary.get("scoring_criteria") and secondary.get("scoring_criteria"):
+        primary["scoring_criteria"] = secondary["scoring_criteria"]
+    if not primary.get("rubric_image_paths") and secondary.get("rubric_image_paths"):
+        primary["rubric_image_paths"] = secondary["rubric_image_paths"]
+
+    # 6. 核心考點與解題技巧聯集
+    p_cats = primary.get("topic_categories", []) or []
+    s_cats = secondary.get("topic_categories", []) or []
+    merged_cats = list(dict.fromkeys([c for c in p_cats + s_cats if c]))
+    if merged_cats:
+        primary["topic_categories"] = merged_cats
+        primary["topic_category"] = merged_cats[0]
+
+    p_techs = primary.get("techniques_used", []) or []
+    s_techs = secondary.get("techniques_used", []) or []
+    primary["techniques_used"] = list(dict.fromkeys([t for t in p_techs + s_techs if t]))
+
+    return primary
+
 def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
     """若 JSON 記錄的路徑失效，跨目錄自動搜尋真正的實體 PDF"""
     if candidate_pdf_path and os.path.exists(candidate_pdf_path):
@@ -481,25 +563,21 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
         current_sol_len = len(str(q.get("detailed_solution", "")))
         
         # 情況 A：題號完全相同
-        if key in merged_map:
-            existing_len = len(str(merged_map[key].get("detailed_solution", "")))
-            if current_sol_len > existing_len:
-                merged_map[key] = q
-            continue
-            
-        # 情況 B：題幹高度重複 (同名題庫雙胞胎碰撞)
-        if clean_text_fp and len(clean_text_fp) >= 10:
-            if clean_text_fp in text_fingerprints:
-                old_key = text_fingerprints[clean_text_fp]
-                existing_len = len(str(merged_map[old_key].get("detailed_solution", "")))
-                if current_sol_len > existing_len:
-                    del merged_map[old_key]
-                    merged_map[key] = q
-                    text_fingerprints[clean_text_fp] = key
+            if key in merged_map:
+                merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
                 continue
-            text_fingerprints[clean_text_fp] = key
 
-        merged_map[key] = q
+            if clean_text_fp and len(clean_text_fp) >= 10:
+                if clean_text_fp in text_fps:
+                    old_k = text_fps[clean_text_fp]
+                    fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
+                    del merged_map[old_k]
+                    merged_map[key] = fused_q
+                    text_fps[clean_text_fp] = key
+                    continue
+                text_fps[clean_text_fp] = key
+
+            merged_map[key] = q
 
     merged_list = list(merged_map.values())
     stats["merged"] = len(merged_list)
