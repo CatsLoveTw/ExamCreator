@@ -66,6 +66,64 @@ def register_cloud_purge(local_path: str):
             f.write(f"{cloud_target}\n")
     except Exception:
         pass
+        
+# =========================================================================
+# 大考與試卷名稱全球統一標準化核心
+# =========================================================================
+def standardize_exam_metadata(year_str: str, exam_type: str, subject: str, mock_tag: str = "", school_name: str = "") -> dict:
+    digits = "".join(filter(str.isdigit, str(year_str)))
+    y_val = int(digits) if digits else 111
+    
+    # 清洗考科名稱（徹底拔除「考科」、「科」冗字，統一學科名稱）
+    clean_sub = re.sub(r'(?:考科|科)$', '', str(subject).strip())
+    if clean_sub in ["高中數學甲", "數甲"]: clean_sub = "數學甲"
+    elif clean_sub in ["高中數學乙", "數乙"]: clean_sub = "數學乙"
+    elif clean_sub in ["高中數學A", "數A"]: clean_sub = "數學A"
+    elif clean_sub in ["高中數學B", "數B"]: clean_sub = "數學B"
+    elif clean_sub in ["國綜", "國語文"]: clean_sub = "國文"
+    elif clean_sub in ["國語文寫作", "寫作測驗"]: clean_sub = "國寫"
+
+    # 補考判定：補考絕對隔離，不可與正式考合併！
+    is_makeup = any(k in str(mock_tag) or k in str(year_str) for k in ["補考", "補辦", "代考"])
+    makeup_tag = "_補考" if is_makeup else ""
+    makeup_src = "補考_" if is_makeup else ""
+
+    sem_tag = "上" if "上學期" in str(year_str) else ("下" if "下學期" in str(year_str) else "")
+
+    if exam_type == "SCHOOL":
+        sch = school_name or "通用學校"
+        spec_name = f"{y_val}學年度_{sch}{mock_tag}_{clean_sub}"
+        acad_year = f"{y_val}{sem_tag}定期考"
+        exam_source = f"{y_val}學年度{sem_tag+'學期' if sem_tag else ''}{sch}{mock_tag}_{clean_sub}"
+        type_folder = os.path.join("學校定期考", sch)
+    elif exam_type == "MOCK":
+        spec_name = f"{y_val}學年度_模擬考{mock_tag}_{clean_sub}"
+        acad_year = f"{y_val}模考{mock_tag}"
+        exam_source = f"{y_val}學年度模擬考{mock_tag}_{clean_sub}"
+        type_folder = "模擬考"
+    elif exam_type == "GSAT":
+        spec_name = f"{y_val}學年度_學測{makeup_tag}_{clean_sub}"
+        acad_year = f"{y_val}學測{makeup_tag}"
+        exam_source = f"{y_val}學年度學科能力測驗{makeup_src}{clean_sub}"
+        type_folder = "學測"
+    else:  # AST (大考指考 / 分科測驗)
+        # 111學年起為分科測驗，110學年以前一律為指定科目考試(指考)
+        ast_short = "分科" if y_val >= 111 else "指考"
+        ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
+        spec_name = f"{y_val}學年度_{ast_short}{makeup_tag}_{clean_sub}"
+        acad_year = f"{y_val}{ast_short}{makeup_tag}"
+        exam_source = f"{y_val}學年度{ast_full}{makeup_src}{clean_sub}"
+        type_folder = "分科指考"
+
+    return {
+        "spec_name": spec_name,
+        "academic_year": acad_year,
+        "exam_source": exam_source,
+        "clean_subject": clean_sub,
+        "is_makeup": is_makeup,
+        "y_val": y_val,
+        "type_folder": type_folder
+    }
 
 def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
     """若 JSON 記錄的路徑失效，跨目錄自動搜尋真正的實體 PDF"""
@@ -504,9 +562,11 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     
     return stats
 
+
+    
 def run_database_repair_suite():
     print("=" * 75)
-    print("🚀 啟動【實體 PDF 題數裁決、跨科淨化與同名去重修復引擎】...")
+    print("🚀 啟動【考卷雙胞胎智慧合併、exam_source全球統一與無損去重修復引擎】...")
     print("=" * 75)
 
     sanitize_subject_json()
@@ -515,25 +575,166 @@ def run_database_repair_suite():
         print(f"❌ 找不到題庫目錄: {DATABASE_DIR}")
         return
 
-    exam_bases = set()
+    # 1. 深度掃描全庫所有 JSON 檔案，以「大考核心特徵」建立智慧分組池
+    # key: (y_val, exam_type, is_makeup, clean_subject, folder)
+    exam_groups: Dict[Tuple, List[str]] = {}
+
     for root, dirs, files in os.walk(DATABASE_DIR):
         for f in files:
-            if f.endswith("_database.json") or f.endswith("_partial_database.json"):
-                base_name = f.replace("_partial_database.json", "").replace("_database.json", "")
-                exam_bases.add(os.path.join(root, base_name))
+            if f.endswith(("_database.json", "_partial_database.json", "_raw_extracted.json")):
+                full_p = os.path.join(root, f)
+                # 排除 .1.json 等重複備份雜訊
+                if re.search(r'\.\d+\.json$', f):
+                    try: os.remove(full_p)
+                    except: pass
+                    continue
+                    
+                # 解析本檔特徵
+                clean_name = f.replace(" ", "")
+                y_match = re.search(r'(\d+)', clean_name)
+                y_val = int(y_match.group(1)) if y_match else 0
+                
+                is_makeup = "補考" in clean_name
+                
+                # 判斷大考類型
+                if "學測" in clean_name or "學科能力" in clean_name: e_type = "GSAT"
+                elif "模擬" in clean_name or "模考" in clean_name: e_type = "MOCK"
+                elif "定期" in clean_name or "段考" in clean_name or "學校" in root: e_type = "SCHOOL"
+                else: e_type = "AST"
+                
+                # 判斷科目
+                subj = "未知"
+                for s_cand in ["數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", 
+                               "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "國文", "國寫", "英文", "自然", "社會"]:
+                    if s_cand in clean_name:
+                        subj = s_cand
+                        break
+                        
+                meta = standardize_exam_metadata(str(y_val), e_type, subj, mock_tag="_補考" if is_makeup else "")
+                group_key = (meta["y_val"], e_type, meta["is_makeup"], meta["clean_subject"], meta["type_folder"])
+                
+                if group_key not in exam_groups:
+                    exam_groups[group_key] = []
+                exam_groups[group_key].append(full_p)
 
+    total_merged_papers = 0
     total_ghosts_purged = 0
-    for base in exam_bases:
-        db_p = f"{base}_database.json"
-        partial_p = f"{base}_partial_database.json"
-        raw_p = f"{base}_raw_extracted.json"
-        res = reconcile_and_merge_database_pair(db_p, partial_p, raw_p)
-        total_ghosts_purged += res["ghosts"]
-        print(f"📦 [{res['file']}] -> {res['status']}")
-        if res["ghosts"] > 0: print(f"    * 成功斬除幽靈/跨科假題: {res['ghosts']} 題")
+
+    # 2. 對每個大考核心組別進行「跨檔案無損大合併」
+    for group_key, file_list in exam_groups.items():
+        y_val, e_type, is_makeup, clean_sub, type_folder = group_key
+        meta = standardize_exam_metadata(str(y_val), e_type, clean_sub, mock_tag="_補考" if is_makeup else "")
+        
+        target_dir = os.path.join(DATABASE_DIR, type_folder)
+        os.makedirs(target_dir, exist_ok=True)
+        
+        canonical_db_path = os.path.join(target_dir, f"{meta['spec_name']}_database.json")
+        canonical_partial_path = os.path.join(target_dir, f"{meta['spec_name']}_partial_database.json")
+        canonical_raw_path = os.path.join(target_dir, f"{meta['spec_name']}_raw_extracted.json")
+
+        # 收集該組所有來源檔案內的題目
+        pooled_questions = []
+        for fp in file_list:
+            try:
+                with open(fp, "r", encoding="utf-8") as jf:
+                    data = json.load(jf)
+                    if isinstance(data, list):
+                        pooled_questions.extend(data)
+            except Exception: pass
+
+        if not pooled_questions:
+            continue
+
+        # 尋找實體 PDF 校準題數
+        actual_pdf = find_actual_pdf(canonical_db_path, "")
+        max_pdf_q, physical_q_set = get_real_pdf_max_question_info(actual_pdf, exam_name=meta["spec_name"])
+
+        # 🚨 雙重去重閥門：合併兩份考卷時比對「題號」與「題幹指紋」，將雙倍題目合而為一
+        merged_map = {}
+        text_fps = {}
+
+        for q in pooled_questions:
+            if not is_valid_question_strict(q, max_pdf_q, physical_q_set, clean_sub):
+                total_ghosts_purged += 1
+                continue
+
+            q_num = str(q.get("question_number", "")).strip()
+            q_type = str(q.get("question_type", "")).strip()
+            key = (q_num, q_type)
+            clean_text_fp = re.sub(r'[^\w\u4e00-\u9fa5]', '', str(q.get("question_text", "")))[:30]
+            current_score = len(str(q.get("detailed_solution", "")))
+
+            if key in merged_map:
+                if current_score > len(str(merged_map[key].get("detailed_solution", ""))):
+                    merged_map[key] = q
+                continue
+
+            if clean_text_fp and len(clean_text_fp) >= 10:
+                if clean_text_fp in text_fps:
+                    old_k = text_fps[clean_text_fp]
+                    if current_score > len(str(merged_map[old_k].get("detailed_solution", ""))):
+                        del merged_map[old_k]
+                        merged_map[key] = q
+                        text_fps[clean_text_fp] = key
+                    continue
+                text_fps[clean_text_fp] = key
+
+            merged_map[key] = q
+
+        merged_list = list(merged_map.values())
+
+        # 🚨 全面統一 exam_source 與 academic_year，讓前端網站 100% 聚合為同一張卡片！
+        for q in merged_list:
+            q["academic_year"] = meta["academic_year"]
+            q["exam_source"] = meta["exam_source"]
+            main_cat = sanitize_knowledge_point(q.get("topic_category", ""))
+            cats = [sanitize_knowledge_point(c) for c in q.get("topic_categories", []) if c]
+            q["topic_categories"] = list(dict.fromkeys(cats)) if cats else [main_cat]
+            q["topic_category"] = q["topic_categories"][0]
+            for k in ["question_text", "detailed_solution", "question_analysis", "solving_strategy", "scoring_rubric", "concept_review", "traps_and_warnings"]:
+                if k in q: q[k] = clean_latex_corruptions(q[k])
+
+        def safe_sort(x):
+            try: p = int(x.get("page_number", 1))
+            except: p = 1
+            return (p, natural_sort_key(x.get("question_number", "0")))
+        merged_list.sort(key=safe_sort)
+
+        current_count = len(merged_list)
+        r_min, r_max = EXAM_REASONABLE_RANGES.get(clean_sub, (12, 50))
+        is_complete = (current_count >= min(max_pdf_q, r_min)) if max_pdf_q > 0 else (current_count >= r_min)
+
+        # 寫入正規命名的目標檔案
+        if is_complete:
+            with open(canonical_db_path, "w", encoding="utf-8") as f:
+                json.dump(merged_list, f, ensure_ascii=False, indent=4)
+            if os.path.exists(canonical_partial_path):
+                os.remove(canonical_partial_path)
+                register_cloud_purge(canonical_partial_path)
+            status_str = f"✅ 100% 完工存檔 (實體收錄 {current_count} 題，已統一來源為「{meta['exam_source']}」)"
+        else:
+            with open(canonical_partial_path, "w", encoding="utf-8") as f:
+                json.dump(merged_list, f, ensure_ascii=False, indent=4)
+            if os.path.exists(canonical_db_path):
+                try: os.remove(canonical_db_path); register_cloud_purge(canonical_db_path)
+                except: pass
+            status_str = f"⏳ 題數不足 ({current_count} 題)，已降級 partial，待補齊真題"
+
+        # 🚨 關鍵清理：將組內所有「非正規檔名」的舊版本徹底從本機刪除，並登記雲端銷毀！
+        for old_fp in file_list:
+            norm_old = os.path.abspath(old_fp)
+            if norm_old not in [os.path.abspath(canonical_db_path), os.path.abspath(canonical_partial_path)]:
+                try:
+                    os.remove(old_fp)
+                    register_cloud_purge(old_fp)
+                    logging.info(f"🗑️ [清理舊版異名檔案] 已刪除並登記雲端銷毀：{os.path.basename(old_fp)}")
+                except: pass
+
+        total_merged_papers += 1
+        print(f"📦 [{meta['spec_name']}] (整合了 {len(file_list)} 個來源檔) -> {status_str}")
 
     print("=" * 75)
-    print(f"🎉 清理完畢！全庫總共拔除 {total_ghosts_purged} 筆多餘幽靈題與跨科污染題目。")
+    print(f"🎉 處理完畢！共智慧合併 {total_merged_papers} 份大考題庫，斬除 {total_ghosts_purged} 筆多餘幽靈題。")
     print("=" * 75)
 
 if __name__ == "__main__":
