@@ -1159,8 +1159,8 @@ class FreeTierKey:
         if current_time < self.model_cooldowns.get(model, 0.0):
             return False
             
-        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 1.2秒，Flash 2.2秒，安全合規 QPS）
-        min_interval = 1.2 if "lite" in model else 2.2
+        # 2. 針對該模型的物理防衝撞間隔（Flash-Lite 3秒，Flash 4.2秒，安全合規 QPS）
+        min_interval = 3 if "lite" in model else 4.2
         if (current_time - self.model_last_request.get(model, 0.0)) < min_interval:
             return False
             
