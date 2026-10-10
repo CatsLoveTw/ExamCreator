@@ -1223,11 +1223,14 @@ class FreeTierKey:
         else:
             self.model_rpd_exhausted["global"] = reset_time
             
+
 class LiveDashboardMetrics:
     def __init__(self):
         self.lock = threading.Lock()
         self.start_time = time.time()
         self.run_start_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.session_id = str(int(time.time()))
+        
         self.current_paper = "準備就緒，等待任務..."
         self.total_papers = 0
         self.completed_papers = 0
@@ -1235,101 +1238,98 @@ class LiveDashboardMetrics:
         self.completed_questions = 0
         self.diagram_count = 0
         self.arbitration_count = 0
-        self.http_counts = {"200": 0, "429": 0, "503": 0, "400": 0, "other": 0}
-        self.proxy_stats = {}
-        self.model_stats = {}
+        
+        # 🚨 全新精細化追蹤字典
+        self.proxy_stats = {}   # {proxy: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
+        self.model_stats = {}   # {model: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
+        self.key_stats = {}     # {masked_key: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
+        self.exam_progress = {} # {exam_name: {"total": 0, "completed": 0, "status": "等待中"}}
         self.recent_logs = []
 
-        # 🚀 雲端跨次持久化歷史戰報紀錄
         self.history_file = "telemetry_history.json"
-        self.history_base = self.load_history()
-        self.save_history()  # 啟動時自動記錄一次 Run
+        self.history_data = self.load_history()
+        self.save_history()
 
     def load_history(self) -> dict:
-        """從雲端備份的 telemetry_history.json 讀取歷次執行之累積紀錄"""
+        """載入基於時間序列的全新歷史資料結構"""
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    logging.info(f"📜 [雲端歷史戰報] 成功載入歷史執行紀錄！(歷次已累積執行 {data.get('total_runs', 0)} 次，解題 {data.get('cumulative_questions', 0)} 題)")
+                    # 確保相容舊格式，轉為時間序列
+                    if "runs" not in data:
+                        data = {"runs": []}
                     return data
             except Exception as e:
-                logging.warning(f"無法讀取歷史紀錄 {self.history_file}: {e}")
-        return {
-            "total_runs": 0,
-            "cumulative_questions": 0,
-            "cumulative_papers": 0,
-            "cumulative_http_counts": {"200": 0, "429": 0, "503": 0, "400": 0, "other": 0},
-            "cumulative_model_stats": {},
-            "last_run_timestamp": "無"
-        }
+                logging.warning(f"讀取歷史紀錄失敗，將初始化新紀錄: {e}")
+        return {"runs": []}
 
     def save_history(self):
-        """將當前執行的重點數據無損融合至歷史總戰報，並持久化寫入檔案"""
+        """將當前 session 無損寫入歷史資料庫，形成時間序列，供前端篩選起止時間"""
         with self.lock:
             try:
-                merged = dict(self.history_base)
-                # 當次 Run 計數遞增
-                merged["total_runs"] = self.history_base.get("total_runs", 0) + 1
-                merged["last_run_timestamp"] = self.run_start_str
-                
-                # 融合計算累積題目與考卷數
-                merged["cumulative_questions"] = self.history_base.get("cumulative_questions", 0) + self.completed_questions
-                merged["cumulative_papers"] = self.history_base.get("cumulative_papers", 0) + self.completed_papers
+                # 構建當前 Session 的快照
+                current_session = {
+                    "session_id": self.session_id,
+                    "start_time": self.run_start_str,
+                    "last_update": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "completed_questions": self.completed_questions,
+                    "completed_papers": self.completed_papers,
+                    "diagram_count": self.diagram_count,
+                    "proxy_stats": self.proxy_stats,
+                    "model_stats": self.model_stats,
+                    "key_stats": self.key_stats,
+                    "exam_progress": self.exam_progress
+                }
 
-                # 融合 HTTP 回傳狀態數
-                merged_http = dict(self.history_base.get("cumulative_http_counts", {}))
-                for k, v in self.http_counts.items():
-                    merged_http[k] = merged_http.get(k, 0) + v
-                merged["cumulative_http_counts"] = merged_http
-
-                # 融合各模型調度數
-                merged_model = dict(self.history_base.get("cumulative_model_stats", {}))
-                for m, stats in self.model_stats.items():
-                    if m not in merged_model: merged_model[m] = {"200": 0, "429": 0, "other": 0}
-                    merged_model[m]["200"] = merged_model[m].get("200", 0) + stats.get("200", 0)
-                    merged_model[m]["429"] = merged_model[m].get("429", 0) + stats.get("429", 0)
-                    merged_model[m]["other"] = merged_model[m].get("other", 0) + stats.get("other", 0)
-                merged["cumulative_model_stats"] = merged_model
+                # 尋找是否已有此 session，有則更新，無則新增
+                existing_idx = next((i for i, r in enumerate(self.history_data["runs"]) if r.get("session_id") == self.session_id), -1)
+                if existing_idx >= 0:
+                    self.history_data["runs"][existing_idx] = current_session
+                else:
+                    self.history_data["runs"].append(current_session)
 
                 with open(self.history_file, "w", encoding="utf-8") as f:
-                    json.dump(merged, f, ensure_ascii=False, indent=4)
+                    json.dump(self.history_data, f, ensure_ascii=False, indent=4)
             except Exception as e:
-                logging.error(f"寫入歷史戰報 {self.history_file} 失敗: {e}")
+                pass
 
-    def record_http(self, proxy_name: str, model_name: str, code: int):
+    def record_http(self, proxy_name: str, model_name: str, masked_key: str, code: int):
+        """高精度記錄各維度的 HTTP 狀態 (分類為 2xx, 4xx, 5xx)"""
         with self.lock:
             code_str = str(code)
-            if code_str in self.http_counts:
-                self.http_counts[code_str] += 1
-            else:
-                self.http_counts["other"] += 1
-                
+            category = "2xx" if code_str.startswith("2") else ("4xx" if code_str.startswith("4") else ("5xx" if code_str.startswith("5") else "other"))
+            
             short_p = proxy_name.split("//")[-1].split("/")[0] if "//" in proxy_name else proxy_name
-            if short_p not in self.proxy_stats:
-                self.proxy_stats[short_p] = {"200": 0, "429": 0, "other": 0}
-            if model_name not in self.model_stats:
-                self.model_stats[model_name] = {"200": 0, "429": 0, "other": 0}
+            
+            # 初始化結構
+            if short_p not in self.proxy_stats: self.proxy_stats[short_p] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
+            if model_name not in self.model_stats: self.model_stats[model_name] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
+            if masked_key not in self.key_stats: self.key_stats[masked_key] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
 
-            if code_str == "200": 
-                self.proxy_stats[short_p]["200"] += 1
-                self.model_stats[model_name]["200"] += 1
-            elif code_str == "429": 
-                self.proxy_stats[short_p]["429"] += 1
-                self.model_stats[model_name]["429"] += 1
-            else: 
-                self.proxy_stats[short_p]["other"] += 1
-                self.model_stats[model_name]["other"] += 1
-        # 定期落盤備份歷史戰報
+            # 計數
+            self.proxy_stats[short_p][category] += 1
+            self.model_stats[model_name][category] += 1
+            self.key_stats[masked_key][category] += 1
+            
+        self.save_history()
+
+    def update_exam_progress(self, exam_name: str, completed: int, total: int, status: str):
+        """更新單張考卷的解題進度"""
+        with self.lock:
+            self.exam_progress[exam_name] = {
+                "completed": completed,
+                "total": total,
+                "status": status
+            }
         self.save_history()
 
     def add_log(self, msg: str):
         with self.lock:
             ts = datetime.datetime.now().strftime("%H:%M:%S")
             self.recent_logs.insert(0, f"[{ts}] {msg}")
-            if len(self.recent_logs) > 12:
+            if len(self.recent_logs) > 15:
                 self.recent_logs.pop()
-        self.save_history()
 
 GLOBAL_METRICS = LiveDashboardMetrics()
 
@@ -1370,13 +1370,20 @@ def start_dashboard_web_server(port=8080, manager=None):
                     time_limit_sec = int(MAX_EXECUTION_TIME_SECONDS)
                     time_pct = min(100, int((uptime_sec / time_limit_sec) * 100))
                     
-                    uptime_m = max(1, uptime_sec / 60.0)
-                    qpm = round(GLOBAL_METRICS.completed_questions / uptime_m, 1)
+                    # 🚀 計算「平均完成一題要花多少時間」
+                    time_per_q_str = "計算中..."
+                    if GLOBAL_METRICS.completed_questions > 0:
+                        sec_per_q = uptime_sec / GLOBAL_METRICS.completed_questions
+                        if sec_per_q >= 60:
+                            time_per_q_str = f"{int(sec_per_q // 60)} 分 {int(sec_per_q % 60)} 秒 / 題"
+                        else:
+                            time_per_q_str = f"{int(sec_per_q)} 秒 / 題"
 
-                    tot_http = sum(GLOBAL_METRICS.http_counts.values())
-                    ok_http = GLOBAL_METRICS.http_counts.get("200", 0)
+                    # 計算 2xx 成功率 (從 proxy_stats 總和推算)
+                    tot_http = sum(sum(cat.values()) for cat in GLOBAL_METRICS.proxy_stats.values())
+                    ok_http = sum(cat.get("2xx", 0) for cat in GLOBAL_METRICS.proxy_stats.values())
                     success_rate = f"{(ok_http / tot_http * 100):.1f}%" if tot_http > 0 else "100%"
-
+                    
                     # 🚀 讀取最新融合的歷史總統計
                     h_base = GLOBAL_METRICS.history_base
                     cum_q = h_base.get("cumulative_questions", 0) + GLOBAL_METRICS.completed_questions
@@ -1391,27 +1398,23 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "current_paper": GLOBAL_METRICS.current_paper,
                         "paper_progress": f"{GLOBAL_METRICS.completed_papers}/{GLOBAL_METRICS.total_papers}",
                         "progress": f"{GLOBAL_METRICS.completed_questions}/{GLOBAL_METRICS.total_questions}",
-                        "qpm": qpm,
+                        "time_per_q_str": time_per_q_str,  # 🆕 新的速度指標
                         "success_rate": success_rate,
                         "disk_str": disk_str,
                         "key_health": key_health,
                         "diagram_count": GLOBAL_METRICS.diagram_count,
                         "arbitration_count": GLOBAL_METRICS.arbitration_count,
-                        "http_counts": GLOBAL_METRICS.http_counts,
                         "proxy_stats": GLOBAL_METRICS.proxy_stats,
                         "model_stats": GLOBAL_METRICS.model_stats,
+                        "key_stats": GLOBAL_METRICS.key_stats,
+                        "exam_progress": GLOBAL_METRICS.exam_progress,
                         "key_statuses": key_statuses,
                         "recent_logs": GLOBAL_METRICS.recent_logs,
-                        # 📜 歷史戰報傳遞
-                        "cum_runs": cum_runs,
-                        "cum_q": cum_q,
-                        "cum_p": cum_p,
-                        "cum_http_200": cum_http_200,
-                        "cum_http_429": cum_http_429,
-                        "last_run_time": h_base.get("last_run_timestamp", "首升執行")
+                        # 📜 傳遞完整的時間序列歷史資料
+                        "history_data": GLOBAL_METRICS.history_data
                     }
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
-            else:
+           else:
                 self.send_response(200)
                 self.send_header("Content-type", "text/html; charset=utf-8")
                 self.end_headers()
@@ -1419,158 +1422,257 @@ def start_dashboard_web_server(port=8080, manager=None):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Exam Parser 即時任務遙測中心</title>
+                    <title>Exam Parser 遙測中心</title>
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
                         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-                        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; max-width: 1200px; margin: 0 auto; }
-                        .card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; }
+                        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
+                        h1 { color: #38bdf8; margin: 0; }
+                        .filter-box { background: #1e293b; padding: 10px 15px; border-radius: 8px; border: 1px solid #475569; display: flex; gap: 10px; align-items: center; }
+                        .filter-box input[type="date"] { background: #0f172a; color: #f8fafc; border: 1px solid #334155; padding: 5px; border-radius: 4px; }
+                        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; max-width: 1400px; margin: 0 auto; }
+                        .card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; overflow: hidden; }
                         h2 { margin-top: 0; color: #38bdf8; font-size: 1.1rem; border-bottom: 1px solid #334155; padding-bottom: 10px; }
                         .stat-val { font-size: 1.6rem; font-weight: bold; color: #4ade80; }
-                        .progress-bar-bg { background: #334155; border-radius: 8px; height: 12px; width: 100%; overflow: hidden; margin-top: 6px; }
-                        .progress-bar-fill { background: linear-gradient(90deg, #38bdf8, #4ade80); height: 100%; width: 0%; transition: width 0.5s; }
                         .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; }
-                        .badge-200 { background: #166534; color: #4ade80; }
-                        .badge-429 { background: #991b1b; color: #fca5a5; }
-                        .badge-503 { background: #854d0e; color: #fef08a; }
+                        .badge-2xx { background: #166534; color: #4ade80; }
+                        .badge-4xx { background: #991b1b; color: #fca5a5; }
+                        .badge-5xx { background: #854d0e; color: #fef08a; }
                         table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
                         th, td { text-align: left; padding: 8px; border-bottom: 1px solid #334155; }
-                        th { color: #94a3b8; }
-                        .log-box { background: #020617; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #a7f3d0; max-height: 180px; overflow-y: auto; }
+                        th { color: #94a3b8; background: #0f172a; position: sticky; top: 0; }
+                        .table-container { max-height: 250px; overflow-y: auto; }
+                        .log-box { background: #020617; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #a7f3d0; max-height: 200px; overflow-y: auto; }
+                        .progress-bar-bg { background: #334155; border-radius: 8px; height: 8px; width: 100%; margin-top: 5px; }
+                        .progress-bar-fill { background: linear-gradient(90deg, #38bdf8, #4ade80); height: 100%; border-radius: 8px;}
                     </style>
                 </head>
                 <body>
-                    <h1 style="text-align: center; color: #38bdf8; margin-bottom: 25px;">⚡ Exam Parser 即時遠端遙測儀表板</h1>
+                    <div class="header-container" style="max-width: 1400px; margin: 0 auto 25px auto;">
+                        <h1>⚡ Exam Parser 終極遙測儀表板</h1>
+                        <div class="filter-box">
+                            <label>歷史資料篩選起訖：</label>
+                            <input type="date" id="start-date"> 
+                            <span>至</span> 
+                            <input type="date" id="end-date">
+                            <button onclick="updateDisplay()" style="background:#38bdf8;color:#0f172a;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;">套用</button>
+                        </div>
+                    </div>
+
                     <div class="grid">
+                        <!-- 即時監控區塊 -->
                         <div class="card">
-                            <h2>⏱️ GHA 5小時安全時間倒數</h2>
-                            <div>已運行：<span id="uptime" style="font-weight:bold;color:#f8fafc;">-</span> / 05:00:00</div>
-                            <div class="progress-bar-bg"><div id="time-bar" class="progress-bar-fill"></div></div>
+                            <h2>📌 即時任務與速度指標 (Live)</h2>
+                            <div>目前考卷：<span id="live-paper" style="color:#f1f5f9;font-weight:bold;">-</span></div>
+                            <div style="margin-top:6px;">當前解題進度：<span id="live-progress" class="stat-val" style="font-size:1.4rem;">0/0</span></div>
+                            <div style="margin-top:6px;">平均解題速度：<span id="live-speed" style="color:#f59e0b;font-weight:bold;font-size:1.2rem;">計算中...</span></div>
+                            <div style="margin-top:6px;font-size:0.85rem;color:#94a3b8;">運行時間：<span id="uptime">-</span> | 題庫資產：<span id="disk-size" style="color:#4ade80;">0 MB</span></div>
                         </div>
+
+                        <!-- 歷史彙總區塊 -->
                         <div class="card">
-                            <h2>📌 當前考卷與進度</h2>
-                            <div>考卷：<span id="paper" style="color:#f1f5f9;font-weight:bold;">-</span></div>
-                            <div style="margin-top:6px;">考卷總進度：<span id="paper-progress" style="color:#38bdf8;font-weight:bold;">0/0 份</span></div>
-                            <div style="margin-top:6px;">當前題目進度：<span id="progress" class="stat-val" style="font-size:1.3rem;">0/0</span> (<span id="qpm">0</span> 題/分)</div>
-                            <div style="margin-top:6px;font-size:0.85rem;color:#94a3b8;">已累積題庫資產：<span id="disk-size" style="color:#4ade80;font-weight:bold;">0 MB</span></div>
-                        </div>
-                        <div class="card">
-                            <h2>🔑 34 把 API 金鑰即時健康度</h2>
-                            <div style="margin-top:5px;"><span class="badge" style="background:#166534;color:#4ade80;">🟢 正常可用</span> <span id="k-active" class="stat-val" style="font-size:1.2rem;color:#4ade80;">0</span> 把</div>
-                            <div style="margin-top:5px;"><span class="badge" style="background:#854d0e;color:#fef08a;">🟡 RPD 冷卻</span> <span id="k-cool" class="stat-val" style="font-size:1.2rem;color:#fef08a;">0</span> 把</div>
-                            <div style="margin-top:5px;"><span class="badge" style="background:#991b1b;color:#fca5a5;">🔴 失效/停用</span> <span id="k-dis" class="stat-val" style="font-size:1.2rem;color:#fca5a5;">0</span> 把</div>
-                        </div>
-                        <div class="card">
-                            <h2>🌐 HTTP 狀態統計與成功率</h2>
-                            <div>請求成功率：<span id="succ-rate" class="stat-val" style="font-size:1.3rem;color:#38bdf8;">100%</span></div>
-                            <div style="margin-top:6px;"><span class="badge badge-200">200 成功</span> <span id="c200" style="color:#4ade80;font-weight:bold;">0</span></div>
-                            <div style="margin-top:4px;"><span class="badge badge-429">429 限流</span> <span id="c429" style="color:#fca5a5;font-weight:bold;">0</span></div>
-                            <div style="margin-top:4px;"><span class="badge badge-503">503 忙碌</span> <span id="c503" style="color:#fef08a;font-weight:bold;">0</span></div>
-                        </div>
-                        <div class="card">
-                            <h2>🎨 圖解與仲裁引擎</h2>
-                            <div>AI 自動繪圖：<span id="diag-count" class="stat-val" style="font-size:1.3rem;color:#38bdf8;">0</span> 張</div>
-                            <div style="margin-top:6px;">學術仲裁修正：<span id="arbit-count" class="stat-val" style="font-size:1.3rem;color:#f59e0b;">0</span> 次</div>
-                        </div>
-                        <div class="card" style="grid-column: span 2;">
-                            <h2>📜 雲端跨次歷史累積總戰報 (Cloud History)</h2>
+                            <h2>📊 篩選區間總結 (Aggregated)</h2>
                             <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-                                <div>歷史總啟動次數：<span id="cum-runs" style="color:#38bdf8;font-weight:bold;">0</span> 次</div>
-                                <div>歷史累積完成考卷：<span id="cum-p" style="color:#4ade80;font-weight:bold;">0</span> 份</div>
-                                <div>歷史累積解析題目：<span id="cum-q" style="color:#4ade80;font-weight:bold;">0</span> 題</div>
-                                <div>歷史累積 API 200 成功：<span id="cum-200" style="color:#4ade80;font-weight:bold;">0</span> 次</div>
-                                <div>歷史 429 限流數：<span id="cum-429" style="color:#fca5a5;font-weight:bold;">0</span> 次</div>
+                                <div>總解題數：<span id="agg-questions" class="stat-val">0</span> 題</div>
+                                <div>完工考卷：<span id="agg-papers" class="stat-val">0</span> 份</div>
+                                <div>繪製圖解：<span id="agg-diagrams" class="stat-val" style="color:#38bdf8;">0</span> 張</div>
+                                <div style="width:100%;margin-top:5px;">
+                                    總體 HTTP 成功率：<span id="agg-success-rate" style="font-size:1.2rem;font-weight:bold;color:#38bdf8;">100%</span>
+                                </div>
                             </div>
-                            <div style="margin-top:8px;font-size:0.8rem;color:#94a3b8;">上次啟動時間：<span id="last-run-time">-</span></div>
                         </div>
+
+                        <!-- 考卷進度表 -->
                         <div class="card" style="grid-column: span 2;">
-                            <h2>🤖 各 Gemini 模型流量分流統計 (3.7 / 3.6 / 3.5 / Lite)</h2>
-                            <table>
-                                <thead><tr><th>模型名稱 (Model)</th><th>200 成功</th><th>429 限流</th><th>其他錯誤</th><th>成功率</th></tr></thead>
-                                <tbody id="model-rows"></tbody>
-                            </table>
+                            <h2>📑 考卷完成度狀態追蹤 (Exam Progress)</h2>
+                            <div class="table-container">
+                                <table>
+                                    <thead><tr><th>考卷名稱</th><th>總題數</th><th>已完成</th><th>進度條</th><th>狀態</th></tr></thead>
+                                    <tbody id="exam-rows"></tbody>
+                                </table>
+                            </div>
                         </div>
+
+                        <!-- 代理 Proxy 狀態 -->
+                        <div class="card">
+                            <h2>🚀 多雲代理出口戰報 (Proxy Stats)</h2>
+                            <div class="table-container">
+                                <table>
+                                    <thead><tr><th>Proxy 節點</th><th><span class="badge badge-2xx">2xx</span></th><th><span class="badge badge-4xx">4xx</span></th><th><span class="badge badge-5xx">5xx</span></th></tr></thead>
+                                    <tbody id="proxy-rows"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 模型 Model 狀態 -->
+                        <div class="card">
+                            <h2>🤖 各模型負載統計 (Model Stats)</h2>
+                            <div class="table-container">
+                                <table>
+                                    <thead><tr><th>模型名稱</th><th><span class="badge badge-2xx">2xx</span></th><th><span class="badge badge-4xx">4xx</span></th><th><span class="badge badge-5xx">5xx</span></th></tr></thead>
+                                    <tbody id="model-rows"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 金鑰 Key 狀態 -->
                         <div class="card" style="grid-column: span 2;">
-                            <h2>🚀 多雲代理出口戰報 (Cloudflare / Vercel / Deno)</h2>
-                            <table>
-                                <thead><tr><th>代理節點 (Endpoint)</th><th>200 成功</th><th>429 限流</th><th>其他錯誤</th><th>成功率</th></tr></thead>
-                                <tbody id="proxy-rows"></tbody>
-                            </table>
+                            <h2>🔑 API 金鑰損耗深度監控 (Key Stats)</h2>
+                            <div class="table-container">
+                                <table>
+                                    <thead><tr><th>API 金鑰 (Masked)</th><th><span class="badge badge-2xx">2xx 成功</span></th><th><span class="badge badge-4xx">4xx 限流/拒絕</span></th><th><span class="badge badge-5xx">5xx 伺服過載</span></th><th>成功率</th></tr></thead>
+                                    <tbody id="key-rows"></tbody>
+                                </table>
+                            </div>
                         </div>
+
+                        <!-- 即時動態日誌 -->
                         <div class="card" style="grid-column: span 2;">
                             <h2>📜 即時處理動態日誌 (Live Activity)</h2>
                             <div class="log-box" id="log-box">等待動態更新中...</div>
                         </div>
-                        <div class="card" style="grid-column: span 2;">
-                            <h2>🔑 金鑰狀態儀表板 (已安全脫敏)</h2>
-                            <table>
-                                <thead><tr><th>API 金鑰 (Masked)</th><th>RPM</th><th>TPM</th><th>RPD 每日配額與狀態</th></tr></thead>
-                                <tbody id="key-rows"></tbody>
-                            </table>
-                        </div>
                     </div>
+
                     <script>
-                        async function update() {
+                        let lastFetchedData = null;
+
+                        // 預設篩選區間：過去 7 天
+                        const today = new Date();
+                        const pastWeek = new Date(today);
+                        pastWeek.setDate(pastWeek.getDate() - 7);
+                        document.getElementById('start-date').value = pastWeek.toISOString().split('T')[0];
+                        document.getElementById('end-date').value = today.toISOString().split('T')[0];
+
+                        async function fetchData() {
                             try {
                                 const res = await fetch('/api/data');
-                                const d = await res.json();
-                                document.getElementById('paper').innerText = d.current_paper;
-                                document.getElementById('paper-progress').innerText = d.paper_progress;
-                                document.getElementById('progress').innerText = d.progress;
-                                document.getElementById('qpm').innerText = d.qpm;
-                                document.getElementById('uptime').innerText = d.uptime_formatted;
-                                document.getElementById('time-bar').style.width = d.time_pct + '%';
-                                document.getElementById('diag-count').innerText = d.diagram_count;
-                                document.getElementById('arbit-count').innerText = d.arbitration_count;
-                                document.getElementById('disk-size').innerText = d.disk_str;
-                                document.getElementById('k-active').innerText = d.key_health.active || 0;
-                                document.getElementById('k-cool').innerText = d.key_health.cooldown || 0;
-                                document.getElementById('k-dis').innerText = d.key_health.disabled || 0;
-                                document.getElementById('succ-rate').innerText = d.success_rate || '100%';
-                                document.getElementById('cum-runs').innerText = d.cum_runs || 0;
-                                document.getElementById('cum-p').innerText = d.cum_p || 0;
-                                document.getElementById('cum-q').innerText = d.cum_q || 0;
-                                document.getElementById('cum-200').innerText = d.cum_http_200 || 0;
-                                document.getElementById('cum-429').innerText = d.cum_http_429 || 0;
-                                document.getElementById('last-run-time').innerText = d.last_run_time || '-';
-                                document.getElementById('cum-p').innerText = d.cum_p || 0;
-                                document.getElementById('cum-q').innerText = d.cum_q || 0;
-                                document.getElementById('cum-200').innerText = d.cum_http_200 || 0;
-                                document.getElementById('cum-429').innerText = d.cum_http_429 || 0;
-                                document.getElementById('last-run-time').innerText = d.last_run_time || '-';
-                                
-                                document.getElementById('c200').innerText = d.http_counts['200'] || 0;
-                                document.getElementById('c429').innerText = d.http_counts['429'] || 0;
-                                document.getElementById('c503').innerText = d.http_counts['503'] || 0;
-                                
-                                let mHTML = '';
-                                for (const [m, stats] of Object.entries(d.model_stats)) {
-                                    const total = stats['200'] + stats['429'] + stats['other'];
-                                    const rate = total > 0 ? ((stats['200'] / total) * 100).toFixed(1) + '%' : '0%';
-                                    mHTML += `<tr><td><b>${m}</b></td><td style="color:#4ade80">${stats['200']}</td><td style="color:#fca5a5">${stats['429']}</td><td>${stats['other']}</td><td>${rate}</td></tr>`;
-                                }
-                                document.getElementById('model-rows').innerHTML = mHTML || '<tr><td colspan="5">尚無模型分流數據</td></tr>';
-
-                                let pHTML = '';
-                                for (const [p, stats] of Object.entries(d.proxy_stats)) {
-                                    const total = stats['200'] + stats['429'] + stats['other'];
-                                    const rate = total > 0 ? ((stats['200'] / total) * 100).toFixed(1) + '%' : '0%';
-                                    pHTML += `<tr><td><b>${p}</b></td><td style="color:#4ade80">${stats['200']}</td><td style="color:#fca5a5">${stats['429']}</td><td>${stats['other']}</td><td>${rate}</td></tr>`;
-                                }
-                                document.getElementById('proxy-rows').innerHTML = pHTML || '<tr><td colspan="5">尚無代理數據</td></tr>';
-                                
-                                document.getElementById('log-box').innerHTML = (d.recent_logs || []).join('<br>') || '尚無動態';
-
-                                let kHTML = '';
-                                (d.key_statuses || []).forEach(k => {
-                                    kHTML += `<tr><td><code>${k.key}</code></td><td>${k.rpm_status}</td><td>${k.tpm_status}</td><td>${k.rpd_status}</td></tr>`;
-                                });
-                                document.getElementById('key-rows').innerHTML = kHTML || '<tr><td colspan="4">無資料</td></tr>';
-                            } catch(e) {}
+                                lastFetchedData = await res.json();
+                                updateDisplay();
+                            } catch(e) { console.error("Fetch error:", e); }
                         }
-                        setInterval(update, 2000);
-                        update();
+
+                        function mergeStats(target, source) {
+                            for (const [key, stats] of Object.entries(source)) {
+                                if (!target[key]) target[key] = { "2xx": 0, "4xx": 0, "5xx": 0, "other": 0 };
+                                target[key]["2xx"] += (stats["2xx"] || 0);
+                                target[key]["4xx"] += (stats["4xx"] || 0);
+                                target[key]["5xx"] += (stats["5xx"] || 0);
+                                target[key]["other"] += (stats["other"] || 0);
+                            }
+                        }
+
+                        function updateDisplay() {
+                            if (!lastFetchedData) return;
+                            const d = lastFetchedData;
+                            
+                            // 1. 更新即時指標
+                            document.getElementById('live-paper').innerText = d.current_paper;
+                            document.getElementById('live-progress').innerText = `${d.progress}`;
+                            document.getElementById('live-speed').innerText = d.time_per_q_str || "計算中...";
+                            document.getElementById('uptime').innerText = d.uptime_formatted;
+                            document.getElementById('disk-size').innerText = d.disk_str;
+                            document.getElementById('log-box').innerHTML = (d.recent_logs || []).join('<br>') || '尚無動態';
+
+                            // 2. 獲取篩選日期
+                            const sDateStr = document.getElementById('start-date').value;
+                            const eDateStr = document.getElementById('end-date').value;
+                            const sTime = sDateStr ? new Date(sDateStr + "T00:00:00").getTime() : 0;
+                            const eTime = eDateStr ? new Date(eDateStr + "T23:59:59").getTime() : Infinity;
+
+                            // 3. 聚合資料結構準備
+                            let aggQ = 0, aggP = 0, aggD = 0;
+                            let aggProxy = {}, aggModel = {}, aggKey = {}, aggExams = {};
+
+                            // 4. 融合歷史資料 (History Runs)
+                            if (d.history_data && d.history_data.runs) {
+                                d.history_data.runs.forEach(run => {
+                                    const runTime = new Date(run.start_time.replace(" ", "T")).getTime();
+                                    if (runTime >= sTime && runTime <= eTime) {
+                                        aggQ += (run.completed_questions || 0);
+                                        aggP += (run.completed_papers || 0);
+                                        aggD += (run.diagram_count || 0);
+                                        if (run.proxy_stats) mergeStats(aggProxy, run.proxy_stats);
+                                        if (run.model_stats) mergeStats(aggModel, run.model_stats);
+                                        if (run.key_stats) mergeStats(aggKey, run.key_stats);
+                                        if (run.exam_progress) {
+                                            for(const [exam, prog] of Object.entries(run.exam_progress)){
+                                                aggExams[exam] = prog; // 覆寫為最新狀態
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+
+                            // 5. 融合當前即時 Session 資料 (若當前時間符合篩選區間)
+                            const nowTime = new Date().getTime();
+                            if (nowTime >= sTime && nowTime <= eTime) {
+                                aggQ += (d.completed_questions || 0); // 注意：若即時資料已寫入 history_data 的最後一筆，此處可能需防連加。目前的 Python 設計是覆寫最後一筆，所以此處不累加即時的 Q 數量，僅覆寫統計字典。
+                                mergeStats(aggProxy, d.proxy_stats || {});
+                                mergeStats(aggModel, d.model_stats || {});
+                                mergeStats(aggKey, d.key_stats || {});
+                                if (d.exam_progress) {
+                                    for(const [exam, prog] of Object.entries(d.exam_progress)){
+                                        aggExams[exam] = prog;
+                                    }
+                                }
+                            }
+
+                            // 6. 渲染彙總數字
+                            document.getElementById('agg-questions').innerText = aggQ;
+                            document.getElementById('agg-papers').innerText = aggP;
+                            document.getElementById('agg-diagrams').innerText = aggD;
+
+                            let tot2xx = 0, totAll = 0;
+                            for (const s of Object.values(aggProxy)) {
+                                tot2xx += s["2xx"];
+                                totAll += (s["2xx"] + s["4xx"] + s["5xx"] + s["other"]);
+                            }
+                            document.getElementById('agg-success-rate').innerText = totAll > 0 ? ((tot2xx / totAll) * 100).toFixed(1) + "%" : "100%";
+
+                            // 7. 渲染 Proxy 表格
+                            let pHTML = '';
+                            for (const [p, s] of Object.entries(aggProxy)) {
+                                pHTML += `<tr><td><b>${p}</b></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td></tr>`;
+                            }
+                            document.getElementById('proxy-rows').innerHTML = pHTML || '<tr><td colspan="4">無資料</td></tr>';
+
+                            // 8. 渲染 Model 表格
+                            let mHTML = '';
+                            for (const [m, s] of Object.entries(aggModel)) {
+                                mHTML += `<tr><td><b>${m}</b></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td></tr>`;
+                            }
+                            document.getElementById('model-rows').innerHTML = mHTML || '<tr><td colspan="4">無資料</td></tr>';
+
+                            // 9. 渲染 Key 表格
+                            let kHTML = '';
+                            for (const [k, s] of Object.entries(aggKey)) {
+                                const kTotal = s["2xx"] + s["4xx"] + s["5xx"] + s["other"];
+                                const kRate = kTotal > 0 ? ((s["2xx"] / kTotal) * 100).toFixed(1) + "%" : "0%";
+                                kHTML += `<tr><td><code>${k}</code></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td><td><b>${kRate}</b></td></tr>`;
+                            }
+                            document.getElementById('key-rows').innerHTML = kHTML || '<tr><td colspan="5">無資料</td></tr>';
+
+                            // 10. 渲染考卷進度表格
+                            let eHTML = '';
+                            for (const [exam, s] of Object.entries(aggExams)) {
+                                const total = s.total || 1;
+                                const comp = s.completed || 0;
+                                const pct = Math.min(100, (comp / total) * 100).toFixed(0);
+                                const statusColor = s.status.includes("完工") ? "#4ade80" : (s.status.includes("解題") ? "#38bdf8" : "#94a3b8");
+                                eHTML += `<tr>
+                                    <td><b>${exam}</b></td>
+                                    <td>${total}</td>
+                                    <td>${comp}</td>
+                                    <td><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%; background:${statusColor}"></div></div></td>
+                                    <td style="color:${statusColor}">${s.status}</td>
+                                </tr>`;
+                            }
+                            document.getElementById('exam-rows').innerHTML = eHTML || '<tr><td colspan="5">尚未開始解析考卷</td></tr>';
+                        }
+
+                        setInterval(fetchData, 3000);
+                        fetchData();
                     </script>
                 </body>
                 </html>
@@ -2108,8 +2210,10 @@ class GeminiFreeTierManager:
                 )
                 
                 # 📊 記錄成功 200 狀態（包含代理名稱與模型名稱）
-                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, 200)
-
+                key_masked = f"{key_obj.api_key[:6]}...{key_obj.api_key[-4:]}" if key_obj else "Unknown"
+                # 📊 記錄成功 200 狀態
+                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, key_masked, 200)
+                
                 if not response:
                     logging.warning("⚠️ API 回傳完全為空 (None)，可能發生網路瞬斷，準備重試...")
                     attempts += 1
@@ -2162,8 +2266,9 @@ class GeminiFreeTierManager:
                 raise ree
             except APIError as e:
                 err_code = getattr(e, 'code', 500)
-                # 🚀 修正：補上漏傳的 model 參數，確保 429 / 503 錯誤能正確計入儀表板並啟動自癒重試
-                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, err_code)
+                key_masked = f"{key_obj.api_key[:6]}...{key_obj.api_key[-4:]}" if key_obj else "Unknown"
+                # 記錄 429 / 503 / 401 等錯誤
+                GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, key_masked, err_code)
                 err_str = str(e).lower()
                 
                 # 🚀 檢測本題是否包含 PIL 圖片（若無圖片，則可安全切換至第三方大模型備援）
@@ -4920,8 +5025,9 @@ class ExamParser:
             GLOBAL_METRICS.current_paper = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
             GLOBAL_METRICS.total_questions = len(all_extracted_questions)
             GLOBAL_METRICS.completed_questions = len(loaded_partial_questions)
+        GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(loaded_partial_questions), len(all_extracted_questions), "解題中...")
         GLOBAL_METRICS.add_log(f"🚀 開始解析考卷：{GLOBAL_METRICS.current_paper} (總題數：{len(all_extracted_questions)})")
-
+        
         task_queue = []
         for q in all_extracted_questions:
             q_num = q.get("question_number")
@@ -5566,8 +5672,9 @@ class ExamParser:
                                 # 📊 即時更新網頁儀表板進度與滾動日誌
                                 with GLOBAL_METRICS.lock:
                                     GLOBAL_METRICS.completed_questions = len(all_final_questions)
+                                GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(all_final_questions), len(all_extracted_questions), "解題中...")
                                 GLOBAL_METRICS.add_log(f"✅ 題號 {q_data['question_number']} 詳解與圖解通過審查！")
-
+                                
                             completed_indices.add(idx)
                             save_partial_progress_immediately(partial_json_path, all_final_questions)
                             logging.info(f"  -> 🎉 {paper_tag} 題號 {q_data['question_number']} 通過驗證，成功收錄Partial。")
@@ -5731,6 +5838,10 @@ class ExamParser:
                     try: img_obj.close()
                     except Exception: pass
                 del q['_cropped_pil_images']
+
+        # 結算本卷最終狀態
+        final_status = "部分完成(保留降級)" if is_partial else "100% 全卷完工"
+        GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(valid_solved_questions), len(all_extracted_questions), final_status)
 
         if is_partial:
             # 只要還有任何一題失敗/超時，絕對不產生最終 database，保留 raw 暫存等待下次重跑！
