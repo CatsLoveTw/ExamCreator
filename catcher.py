@@ -2081,9 +2081,11 @@ class GeminiFreeTierManager:
                 # 🚀 動態載入該模型專屬的 Token 上限
                 model_max_tokens = self.model_token_limits.get(model, 65536)
                 
+                # 🚨 調整順序：先取得當前輪到的 Proxy，再印出日誌（防止變數未賦值錯誤）
+                chosen_proxy = self.get_next_proxy_url()
                 proxy_label = chosen_proxy.split('//')[-1].split('/')[0] if chosen_proxy else "Direct_Google"
-                print(f"🔹{desc_str} 嘗試使用模型 {model} (Proxy: {proxy_label}) (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
                 
+                print(f"🔹{desc_str} 嘗試使用模型 {model} (Proxy: {proxy_label}) (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
                 self.print_keys_status()
 
                 gen_config = types.GenerateContentConfig(
@@ -2096,8 +2098,7 @@ class GeminiFreeTierManager:
                 if thinking_config:
                     gen_config.thinking_config = thinking_config
 
-                # 🚀 修復：從 Key 物件中動態取用已快取的 Client，防止連線池洩漏
-                chosen_proxy = self.get_next_proxy_url()
+                # 🚀 從 Key 物件中動態取用已快取的 Client
                 active_client = key_obj.get_client(chosen_proxy)
 
                 response = active_client.models.generate_content(
