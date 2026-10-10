@@ -561,23 +561,23 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
         clean_text_fp = re.sub(r'[^\w\u4e00-\u9fa5]', '', str(q.get("question_text", "")))[:30]
         
         current_sol_len = len(str(q.get("detailed_solution", "")))
-        
         # 情況 A：題號完全相同
-            if key in merged_map:
-                merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
-                continue
+        if key in merged_map:
+            merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
+            continue
 
-            if clean_text_fp and len(clean_text_fp) >= 10:
-                if clean_text_fp in text_fps:
-                    old_k = text_fps[clean_text_fp]
-                    fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
-                    del merged_map[old_k]
-                    merged_map[key] = fused_q
-                    text_fps[clean_text_fp] = key
-                    continue
+        if clean_text_fp and len(clean_text_fp) >= 10:
+            if clean_text_fp in text_fps:
+                old_k = text_fps[clean_text_fp]
+                fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
+                del merged_map[old_k]
+                merged_map[key] = fused_q
                 text_fps[clean_text_fp] = key
+                continue
+            text_fps[clean_text_fp] = key
 
-            merged_map[key] = q
+        merged_map[key] = q
+            
 
     merged_list = list(merged_map.values())
     stats["merged"] = len(merged_list)
