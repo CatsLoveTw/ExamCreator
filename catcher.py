@@ -2166,12 +2166,15 @@ class GeminiFreeTierManager:
                 # 🚀 檢測本題是否包含 PIL 圖片（若無圖片，則可安全切換至第三方大模型備援）
                 has_pil_images = any(isinstance(c, Image.Image) for c in contents) if isinstance(contents, list) else False
                 
-                # 🚀 404 模型不存在：直接跳過該無效模型 (修復 target_model 變數未定義 Bug)
+                # 🚀 404 錯誤（模型端點不存在或代理路徑未對應）：不更換金鑰，只將該模型自候選名單中移除
                 if e.code == 404 or "not found" in err_str or "is not found for api version" in err_str:
-                    logging.warning(f"⏭️ [404 模型無效] 專案不支援模型 {model}，立即切換下一梯隊...")
-                    if model in candidate_models:
-                        candidate_models.remove(model)
-                    smart_sleep(0.5)
+                    logging.warning(f"⏭️ [404 模型無效/代理端點未支援] 模型 {model} 回傳 404，金鑰保持有效，立即換下一個模型...")
+                    with self.lock:
+                        if model in candidate_models:
+                            candidate_models.remove(model)
+                        if model in self.models:
+                            self.models.remove(model)
+                    smart_sleep(0.3)
                     continue
 
                 # 🚨 503 / 504 伺服器過載：充分輪詢手頭可用金鑰後才切換備援
@@ -3503,7 +3506,7 @@ class ExamParser:
         else: # AST（大考指考 / 分科測驗）
             type_folder = "分科指考"
             ast_short = "分科" if y_val >= 111 else "指考"
-            ask_full = "分科測驗" if y_val >= 111 else "指定科目考試"
+            ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
             spec_name = f"{y_val}學年度_{ast_short}{makeup_tag}_{clean_subj_name}"
             standard_academic_year = f"{y_val}{ast_short}{makeup_tag}"
             standard_exam_source = f"{y_val}學年度{ast_full}{makeup_src}{clean_subj_name}"
