@@ -1094,12 +1094,12 @@ class SolutionValidatorBatch(BaseModel):
 class FreeTierKey:
     def __init__(self, api_key: str, custom_base_url: Optional[str] = None):
         self.api_key = api_key
-        # 快取連線池並加上執行緒鎖
         self.clients_cache: Dict[str, genai.Client] = {}
         self.cache_lock = threading.Lock()
         self.client = self.get_client(custom_base_url)
-        
-        # 🚨 升級：改為「各模型獨立記錄 RPD 耗盡狀態」，拒絕跨模型連坐！
+        self.rpd_reset_time = 0.0
+
+        # 🚨 各模型獨立 RPD 耗盡字典 (model_name -> reset_timestamp)
         self.model_rpd_exhausted: Dict[str, float] = {}
 
         # 各模型獨立冷卻與請求紀錄字典
@@ -1111,6 +1111,22 @@ class FreeTierKey:
         self.limit_rpd = 1500
         self.is_disabled = False
         self.disable_reason = ""
+        
+    def is_model_rpd_exhausted(self, model: str, current_time: float) -> bool:
+        """判定特定模型在此金鑰下是否每日額度耗盡"""
+        if model in self.model_rpd_exhausted:
+            if current_time < self.model_rpd_exhausted[model]:
+                return True
+            else:
+                del self.model_rpd_exhausted[model]
+        return False
+
+    @property
+    def rpd_exhausted(self) -> bool:
+        """向下相容屬性：當前 Key 是否所有主流模型皆已耗盡（防止儀表板與舊呼叫崩潰）"""
+        now = time.time()
+        self.model_rpd_exhausted = {m: exp for m, exp in self.model_rpd_exhausted.items() if now < exp}
+        return len(self.model_rpd_exhausted) >= 5
     
     def get_client(self, custom_base_url: Optional[str] = None) -> genai.Client:
         """複用並快取 Client，防範長執行過程中的資源洩漏 (具備執行緒安全鎖)"""
@@ -1128,23 +1144,23 @@ class FreeTierKey:
         current_time = time.time()
         self.token_usage = [item for item in self.token_usage if current_time - item[0] <= 60.5]
         
-        # 統計該 Key 旗下所有模型在過去 60 秒內的總請求數 (RPM)
+        # 清理已過期的模型冷卻
+        self.model_rpd_exhausted = {m: exp for m, exp in self.model_rpd_exhausted.items() if current_time < exp}
+        
         total_rpm = sum(
             len([t for t in times if current_time - t <= 60.5])
             for times in self.model_request_times.values()
         )
         current_tpm = sum(item[1] for item in self.token_usage)
         
-        if self.rpd_exhausted and current_time >= self.rpd_reset_time:
-            self.rpd_exhausted = False
-            self.daily_request_count = 0
-            
+        exhausted_models = list(self.model_rpd_exhausted.keys())
+        rpd_note = f" (耗盡: {','.join(exhausted_models)})" if exhausted_models else ""
+        
         return {
-            # 🚀 強化金鑰隱私遮罩，只露前 6 個與後 4 個字元
             "key": f"{self.api_key[:6]}...{self.api_key[-4:]}" if len(self.api_key) > 12 else self.api_key,
             "rpm_status": f"{total_rpm}/15",
             "tpm_status": f"{current_tpm}/500k",
-            "rpd_status": f"{self.daily_request_count}/{self.limit_rpd}" + (" (已耗盡，等待重置)" if self.rpd_exhausted else ""),
+            "rpd_status": f"{self.daily_request_count}/{self.limit_rpd}{rpd_note}",
         }
 
     def can_request_model(self, model: str, current_time: float, estimated_tokens: int) -> bool:
@@ -1199,9 +1215,14 @@ class FreeTierKey:
         jitter = random.uniform(5.0, 25.0)  # 動態錯開 5~25 秒
         self.model_cooldowns[model] = time.time() + cooldown_seconds + jitter
 
-    def mark_rpd_exhausted(self, model: str):
-        self.model_rpd_exhausted[model] = get_next_rpd_reset_timestamp()
-        
+    def mark_rpd_exhausted(self, model: Optional[str] = None):
+        """標記模型耗盡。若未指定模型則標記為全域限制"""
+        reset_time = get_next_rpd_reset_timestamp()
+        if model:
+            self.model_rpd_exhausted[model] = reset_time
+        else:
+            self.model_rpd_exhausted["global"] = reset_time
+            
 class LiveDashboardMetrics:
     def __init__(self):
         self.lock = threading.Lock()
@@ -1956,13 +1977,15 @@ class GeminiFreeTierManager:
         """尋找目前能執行 target_model 的金鑰；若無可用 Key 則回傳 None 以利立即降級至下一梯隊模型"""
         with self.lock:
             current_time = time.time()
-            active_keys = [k for k in self.keys if not k.rpd_exhausted and not k.is_disabled]
+            # 🚨 核心修復：只檢查 target_model 是否可用，不因其他模型耗盡而封鎖整把 Key！
+            active_keys = [k for k in self.keys if not k.is_disabled and not k.is_model_rpd_exhausted(target_model, current_time)]
             
             if not self.keys:
                 logging.critical("🚨 [系統致命錯誤] 找不到任何 API 金鑰！")
                 os._exit(1)
             if not active_keys:
-                raise RPDExhaustedException("所有 API 金鑰已達每日總配額上限。")
+                # 當前目標模型已無可用金鑰，回傳 None 讓排程器平滑切換下一梯隊模型（例如 3.7 -> 3.5-lite）
+                return None, target_model, None
                 
             num_active = len(active_keys)
             for i in range(num_active):
