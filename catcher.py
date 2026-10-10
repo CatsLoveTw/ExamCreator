@@ -2081,7 +2081,9 @@ class GeminiFreeTierManager:
                 # 🚀 動態載入該模型專屬的 Token 上限
                 model_max_tokens = self.model_token_limits.get(model, 65536)
                 
-                print(f"🔹{desc_str} 嘗試使用模型 {model} (Max Tokens: {model_max_tokens}) 呼叫 API (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
+                proxy_label = chosen_proxy.split('//')[-1].split('/')[0] if chosen_proxy else "Direct_Google"
+                print(f"🔹{desc_str} 嘗試使用模型 {model} (Proxy: {proxy_label}) (金鑰: {key_obj.api_key[:8]}...) (第 {attempts + 1} 次嘗試)...", flush=True)
+                
                 self.print_keys_status()
 
                 gen_config = types.GenerateContentConfig(
@@ -2177,15 +2179,28 @@ class GeminiFreeTierManager:
                     smart_sleep(0.3)
                     continue
 
-                # 🚨 503 / 504 伺服器過載：充分輪詢手頭可用金鑰後才切換備援
+                # 🚨 503 / 504 伺服器過載處理：立即換模型 + 指數退避等待，避免無效高頻衝撞
                 if e.code in [503, 504] or "unavailable" in err_str or "gateway timeout" in err_str:
                     attempts += 1
+                    
+                    # 1. 核心修復：立刻將過載模型排到最後，強制換下一個模型接手（如 flash-lite 或 2.5-flash）
+                    if candidate_models and len(candidate_models) > 1:
+                        swapped_model = candidate_models.pop(0)
+                        candidate_models.append(swapped_model)
+                        next_model_hint = f"，立即切換至模型【{candidate_models[0]}】"
+                    else:
+                        next_model_hint = ""
+
+                    # 2. 外部備援大模型接管判定（純文字題優先切換）
                     fallback_threshold = max(3, min(len(self.keys), 6))
                     if attempts >= fallback_threshold and not has_pil_images:
                         res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [503備援接管]")
                         if res_fallback: return res_fallback, None
-                    logging.warning(f"⚠️ [503/504 伺服器過載] 第 {attempts} 次重試 (切換下一把金鑰)...")
-                    smart_sleep(1.0)
+
+                    # 3. 避免 1.3 秒高頻轟炸：隨重試次數遞增退避時間 (2s -> 4s -> 6s + 隨機抖動)
+                    backoff_wait = min(2.0 + (attempts * 1.2), 8.0) + random.uniform(0.5, 2.0)
+                    logging.warning(f"⚠️ [503 伺服器過載] 第 {attempts} 次重試{next_model_hint}，冷卻等待 {backoff_wait:.1f} 秒...")
+                    smart_sleep(backoff_wait)
                     continue
 
                 # 🚨 401 錯誤處理（精確防誤殺：只有 Google 官方證實金鑰無效才停用）
