@@ -48,11 +48,14 @@ class TimeoutSafetyException(Exception):
     pass
 
 def check_global_timeout():
-    """檢查是否超過 5 小時，超時立刻拋出安全例外"""
+    """檢查是否超過 5 小時或收到 Web 控制台手動終止指令"""
+    if getattr(GLOBAL_METRICS, "stop_requested", False):
+        logging.critical("🛑 [Web 遠端指令生效] 已收到手動停止指令！正在強制刷新進度並觸發安全退出 (Exit 0)...")
+        raise TimeoutSafetyException("Web 面板手動安全終止。")
     if time.time() - GLOBAL_START_TIME > MAX_EXECUTION_TIME_SECONDS:
         logging.critical("[全域時間預警] 已達 5 小時執行上限！強制中斷任務並準備安全上傳...")
         raise TimeoutSafetyException("已達 5 小時安全時間上限。")
-
+        
 def smart_sleep(seconds: float):
     """可被全域超時中斷的智慧睡眠函式（每 2 秒檢查一次時間，絕不死睡）"""
     start = time.time()
@@ -1112,6 +1115,19 @@ class FreeTierKey:
         self.is_disabled = False
         self.disable_reason = ""
         
+        # 🚨 近期 10 次請求健康度視窗 (1=成功, 0=失敗)
+        self.recent_10_history = []
+
+    def record_call_outcome(self, is_success: bool):
+        self.recent_10_history.append(1 if is_success else 0)
+        if len(self.recent_10_history) > 10:
+            self.recent_10_history.pop(0)
+
+    @property
+    def recent_10_success_rate(self) -> float:
+        if not self.recent_10_history: return 1.0
+        return sum(self.recent_10_history) / len(self.recent_10_history)
+        
     def is_model_rpd_exhausted(self, model: str, current_time: float) -> bool:
         """判定特定模型在此金鑰下是否每日額度耗盡"""
         if model in self.model_rpd_exhausted:
@@ -1231,53 +1247,177 @@ class LiveDashboardMetrics:
         self.run_start_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.session_id = str(int(time.time()))
         
+        # 🚨 遠端控制開關與即時階段標記
+        self.stop_requested = False
+        self.current_stage = "準備就緒，等待任務..."
         self.current_paper = "準備就緒，等待任務..."
+        
         self.total_papers = 0
         self.completed_papers = 0
-        
-        # 🚨 關鍵分離：當前考卷進度 vs 本次運行實質新解題數
         self.paper_total_questions = 0
         self.paper_completed_questions = 0
-        self.session_new_solved_questions = 0 # 累計新解題目，換考卷絕對不歸零！
+        self.session_new_solved_questions = 0
         
         self.diagram_count = 0
         self.arbitration_count = 0
         
+        # 🚨 各維度細緻統計
         self.proxy_stats = {}   # {proxy: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
         self.model_stats = {}   # {model: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
         self.key_stats = {}     # {masked_key: {"2xx":0, "4xx":0, "5xx":0, "other":0}}
         self.exam_progress = {} # {exam_name: {"total": 0, "completed": 0, "status": "等待中"}}
         self.recent_logs = []
 
+        # 🚨 API 各階段成本統計 {stage: {"200_ok": int, "json_err": int, "total_rtt": float}}
+        self.api_stage_stats = {
+            "page_scan": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0},
+            "ans_ocr": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0},
+            "rubric_extract": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0},
+            "solution_gen": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0},
+            "validator": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0},
+            "diagram": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0},
+            "arbitration": {"200_ok": 0, "json_err": 0, "total_rtt": 0.0}
+        }
+        self.recent_rtt_list = [] # 最近 30 次 API RTT 滑動視窗
+
         self.history_file = "telemetry_history.json"
         self.history_data = self.load_history()
         self.save_history()
 
+    def set_stage(self, stage_text: str):
+        """更新當前試卷的微觀處理階段"""
+        with self.lock:
+            self.current_stage = stage_text
+        self.add_log(f"📍 {stage_text}")
+
     def set_current_paper(self, paper_name: str, total_q: int, existing_partial_q: int):
-        """切換考卷時呼叫：更新單卷進度，但【絕對不重置】本次運行的累計新解題數！"""
         with self.lock:
             self.current_paper = paper_name
             self.paper_total_questions = total_q
             self.paper_completed_questions = existing_partial_q
+            self.current_stage = f"開始處理考卷: {paper_name}"
         self.save_history()
 
     def record_new_solved_question(self):
-        """只有在真正呼叫 AI 且驗證通過新題目時才呼叫：增加實質解題數"""
         with self.lock:
             self.session_new_solved_questions += 1
             self.paper_completed_questions += 1
         self.save_history()
+
+    def record_stage_api_call(self, stage: str, rtt: float, is_200: bool, is_json_err: bool = False):
+        """記錄 API 呼叫的階段歸屬、延遲與 JSON 狀態"""
+        with self.lock:
+            if stage not in self.api_stage_stats:
+                self.api_stage_stats[stage] = {"200_ok": 0, "json_err": 0, "total_rtt": 0.0}
+            
+            if is_200:
+                self.api_stage_stats[stage]["200_ok"] += 1
+                self.api_stage_stats[stage]["total_rtt"] += rtt
+                self.recent_rtt_list.append(rtt)
+                if len(self.recent_rtt_list) > 30:
+                    self.recent_rtt_list.pop(0)
+
+            if is_json_err:
+                self.api_stage_stats[stage]["json_err"] += 1
+        self.save_history()
+
+    def compute_simulation_forecast(self, keys_list: list, remaining_papers_count: int) -> dict:
+        """
+        🔮 運籌學調和模擬引擎：
+        結合每把 Key 近期 10 次成功率 + 實質階段消耗 + 過去 10 次歷史運行速度進行調和平均預測
+        """
+        with self.lock:
+            uptime = max(1.0, time.time() - self.start_time)
+            
+            # 1. 計算金鑰佇列近 10 次成功率與有效吞吐量
+            active_keys = [k for k in keys_list if not k.is_disabled]
+            if not active_keys:
+                return {"status": "無可用金鑰"}
+
+            key_rates = [k.recent_10_success_rate for k in active_keys]
+            avg_key_success_p = sum(key_rates) / len(key_rates) if key_rates else 0.5
+            
+            # 平均 RTT (秒)
+            avg_rtt = (sum(self.recent_rtt_list) / len(self.recent_rtt_list)) if self.recent_rtt_list else 1.8
+            
+            # 理論佇列吞吐量 (Requests per second)
+            # 每把 Key 平均物理發送間隔 2.5s，並行線程上限 8
+            nominal_fleet_qps = min(8.0 / avg_rtt, len(active_keys) * (1.0 / 2.5))
+            effective_qps = max(0.05, nominal_fleet_qps * avg_key_success_p)
+
+            # 2. 計算解出一題實質消耗的 API 呼叫數 (含詳解、審查、繪圖與 JSON 重試)
+            sol_stat = self.api_stage_stats["solution_gen"]
+            val_stat = self.api_stage_stats["validator"]
+            diag_stat = self.api_stage_stats["diagram"]
+            
+            # 題目平均呼叫數 (每題至少 1 次生成 + 1 次審查 + 重試機率)
+            calls_per_question = 2.1
+            if self.session_new_solved_questions >= 3:
+                total_sol_calls = sol_stat["200_ok"] + sol_stat["json_err"]
+                total_val_calls = val_stat["200_ok"] + val_stat["json_err"]
+                total_diag_calls = diag_stat["200_ok"] + diag_stat["json_err"]
+                calls_per_question = max(1.8, (total_sol_calls + total_val_calls + total_diag_calls) / self.session_new_solved_questions)
+
+            # 3. 當前即時物理速度 (秒/題)
+            live_sec_per_q = (uptime / self.session_new_solved_questions) if self.session_new_solved_questions > 0 else (calls_per_question / effective_qps)
+
+            # 4. 提取最近 10 次歷史 Sessions 的平均速度進行「調和平均數」加權
+            hist_runs = self.history_data.get("runs", [])
+            recent_10_runs = hist_runs[-10:] if len(hist_runs) >= 1 else []
+            
+            hist_speeds = []
+            for r in recent_10_runs:
+                q_cnt = r.get("completed_questions", 0)
+                # 若記錄中有紀錄或由題數與更新時間估計
+                if q_cnt >= 5 and "last_update" in r and "start_time" in r:
+                    try:
+                        t_diff = (datetime.datetime.strptime(r["last_update"], "%Y-%m-%d %H:%M:%S") - datetime.datetime.strptime(r["start_time"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+                        if t_diff > 30:
+                            hist_speeds.append(t_diff / q_cnt)
+                    except: pass
+
+            # 調和平均數融合 (Harmonic Mean)，對極端離群值具備極佳穩健性
+            if hist_speeds:
+                h_mean_hist = len(hist_speeds) / sum(1.0 / max(1.0, s) for s in hist_speeds)
+                # 若當前實質解題 >= 5 題，當前數據佔比 60%，歷史佔 40%
+                weight_live = 0.6 if self.session_new_solved_questions >= 5 else 0.2
+                harmonized_sec_per_q = 1.0 / ((weight_live / live_sec_per_q) + ((1.0 - weight_live) / h_mean_hist))
+            else:
+                harmonized_sec_per_q = live_sec_per_q
+
+            # 5. 輸出客觀模擬預測指標
+            rem_q_in_paper = max(0, self.paper_total_questions - self.paper_completed_questions)
+            eta_current_paper_sec = rem_q_in_paper * harmonized_sec_per_q
+
+            # 單次 GHA (5 小時 = 18000 秒) 預估產能
+            gha_budget_sec = 5.0 * 3600
+            rem_gha_time = max(0.0, gha_budget_sec - uptime)
+            est_capacity_5h_questions = int(rem_gha_time / harmonized_sec_per_q)
+
+            # 每張考卷平均預估時間 (以每卷平均 24 題估計)
+            avg_exam_sec = 24 * harmonized_sec_per_q
+            eta_total_all_sec = eta_current_paper_sec + (remaining_papers_count * avg_exam_sec)
+
+            return {
+                "avg_rtt_sec": round(avg_rtt, 2),
+                "effective_qps": round(effective_qps, 3),
+                "calls_per_question": round(calls_per_question, 2),
+                "harmonized_sec_per_q": round(harmonized_sec_per_q, 1),
+                "eta_current_paper_str": str(datetime.timedelta(seconds=int(eta_current_paper_sec))),
+                "est_capacity_5h_questions": est_capacity_5h_questions,
+                "avg_exam_time_str": str(datetime.timedelta(seconds=int(avg_exam_sec))),
+                "eta_total_all_str": str(datetime.timedelta(seconds=int(eta_total_all_sec))),
+                "key_fleet_health": f"{int(avg_key_success_p * 100)}%"
+            }
 
     def load_history(self) -> dict:
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    if "runs" not in data:
-                        data = {"runs": []}
+                    if "runs" not in data: data = {"runs": []}
                     return data
-            except Exception as e:
-                pass
+            except Exception: pass
         return {"runs": []}
 
     def save_history(self):
@@ -1287,15 +1427,15 @@ class LiveDashboardMetrics:
                     "session_id": self.session_id,
                     "start_time": self.run_start_str,
                     "last_update": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "completed_questions": self.session_new_solved_questions, # 只記錄實質解題數！
+                    "completed_questions": self.session_new_solved_questions,
                     "completed_papers": self.completed_papers,
                     "diagram_count": self.diagram_count,
                     "proxy_stats": self.proxy_stats,
                     "model_stats": self.model_stats,
                     "key_stats": self.key_stats,
-                    "exam_progress": self.exam_progress
+                    "exam_progress": self.exam_progress,
+                    "api_stage_stats": self.api_stage_stats
                 }
-
                 existing_idx = next((i for i, r in enumerate(self.history_data["runs"]) if r.get("session_id") == self.session_id), -1)
                 if existing_idx >= 0:
                     self.history_data["runs"][existing_idx] = current_session
@@ -1304,19 +1444,16 @@ class LiveDashboardMetrics:
 
                 with open(self.history_file, "w", encoding="utf-8") as f:
                     json.dump(self.history_data, f, ensure_ascii=False, indent=4)
-            except Exception:
-                pass
+            except Exception: pass
 
     def record_http(self, proxy_name: str, model_name: str, masked_key: str, code: int):
         with self.lock:
             code_str = str(code)
             category = "2xx" if code_str.startswith("2") else ("4xx" if code_str.startswith("4") else ("5xx" if code_str.startswith("5") else "other"))
             short_p = proxy_name.split("//")[-1].split("/")[0] if "//" in proxy_name else proxy_name
-            
             if short_p not in self.proxy_stats: self.proxy_stats[short_p] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
             if model_name not in self.model_stats: self.model_stats[model_name] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
             if masked_key not in self.key_stats: self.key_stats[masked_key] = {"2xx": 0, "4xx": 0, "5xx": 0, "other": 0}
-
             self.proxy_stats[short_p][category] += 1
             self.model_stats[model_name][category] += 1
             self.key_stats[masked_key][category] += 1
@@ -1324,21 +1461,17 @@ class LiveDashboardMetrics:
 
     def update_exam_progress(self, exam_name: str, completed: int, total: int, status: str):
         with self.lock:
-            self.exam_progress[exam_name] = {
-                "completed": completed,
-                "total": total,
-                "status": status
-            }
+            self.exam_progress[exam_name] = {"completed": completed, "total": total, "status": status}
         self.save_history()
 
     def add_log(self, msg: str):
         with self.lock:
             ts = datetime.datetime.now().strftime("%H:%M:%S")
             self.recent_logs.insert(0, f"[{ts}] {msg}")
-            if len(self.recent_logs) > 15:
-                self.recent_logs.pop()
+            if len(self.recent_logs) > 15: self.recent_logs.pop()
 
 GLOBAL_METRICS = LiveDashboardMetrics()
+
 
 def start_dashboard_web_server(port=8080, manager=None):
     from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -1346,13 +1479,22 @@ def start_dashboard_web_server(port=8080, manager=None):
     class DashboardHandler(BaseHTTPRequestHandler):
         def log_message(self, format, *args): pass
         
+        def do_POST(self):
+            if self.path == "/api/stop":
+                logging.warning("🛑 [Web 遠端指令] 收到使用者強制停止信號！準備安全存檔並優雅退出...")
+                GLOBAL_METRICS.stop_requested = True
+                GLOBAL_METRICS.add_log("🛑 收到 Web 遠端停止指令，正在安全收尾存檔...")
+                self.send_response(200)
+                self.send_header("Content-type", "application/json; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "success", "message": "已觸發停機，即將退出進入 GHA 上傳"}).encode("utf-8"))
+
         def do_GET(self):
             if self.path == "/api/data":
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
                 
-                # 🚀 核心修復：先獨立讀取 manager 金鑰狀態，絕不與 GLOBAL_METRICS.lock 巢狀重疊，徹底杜絕死鎖！
                 key_statuses = []
                 key_health = {"active": 0, "cooldown": 0, "disabled": 0}
                 if manager:
@@ -1363,7 +1505,6 @@ def start_dashboard_web_server(port=8080, manager=None):
                             elif k.rpd_exhausted: key_health["cooldown"] += 1
                             else: key_health["active"] += 1
 
-                # 計算產出資料庫磁碟容量
                 total_mb = 0.0
                 out_dir = "./exam_database_output"
                 if os.path.exists(out_dir):
@@ -1377,29 +1518,29 @@ def start_dashboard_web_server(port=8080, manager=None):
                     time_limit_sec = int(MAX_EXECUTION_TIME_SECONDS)
                     time_pct = min(100, int((uptime_sec / time_limit_sec) * 100))
                     
-                    # 🚀 計算「平均完成一題要花多少時間」（嚴格排除 partial 題目干擾！）
                     time_per_q_str = "計算中..."
                     if GLOBAL_METRICS.session_new_solved_questions > 0:
                         sec_per_q = uptime_sec / GLOBAL_METRICS.session_new_solved_questions
-                        if sec_per_q >= 60:
-                            time_per_q_str = f"{int(sec_per_q // 60)} 分 {int(sec_per_q % 60)} 秒 / 題"
-                        else:
-                            time_per_q_str = f"{int(sec_per_q)} 秒 / 題"
+                        time_per_q_str = f"{int(sec_per_q // 60)} 分 {int(sec_per_q % 60)} 秒 / 題" if sec_per_q >= 60 else f"{int(sec_per_q)} 秒 / 題"
                     else:
                         time_per_q_str = "等待新題目完成..."
-                        
-                    # 計算 2xx 成功率 (從 proxy_stats 總和推算)
+
                     tot_http = sum(sum(cat.values()) for cat in GLOBAL_METRICS.proxy_stats.values())
                     ok_http = sum(cat.get("2xx", 0) for cat in GLOBAL_METRICS.proxy_stats.values())
                     success_rate = f"{(ok_http / tot_http * 100):.1f}%" if tot_http > 0 else "100%"
 
+                    # 🔮 調用運籌學排程與調和預測引擎
+                    rem_papers = max(0, GLOBAL_METRICS.total_papers - GLOBAL_METRICS.completed_papers)
+                    forecast_data = GLOBAL_METRICS.compute_simulation_forecast(manager.keys if manager else [], rem_papers)
+
                     data = {
                         "uptime_formatted": str(datetime.timedelta(seconds=uptime_sec)),
                         "time_pct": time_pct,
+                        "current_stage": GLOBAL_METRICS.current_stage, # 🆕 細部進度階段
                         "current_paper": GLOBAL_METRICS.current_paper,
                         "paper_progress": f"{GLOBAL_METRICS.completed_papers}/{GLOBAL_METRICS.total_papers}",
                         "progress": f"{GLOBAL_METRICS.paper_completed_questions}/{GLOBAL_METRICS.paper_total_questions}",
-                        "session_solved": GLOBAL_METRICS.session_new_solved_questions, # 🆕 本次運行實質總題數
+                        "session_solved": GLOBAL_METRICS.session_new_solved_questions,
                         "time_per_q_str": time_per_q_str,
                         "success_rate": success_rate,
                         "disk_str": disk_str,
@@ -1412,9 +1553,12 @@ def start_dashboard_web_server(port=8080, manager=None):
                         "exam_progress": GLOBAL_METRICS.exam_progress,
                         "key_statuses": key_statuses,
                         "recent_logs": GLOBAL_METRICS.recent_logs,
-                        "history_data": GLOBAL_METRICS.history_data
+                        "history_data": GLOBAL_METRICS.history_data,
+                        # 🔮 預測中樞專屬指標
+                        "forecast": forecast_data,
+                        "api_stage_stats": GLOBAL_METRICS.api_stage_stats,
+                        "current_session_id": GLOBAL_METRICS.session_id
                     }
-                    
                 self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
             else:
                 self.send_response(200)
@@ -1424,74 +1568,121 @@ def start_dashboard_web_server(port=8080, manager=None):
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Exam Parser 終極遙測中心</title>
+                    <title>Exam Parser 遙測中心</title>
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
                         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-                        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 1px solid #334155; padding-bottom: 15px; flex-wrap: wrap; gap: 15px; }
-                        h1 { color: #38bdf8; margin: 0; }
-                        .filter-box { background: #1e293b; padding: 12px 18px; border-radius: 8px; border: 1px solid #475569; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-                        .filter-box input[type="date"], .filter-box select { background: #0f172a; color: #f8fafc; border: 1px solid #334155; padding: 6px 10px; border-radius: 6px; font-size: 0.9rem; }
-                        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; max-width: 1400px; margin: 0 auto; }
-                        .card { background: #1e293b; border-radius: 12px; padding: 20px; border: 1px solid #334155; overflow: hidden; }
-                        h2 { margin-top: 0; color: #38bdf8; font-size: 1.1rem; border-bottom: 1px solid #334155; padding-bottom: 10px; }
-                        .stat-val { font-size: 1.6rem; font-weight: bold; color: #4ade80; }
-                        .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 0.8rem; font-weight: bold; }
+                        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; flex-wrap: wrap; gap: 15px; }
+                        h1 { color: #38bdf8; margin: 0; font-size: 1.5rem; }
+                        .stage-banner { background: #1e293b; border-left: 4px solid #38bdf8; padding: 10px 15px; border-radius: 6px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; }
+                        .btn-stop { background: #ef4444; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+                        .btn-stop:hover { background: #dc2626; }
+                        .filter-box { background: #1e293b; padding: 10px 15px; border-radius: 8px; border: 1px solid #475569; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+                        .filter-box input[type="date"], .filter-box select { background: #0f172a; color: #f8fafc; border: 1px solid #334155; padding: 5px 8px; border-radius: 4px; font-size: 0.85rem; }
+                        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; max-width: 1400px; margin: 0 auto; }
+                        .card { background: #1e293b; border-radius: 12px; padding: 18px; border: 1px solid #334155; overflow: hidden; }
+                        h2 { margin-top: 0; color: #38bdf8; font-size: 1.05rem; border-bottom: 1px solid #334155; padding-bottom: 8px; }
+                        .stat-val { font-size: 1.5rem; font-weight: bold; color: #4ade80; }
+                        .badge { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; }
                         .badge-2xx { background: #166534; color: #4ade80; }
                         .badge-4xx { background: #991b1b; color: #fca5a5; }
                         .badge-5xx { background: #854d0e; color: #fef08a; }
-                        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
-                        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #334155; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.85rem; }
+                        th, td { text-align: left; padding: 7px; border-bottom: 1px solid #334155; }
                         th { color: #94a3b8; background: #0f172a; position: sticky; top: 0; }
-                        .table-container { max-height: 250px; overflow-y: auto; }
-                        .log-box { background: #020617; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #a7f3d0; max-height: 200px; overflow-y: auto; }
-                        .progress-bar-bg { background: #334155; border-radius: 8px; height: 8px; width: 100%; margin-top: 5px; }
-                        .progress-bar-fill { background: linear-gradient(90deg, #38bdf8, #4ade80); height: 100%; border-radius: 8px;}
-                        .record-hint { color: #38bdf8; font-weight: bold; margin-left: 5px; }
+                        .table-container { max-height: 220px; overflow-y: auto; }
+                        .log-box { background: #020617; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem; color: #a7f3d0; max-height: 180px; overflow-y: auto; }
+                        .progress-bar-bg { background: #334155; border-radius: 6px; height: 7px; width: 100%; margin-top: 4px; }
+                        .progress-bar-fill { background: linear-gradient(90deg, #38bdf8, #4ade80); height: 100%; border-radius: 6px; }
                     </style>
                 </head>
                 <body>
-                    <div class="header-container" style="max-width: 1400px; margin: 0 auto 25px auto;">
-                        <h1>⚡ Exam Parser 終極遙測儀表板</h1>
-                        <div class="filter-box">
-                            <label>📅 篩選起訖：</label>
-                            <input type="date" id="start-date" onchange="onDateRangeChange()"> 
-                            <span>至</span> 
-                            <input type="date" id="end-date" onchange="onDateRangeChange()">
-                            
-                            <label style="margin-left: 10px;">🎯 選擇檢視紀錄：</label>
-                            <select id="session-select" onchange="renderSelectedSession()">
-                                <option value="all">載入紀錄中...</option>
-                            </select>
+                    <div class="header-container" style="max-width: 1400px; margin: 0 auto 15px auto;">
+                        <div>
+                            <h1>⚡ Exam Parser 頂級決策與調控遙測中心</h1>
+                            <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">多模態大考解題管線 ‧ 全方位算力排程中樞</div>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button classbtn btn-stop" onclick="triggerGracefulStop()">🛑 優雅停機存檔 (進入 GHA 上傳)</button>
                         </div>
                     </div>
 
+                    <!-- 即時細部處理階段橫幅 -->
+                    <div style="max-width: 1400px; margin: 0 auto 15px auto;" class="stage-banner">
+                        <div>
+                            <span style="color:#94a3b8;">當前流水線作業微觀階段：</span>
+                            <span id="live-stage" style="color:#38bdf8; font-weight:bold;">初始化中...</span>
+                        </div>
+                        <div style="font-size:0.85rem; color:#4ade80;" id="live-paper-badge">-</div>
+                    </div>
+
+                    <!-- 篩選列 -->
+                    <div style="max-width: 1400px; margin: 0 auto 18px auto;" class="filter-box">
+                        <label>📅 歷史起訖：</label>
+                        <input type="date" id="start-date" onchange="onDateRangeChange()"> 
+                        <span>至</span> 
+                        <input type="date" id="end-date" onchange="onDateRangeChange()">
+                        
+                        <label style="margin-left: 10px;">🎯 選擇檢視階段：</label>
+                        <select id="session-select" onchange="renderSelectedSession()">
+                            <option value="live">🔴 [當前即時運行 - Live]</option>
+                        </select>
+                    </div>
+
                     <div class="grid">
+                        <!-- 即時狀態卡 -->
                         <div class="card">
-                            <h2>📌 當前運行與即時速度 (Live Session)</h2>
-                            <div>目前考卷：<span id="live-paper" style="color:#f1f5f9;font-weight:bold;">-</span></div>
-                            <div style="margin-top:6px;">當前考卷進度：<span id="live-progress" class="stat-val" style="font-size:1.3rem;">0/0</span></div>
-                            <div style="margin-top:6px;">本次累計新解題數：<span id="live-session-solved" style="color:#38bdf8;font-weight:bold;font-size:1.2rem;">0</span> 題</div>
-                            <div style="margin-top:6px;">實質單題耗時：<span id="live-speed" style="color:#f59e0b;font-weight:bold;font-size:1.2rem;">計算中...</span></div>
-                            <div style="margin-top:6px;font-size:0.85rem;color:#94a3b8;">運行時間：<span id="uptime">-</span> | 題庫資產：<span id="disk-size" style="color:#4ade80;">0 MB</span></div>
+                            <h2>📌 當前進度與實質耗時 (Live)</h2>
+                            <div>考卷進度：<span id="live-progress" class="stat-val" style="font-size:1.3rem;">0/0</span></div>
+                            <div style="margin-top:5px;">本次新解題數：<span id="live-session-solved" style="color:#38bdf8; font-weight:bold;">0</span> 題</div>
+                            <div style="margin-top:5px;">實質單題耗時：<span id="live-speed" style="color:#f59e0b; font-weight:bold;">計算中...</span></div>
+                            <div style="margin-top:5px; font-size:0.8rem; color:#94a3b8;">已運行：<span id="uptime">-</span> | 題庫資產：<span id="disk-size" style="color:#4ade80;">0 MB</span></div>
                         </div>
 
-                        <div class="card">
-                            <h2>📊 檢視目標統計總結 (<span id="view-target-title" class="record-hint">區間綜合加總</span>)</h2>
-                            <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-                                <div>實質新解題數：<span id="agg-questions" class="stat-val">0</span> 題</div>
-                                <div>完工考卷：<span id="agg-papers" class="stat-val">0</span> 份</div>
-                                <div>繪製圖解：<span id="agg-diagrams" class="stat-val" style="color:#38bdf8;">0</span> 張</div>
-                                <div style="width:100%;margin-top:5px;">
-                                    HTTP 請求成功率：<span id="agg-success-rate" style="font-size:1.2rem;font-weight:bold;color:#38bdf8;">100%</span>
+                        <!-- 🔮 智慧產能與工期預測中心 (AI Capacity & ETA Forecaster) -->
+                        <div class="card" style="grid-column: span 2; border: 1px solid #38bdf8;">
+                            <h2>🔮 智慧產能與工期預測中心 (Harmonic Forecasting Engine)</h2>
+                            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 5px;">
+                                <div>
+                                    <div style="font-size:0.8rem; color:#94a3b8;">單題調和耗時 (平滑加權)</div>
+                                    <div class="stat-val" id="fc-harm-speed" style="font-size:1.2rem; color:#38bdf8;">-</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.8rem; color:#94a3b8;">當前考卷預估剩餘工期</div>
+                                    <div class="stat-val" id="fc-eta-paper" style="font-size:1.2rem; color:#f59e0b;">-</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.8rem; color:#94a3b8;">本次 GHA (5h) 預估解題容量</div>
+                                    <div class="stat-val" id="fc-capacity-5h" style="font-size:1.2rem; color:#4ade80;">-</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.8rem; color:#94a3b8;">平均每卷耗時 / 全局總剩餘</div>
+                                    <div style="font-size:0.95rem; font-weight:bold; color:#f8fafc; margin-top:4px;" id="fc-total-eta">-</div>
                                 </div>
                             </div>
-                            <div style="margin-top: 10px; font-size: 0.8rem; color: #94a3b8;" id="session-detail-info">正在匯總所有符合區間的紀錄</div>
+                            <div style="margin-top:10px; font-size:0.75rem; color:#94a3b8; border-top: 1px solid #334155; padding-top:6px;">
+                                佇列健康度：<span id="fc-health" style="color:#4ade80; font-weight:bold;">100%</span> | 
+                                有效 QPS：<span id="fc-qps" style="color:#38bdf8; font-weight:bold;">-</span> | 
+                                平均 RTT：<span id="fc-rtt" style="color:#f59e0b; font-weight:bold;">-</span> | 
+                                單題實質 API 消耗：<span id="fc-calls-q" style="color:#f8fafc; font-weight:bold;">-</span> 呼叫/題
+                            </div>
                         </div>
 
+                        <!-- 階段 API 呼叫消耗度量 -->
                         <div class="card" style="grid-column: span 2;">
-                            <h2>📑 考卷進度狀態追蹤 (Exam Progress)</h2>
+                            <h2>📊 各解題階段 API 呼叫消耗與延遲度量 (Stage Breakdown)</h2>
+                            <div class="table-container">
+                                <table>
+                                    <thead><tr><th>任務階段 (Stage)</th><th>200 OK 成功數</th><th>JSON 截斷/重試數</th><th>平均 RTT 延遲</th><th>狀態佔比說明</th></tr></thead>
+                                    <tbody id="stage-rows"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- 考卷進度 -->
+                        <div class="card" style="grid-column: span 2;">
+                            <h2>📑 考卷進度與完工追蹤 (Exam Progress)</h2>
                             <div class="table-container">
                                 <table>
                                     <thead><tr><th>考卷名稱</th><th>總題數</th><th>已完成</th><th>進度條</th><th>狀態</th></tr></thead>
@@ -1500,6 +1691,21 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
+                        <!-- 檢視目標統計總結 -->
+                        <div class="card">
+                            <h2>📊 檢視目標統計 (<span id="view-target-title" style="color:#38bdf8;">即時運行</span>)</h2>
+                            <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;">
+                                <div>新解題數：<span id="agg-questions" class="stat-val">0</span> 題</div>
+                                <div>完工考卷：<span id="agg-papers" class="stat-val">0</span> 份</div>
+                                <div>AI 繪圖：<span id="agg-diagrams" class="stat-val" style="color:#38bdf8;">0</span> 張</div>
+                                <div style="width:100%; margin-top:4px;">
+                                    請求成功率：<span id="agg-success-rate" style="font-size:1.1rem; font-weight:bold; color:#38bdf8;">100%</span>
+                                </div>
+                            </div>
+                            <div style="margin-top:8px; font-size:0.75rem; color:#94a3b8;" id="session-detail-info">-</div>
+                        </div>
+
+                        <!-- Proxy 出口戰報 -->
                         <div class="card">
                             <h2>🚀 代理節點出口戰報 (Proxy Stats)</h2>
                             <div class="table-container">
@@ -1510,6 +1716,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
+                        <!-- 模型調用統計 -->
                         <div class="card">
                             <h2>🤖 各模型調用統計 (Model Stats)</h2>
                             <div class="table-container">
@@ -1520,6 +1727,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
+                        <!-- 金鑰損耗度量 -->
                         <div class="card" style="grid-column: span 2;">
                             <h2>🔑 API 金鑰損耗深度監控 (Key Stats)</h2>
                             <div class="table-container">
@@ -1530,6 +1738,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             </div>
                         </div>
 
+                        <!-- 即時處理動態日誌 -->
                         <div class="card" style="grid-column: span 2;">
                             <h2>📜 即時處理動態日誌 (Live Activity)</h2>
                             <div class="log-box" id="log-box">等待動態更新中...</div>
@@ -1540,32 +1749,89 @@ def start_dashboard_web_server(port=8080, manager=None):
                         let lastFetchedData = null;
                         let matchedRuns = [];
 
-                        // 預設篩選區間：過去 7 天到今天
                         const today = new Date();
                         const pastWeek = new Date(today);
                         pastWeek.setDate(pastWeek.getDate() - 7);
                         document.getElementById('start-date').value = pastWeek.toISOString().split('T')[0];
                         document.getElementById('end-date').value = today.toISOString().split('T')[0];
 
+                        // 優雅停機請求觸發器
+                        async function triggerGracefulStop() {
+                            if (confirm('🛑 確定要提前優雅結束當前作業嗎？\\n系統將立即停止派發新題目、保存當前已解出的所有題目，並以 Exit 0 退出，自動進入 GitHub Actions 後續的 Google Drive 上傳步驟！')) {
+                                try {
+                                    const res = await fetch('/api/stop', { method: 'POST' });
+                                    const ret = await res.json();
+                                    alert('✅ 已成功送出停機指令！後端正在刷寫硬碟存檔，請稍候 5~10 秒觀察 GHA 進入上傳步驟。');
+                                } catch (e) {
+                                    alert('⚠️ 發送停機請求失敗：' + e);
+                                }
+                            }
+                        }
+
                         async function fetchData() {
                             try {
                                 const res = await fetch('/api/data');
                                 lastFetchedData = await res.json();
                                 updateLiveStatus();
-                                onDateRangeChange(false); // 更新篩選清單
+                                onDateRangeChange(false);
                             } catch(e) { console.error("Fetch error:", e); }
                         }
 
                         function updateLiveStatus() {
                             if (!lastFetchedData) return;
                             const d = lastFetchedData;
-                            document.getElementById('live-paper').innerText = d.current_paper;
+                            
+                            // 頂部細緻階段
+                            document.getElementById('live-stage').innerText = d.current_stage || "運行中...";
+                            document.getElementById('live-paper-badge').innerText = d.current_paper || "";
+
+                            // 當前進度
                             document.getElementById('live-progress').innerText = d.progress;
                             document.getElementById('live-session-solved').innerText = d.session_solved || 0;
                             document.getElementById('live-speed').innerText = d.time_per_q_str || "計算中...";
                             document.getElementById('uptime').innerText = d.uptime_formatted;
                             document.getElementById('disk-size').innerText = d.disk_str;
                             document.getElementById('log-box').innerHTML = (d.recent_logs || []).join('<br>') || '尚無動態';
+
+                            // 預測中樞指標渲染
+                            if (d.forecast) {
+                                const fc = d.forecast;
+                                document.getElementById('fc-harm-speed').innerText = fc.harmonized_sec_per_q ? `${fc.harmonized_sec_per_q} 秒 / 題` : "-";
+                                document.getElementById('fc-eta-paper').innerText = fc.eta_current_paper_str || "-";
+                                document.getElementById('fc-capacity-5h').innerText = fc.est_capacity_5h_questions ? `約 ${fc.est_capacity_5h_questions} 題` : "-";
+                                document.getElementById('fc-total-eta').innerText = `${fc.avg_exam_time_str || '-'} / ${fc.eta_total_all_str || '-'}`;
+                                
+                                document.getElementById('fc-health').innerText = fc.key_fleet_health || "100%";
+                                document.getElementById('fc-qps').innerText = `${fc.effective_qps || 0} req/s`;
+                                document.getElementById('fc-rtt').innerText = `${fc.avg_rtt_sec || 0}s`;
+                                document.getElementById('fc-calls-q').innerText = fc.calls_per_question || "-";
+                            }
+
+                            // 階段消耗表格
+                            if (d.api_stage_stats) {
+                                const stageMap = {
+                                    "page_scan": "📑 Stage 1 試卷整頁掃描",
+                                    "ans_ocr": "🧠 答案卷雙模型 OCR",
+                                    "rubric_extract": "🎨 非選評分標準視覺萃取",
+                                    "solution_gen": "🧠 Stage 2 名師解題生成",
+                                    "validator": "⚖️ Stage 3 審查批判驗證",
+                                    "diagram": "🎨 AI 科學圖解代碼生成",
+                                    "arbitration": "⚖️ 終極學術仲裁"
+                                };
+                                let sHTML = '';
+                                for (const [st, info] of Object.entries(d.api_stage_stats)) {
+                                    const avgR = info["200_ok"] > 0 ? (info["total_rtt"] / info["200_ok"]).toFixed(2) + "s" : "-";
+                                    const label = stageMap[st] || st;
+                                    sHTML += `<tr>
+                                        <td><b>${label}</b></td>
+                                        <td style="color:#4ade80">${info["200_ok"]}</td>
+                                        <td style="color:#fca5a5">${info["json_err"]}</td>
+                                        <td style="color:#38bdf8">${avgR}</td>
+                                        <td style="color:#94a3b8; font-size:0.75rem;">正常作業</td>
+                                    </tr>`;
+                                }
+                                document.getElementById('stage-rows').innerHTML = sHTML;
+                            }
                         }
 
                         function mergeStats(target, source) {
@@ -1579,11 +1845,9 @@ def start_dashboard_web_server(port=8080, manager=None):
                             }
                         }
 
-                        // 當使用者變更起訖日期時，動態列出符合該起訖日期的所有執行紀錄
                         function onDateRangeChange(forceReset = true) {
                             if (!lastFetchedData) return;
                             const d = lastFetchedData;
-
                             const sDateStr = document.getElementById('start-date').value;
                             const eDateStr = document.getElementById('end-date').value;
                             const sTime = sDateStr ? new Date(sDateStr + "T00:00:00").getTime() : 0;
@@ -1602,26 +1866,24 @@ def start_dashboard_web_server(port=8080, manager=None):
                                 });
                             }
 
-                            // 重新產生下拉選項
-                            let optionsHTML = `<option value="all">📌 [區間綜合加總] (共 ${matchedRuns.length} 筆紀錄)</option>`;
-                            matchedRuns.forEach((run, idx) => {
+                            let optionsHTML = `<option value="live">🔴 [當前即時運行 - Live] Session #${d.current_session_id || 'Now'} (實質新解: ${d.session_solved || 0} 題)</option>`;
+                            optionsHTML += `<option value="all">📌 [區間綜合加總] (共 ${matchedRuns.length} 筆歷史紀錄)</option>`;
+                            
+                            matchedRuns.forEach(run => {
                                 const qCnt = run.completed_questions || 0;
                                 const pCnt = run.completed_papers || 0;
                                 optionsHTML += `<option value="${run.session_id}">🕒 [${run.start_time}] 解題: ${qCnt} 題 | 完工: ${pCnt} 卷</option>`;
                             });
 
                             selectEl.innerHTML = optionsHTML;
-
                             if (!forceReset && Array.from(selectEl.options).some(o => o.value === prevVal)) {
                                 selectEl.value = prevVal;
                             } else {
-                                selectEl.value = "all";
+                                selectEl.value = "live";
                             }
-
                             renderSelectedSession();
                         }
 
-                        // 使用者點選下拉選單切換檢視特定紀錄
                         function renderSelectedSession() {
                             if (!lastFetchedData) return;
                             const d = lastFetchedData;
@@ -1631,11 +1893,19 @@ def start_dashboard_web_server(port=8080, manager=None):
                             let aggProxy = {}, aggModel = {}, aggKey = {}, aggExams = {};
                             let detailInfo = "";
 
-                            if (selectedVal === "all") {
-                                // 區間全部加總
+                            if (selectedVal === "live") {
+                                document.getElementById('view-target-title').innerText = "當前即時運行 (Live)";
+                                detailInfo = `啟動時間：${d.history_data.runs?.[0]?.start_time || '剛剛'} | 當前單題耗時：${d.time_per_q_str || '-'}`;
+                                aggQ = d.session_solved || 0;
+                                aggP = d.paper_progress?.split('/')[0] || 0;
+                                aggD = d.diagram_count || 0;
+                                aggProxy = d.proxy_stats || {};
+                                aggModel = d.model_stats || {};
+                                aggKey = d.key_stats || {};
+                                aggExams = d.exam_progress || {};
+                            } else if (selectedVal === "all") {
                                 document.getElementById('view-target-title').innerText = "區間綜合加總";
-                                detailInfo = `已匯總起訖範圍內共 ${matchedRuns.length} 次執行的完整統計`;
-
+                                detailInfo = `已匯總起訖範圍內共 ${matchedRuns.length} 次歷史執行的完整統計`;
                                 matchedRuns.forEach(run => {
                                     aggQ += (run.completed_questions || 0);
                                     aggP += (run.completed_papers || 0);
@@ -1650,12 +1920,10 @@ def start_dashboard_web_server(port=8080, manager=None):
                                     }
                                 });
                             } else {
-                                // 檢視特定的一次 Session 紀錄！
                                 const targetRun = matchedRuns.find(r => r.session_id === selectedVal);
                                 if (targetRun) {
-                                    document.getElementById('view-target-title').innerText = `紀錄 #${targetRun.session_id}`;
+                                    document.getElementById('view-target-title').innerText = `歷史紀錄 #${targetRun.session_id}`;
                                     detailInfo = `啟動時間：${targetRun.start_time} | 最後更新：${targetRun.last_update || targetRun.start_time}`;
-                                    
                                     aggQ = targetRun.completed_questions || 0;
                                     aggP = targetRun.completed_papers || 0;
                                     aggD = targetRun.diagram_count || 0;
@@ -1673,35 +1941,35 @@ def start_dashboard_web_server(port=8080, manager=None):
 
                             let tot2xx = 0, totAll = 0;
                             for (const s of Object.values(aggProxy)) {
-                                tot2xx += s["2xx"];
-                                totAll += (s["2xx"] + s["4xx"] + s["5xx"] + s["other"]);
+                                tot2xx += (s["2xx"] || 0);
+                                totAll += ((s["2xx"] || 0) + (s["4xx"] || 0) + (s["5xx"] || 0) + (s["other"] || 0));
                             }
                             document.getElementById('agg-success-rate').innerText = totAll > 0 ? ((tot2xx / totAll) * 100).toFixed(1) + "%" : "100%";
 
                             // 渲染 Proxy 表格
                             let pHTML = '';
                             for (const [p, s] of Object.entries(aggProxy)) {
-                                pHTML += `<tr><td><b>${p}</b></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td></tr>`;
+                                pHTML += `<tr><td><b>${p}</b></td><td style="color:#4ade80">${s["2xx"]||0}</td><td style="color:#fca5a5">${s["4xx"]||0}</td><td style="color:#fef08a">${s["5xx"]||0}</td></tr>`;
                             }
                             document.getElementById('proxy-rows').innerHTML = pHTML || '<tr><td colspan="4">無資料</td></tr>';
 
                             // 渲染 Model 表格
                             let mHTML = '';
                             for (const [m, s] of Object.entries(aggModel)) {
-                                mHTML += `<tr><td><b>${m}</b></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td></tr>`;
+                                mHTML += `<tr><td><b>${m}</b></td><td style="color:#4ade80">${s["2xx"]||0}</td><td style="color:#fca5a5">${s["4xx"]||0}</td><td style="color:#fef08a">${s["5xx"]||0}</td></tr>`;
                             }
                             document.getElementById('model-rows').innerHTML = mHTML || '<tr><td colspan="4">無資料</td></tr>';
 
                             // 渲染 Key 表格
                             let kHTML = '';
                             for (const [k, s] of Object.entries(aggKey)) {
-                                const kTotal = s["2xx"] + s["4xx"] + s["5xx"] + s["other"];
-                                const kRate = kTotal > 0 ? ((s["2xx"] / kTotal) * 100).toFixed(1) + "%" : "0%";
-                                kHTML += `<tr><td><code>${k}</code></td><td style="color:#4ade80">${s["2xx"]}</td><td style="color:#fca5a5">${s["4xx"]}</td><td style="color:#fef08a">${s["5xx"]}</td><td><b>${kRate}</b></td></tr>`;
+                                const kTotal = (s["2xx"]||0) + (s["4xx"]||0) + (s["5xx"]||0) + (s["other"]||0);
+                                const kRate = kTotal > 0 ? (((s["2xx"]||0) / kTotal) * 100).toFixed(1) + "%" : "0%";
+                                kHTML += `<tr><td><code>${k}</code></td><td style="color:#4ade80">${s["2xx"]||0}</td><td style="color:#fca5a5">${s["4xx"]||0}</td><td style="color:#fef08a">${s["5xx"]||0}</td><td><b>${kRate}</b></td></tr>`;
                             }
                             document.getElementById('key-rows').innerHTML = kHTML || '<tr><td colspan="5">無資料</td></tr>';
 
-                            // 渲染 考卷進度表格
+                            // 渲染 考卷進度
                             let eHTML = '';
                             for (const [exam, s] of Object.entries(aggExams)) {
                                 const total = s.total || 1;
@@ -2233,7 +2501,6 @@ class GeminiFreeTierManager:
                 # 🚀 動態載入該模型專屬的 Token 上限
                 model_max_tokens = self.model_token_limits.get(model, 65536)
                 
-                # 🚨 調整順序：先取得當前輪到的 Proxy，再印出日誌（防止變數未賦值錯誤）
                 chosen_proxy = self.get_next_proxy_url()
                 proxy_label = chosen_proxy.split('//')[-1].split('/')[0] if chosen_proxy else "Direct_Google"
                 
@@ -2250,14 +2517,26 @@ class GeminiFreeTierManager:
                 if thinking_config:
                     gen_config.thinking_config = thinking_config
 
-                # 🚀 從 Key 物件中動態取用已快取的 Client
                 active_client = key_obj.get_client(chosen_proxy)
 
+                # ⏱️ 開始度量 API 延遲
+                api_t0 = time.time()
                 response = active_client.models.generate_content(
                     model=model,
                     contents=contents,
                     config=gen_config,
                 )
+                api_rtt = time.time() - api_t0
+                key_obj.record_call_outcome(True) # 記錄近 10 次成功
+
+                # 判定階段標籤
+                cur_stage_tag = "solution_gen"
+                if "審查" in task_desc or "validator" in str(response_schema): cur_stage_tag = "validator"
+                elif "補漏" in task_desc or "PageExtraction" in str(response_schema): cur_stage_tag = "page_scan"
+                elif "仲裁" in task_desc: cur_stage_tag = "arbitration"
+                elif "繪圖" in task_desc: cur_stage_tag = "diagram"
+
+                GLOBAL_METRICS.record_stage_api_call(cur_stage_tag, api_rtt, is_200=True, is_json_err=False)
                 
                 # 📊 記錄成功 200 狀態（包含代理名稱與模型名稱）
                 key_masked = f"{key_obj.api_key[:6]}...{key_obj.api_key[-4:]}" if key_obj else "Unknown"
@@ -2316,8 +2595,8 @@ class GeminiFreeTierManager:
                 raise ree
             except APIError as e:
                 err_code = getattr(e, 'code', 500)
+                if key_obj: key_obj.record_call_outcome(False) # 記錄近 10 次失敗
                 key_masked = f"{key_obj.api_key[:6]}...{key_obj.api_key[-4:]}" if key_obj else "Unknown"
-                # 記錄 429 / 503 / 401 等錯誤
                 GLOBAL_METRICS.record_http(chosen_proxy or "Direct_Google", model, key_masked, err_code)
                 err_str = str(e).lower()
                 
@@ -3899,12 +4178,14 @@ class ExamParser:
             is_combined_pdf = (a_pdf is not None and os.path.abspath(q_pdf) == os.path.abspath(a_pdf))
             
             logging.info("📸 正在將原卷與解答 PDF 轉換成黃金 300 DPI 整頁圖片...")
+            GLOBAL_METRICS.set_stage(f"📸 正在將試卷與解答 PDF 轉換為 300 DPI 整頁影像 ({year} {subject})")
             if is_combined_pdf:
                 # 🚨 核心優化：同一檔案只轉一次圖片，命名為 page_xx.png，節省 50% 磁碟空間！
                 all_rendered_pages = self.pdf_to_images(q_pdf, "page", img_dir, dpi=300)
                 
                 # 執行解答 OCR 並獲取「真正包含答案的頁碼（0-indexed）」
                 ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
+                GLOBAL_METRICS.set_stage(f"🧠 [共識投票] 雙模型解析答案卷表格中...")
                 
                 if ans_page_indices:
                     # 答案頁：僅包含命中答案表格的頁面（通常是最後 1~2 頁）
@@ -3938,7 +4219,8 @@ class ExamParser:
                 except Exception: pass
 
             rubric_visual_map = self.extract_rubric_visual(rubric_pdf, img_dir)
-
+            GLOBAL_METRICS.set_stage("🎨 正在執行「跨頁縫合級」評分標準視覺萃取...")
+            
             # =========================================================
             # 【第一階段】：分頁批次掃描與附圖裁切
             # =========================================================
@@ -3984,7 +4266,8 @@ class ExamParser:
                 check_global_timeout() # 🚨 新增：每掃描幾頁前，先檢查一次全域時間！
                 batch_pages = pages[b_idx : b_idx + page_batch_size]
                 logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
-
+                GLOBAL_METRICS.set_stage(f"📑 正在掃描題目卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁 (OCR 題幹與選項)")
+                
                 batch_pil_imgs = []
                 batch_raw_texts = []
                 for p_num in batch_pages:
@@ -4633,6 +4916,7 @@ class ExamParser:
                             continue
                         
                         logging.info(f"🔍 題號 {gap_num} 最可能位於 PDF 第 {target_page_num+1} 頁，啟動單題高精度定向擷取...")
+                        GLOBAL_METRICS.set_stage(f"🔍 定向補漏：正在精確擷取第 {gap_num} 題...")
                         
                         gap_page = doc[target_page_num]
                         gap_image_path = q_image_paths[target_page_num]
