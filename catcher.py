@@ -1242,7 +1242,7 @@ class FreeTierKey:
 
 class LiveDashboardMetrics:
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.start_time = time.time()
         self.run_start_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.session_id = str(int(time.time()))
@@ -1997,11 +1997,12 @@ def start_dashboard_web_server(port=8080, manager=None):
                     
 
 
-    server = HTTPServer(('0.0.0.0', port), DashboardHandler)
+    from http.server import ThreadingHTTPServer
+    server = ThreadingHTTPServer(('0.0.0.0', port), DashboardHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     logging.info(f"🌐 [遙測儀表板] 本地 Web 服務已啟動於 http://127.0.0.1:{port}")
-
+    
 class GeminiFreeTierManager:
     def __init__(self, api_keys: List[str], models: List[str]):
         proxy_env = os.environ.get("GEMINI_PROXY_URL", "").strip()
@@ -2483,7 +2484,8 @@ class GeminiFreeTierManager:
             
             thinking_config = None
             if any(m in model for m in ["gemini-3.8", "gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
-                if enable_thinking:
+                # 只有在非 OCR 掃描任務且明確認可思考時才啟用 HIGH，防止代理端點逾時 (524)
+                if enable_thinking and not any(kw in task_desc for kw in ["OCR", "掃描", "解答仲裁"]):
                     thinking_config = types.ThinkingConfig(thinking_level='HIGH')
                 else:
                     thinking_config = None
@@ -2614,11 +2616,19 @@ class GeminiFreeTierManager:
                     smart_sleep(0.3)
                     continue
 
-                # 🚨 503 / 504 伺服器過載處理：立即換模型 + 指數退避等待，避免無效高頻衝撞
-                if e.code in [503, 504] or "unavailable" in err_str or "gateway timeout" in err_str:
+                # 🚨 500 / 503 / 504 / 524 伺服器過載與代理逾時處理：立即換模型 + 換代理 + 指數退避
+                is_server_or_proxy_overload = (
+                    e.code in [500, 502, 503, 504, 520, 521, 522, 523, 524] 
+                    or any(k in err_str for k in ["unavailable", "gateway timeout", "timeout", "524", "internal server error"])
+                )
+                
+                if is_server_or_proxy_overload:
                     attempts += 1
                     
-                    # 1. 核心修復：立刻將過載模型排到最後，強制換下一個模型接手（如 flash-lite 或 2.5-flash）
+                    # 1. 立刻輪換至下一個 Proxy 節點，避開當前超時的代理（如 Cloudflare 或 Netlify）
+                    chosen_proxy = self.get_next_proxy_url()
+                    
+                    # 2. 立刻將過載模型排到最後，強制換下一個模型接手
                     if candidate_models and len(candidate_models) > 1:
                         swapped_model = candidate_models.pop(0)
                         candidate_models.append(swapped_model)
@@ -2626,15 +2636,15 @@ class GeminiFreeTierManager:
                     else:
                         next_model_hint = ""
 
-                    # 2. 外部備援大模型接管判定（純文字題優先切換）
+                    # 3. 外部備援大模型接管判定
                     fallback_threshold = max(3, min(len(self.keys), 6))
                     if attempts >= fallback_threshold and not has_pil_images:
-                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [503備援接管]")
+                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [伺服器異常備援接管]")
                         if res_fallback: return res_fallback, None
 
-                    # 3. 避免 1.3 秒高頻轟炸：隨重試次數遞增退避時間 (2s -> 4s -> 6s + 隨機抖動)
+                    # 4. 指數退避等待
                     backoff_wait = min(2.0 + (attempts * 1.2), 8.0) + random.uniform(0.5, 2.0)
-                    logging.warning(f"⚠️ [503 伺服器過載] 第 {attempts} 次重試{next_model_hint}，冷卻等待 {backoff_wait:.1f} 秒...")
+                    logging.warning(f"⚠️ [伺服器/代理異常 HTTP {e.code}] 第 {attempts} 次重試{next_model_hint}，切換代理並等待 {backoff_wait:.1f} 秒...")
                     smart_sleep(backoff_wait)
                     continue
 
