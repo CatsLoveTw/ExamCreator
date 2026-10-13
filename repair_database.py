@@ -208,9 +208,12 @@ def fuse_duplicate_question_solutions(q_base: dict, q_incoming: dict) -> dict:
     return primary
 
 def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
-    """若 JSON 記錄的路徑失效，跨目錄自動搜尋真正的實體 PDF"""
+    """跨目錄精準搜尋真正的實體【題目卷】PDF（絕對排除評分原則與答案卷）"""
+    # 若記錄的路徑存在且確為題目卷（不含解答/評分關鍵字）
     if candidate_pdf_path and os.path.exists(candidate_pdf_path):
-        return candidate_pdf_path
+        cand_base = os.path.basename(candidate_pdf_path)
+        if not any(bad in cand_base for bad in ["解答", "答案", "評分", "原則", "說明資料"]):
+            return candidate_pdf_path
         
     base_file = os.path.basename(db_path).replace("_database.json", "").replace("_partial_database.json", "")
     year_m = re.search(r'(\d+)', base_file)
@@ -227,9 +230,13 @@ def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
             for root, dirs, files in os.walk(s_dir):
                 for f in files:
                     if f.endswith(".pdf"):
+                        # 🚨 剛性過濾：絕對不能是解答卷、非選評分原則！
+                        if any(bad in f for bad in ["解答", "答案", "評分", "原則", "說明資料", "更正"]):
+                            continue
                         if year_str and year_str in f:
                             if subj_kw and (subj_kw in f or subj_kw in root):
-                                return os.path.join(root, f)
+                                if any(good in f for good in ["題目", "試題", "試卷", "考科"]):
+                                    return os.path.join(root, f)
     return ""
     
 # -------------------------------------------------------------------------
