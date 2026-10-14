@@ -3,6 +3,7 @@ import re
 import sys
 import json
 import time
+import random
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
@@ -337,9 +338,16 @@ def fix_latex_matrices(text: str) -> str:
     return "".join(parts)
 
 def sanitize_latex_syntax(text: str) -> str:
-    r"""具備區塊保護的高階 LaTeX 語法修復器（防範 \i 正則語法錯誤）"""
+    r"""具備區塊保護的高階 LaTeX 語法修復器（防範 \i 正則語法錯誤與連鎖星號污染）"""
     if not isinstance(text, str) or not text:
         return text
+
+    # 🚨 1. 徹底清除 AI 幻覺產生的連續星號垃圾（如 ********************）
+    text = re.sub(r'\*{3,}', '', text)
+    # 🚨 2. 修復數學符號與 Markdown 粗體交疊的語法硬傷（例如 $ **a$ 或 $ **a**$ -> **$a$**）
+    text = re.sub(r'\$\s*\*\*([^\$]+?)\*\*\s*\$', r'**$\1$**', text)
+    text = re.sub(r'\*\*\s*\$([^\$]+?)\$\s*\*\*', r'**$\1$**', text)
+    text = re.sub(r'\$\s*\*\*([^\$]+?)\s*\$', r'**$\1$**', text)
 
     # 先修復矩陣環境
     text = fix_latex_matrices(text)
@@ -1227,7 +1235,7 @@ class FreeTierKey:
 
     def mark_model_rate_limited(self, model: str, cooldown_seconds: float = 40.0):
         """🚨 精確鎖定模型，並加入 Jitter 避免 34 把 Key 同時解鎖造成次生 429 暴擊"""
-        import random
+        
         jitter = random.uniform(5.0, 25.0)  # 動態錯開 5~25 秒
         self.model_cooldowns[model] = time.time() + cooldown_seconds + jitter
 
@@ -2619,32 +2627,31 @@ class GeminiFreeTierManager:
                 # 🚨 500 / 503 / 504 / 524 伺服器過載與代理逾時處理：立即換模型 + 換代理 + 指數退避
                 is_server_or_proxy_overload = (
                     e.code in [500, 502, 503, 504, 520, 521, 522, 523, 524] 
-                    or any(k in err_str for k in ["unavailable", "gateway timeout", "timeout", "524", "internal server error"])
+                    or any(k in err_str for k in ["unavailable", "gateway timeout", "timeout", "524", "internal server error", "overloaded"])
                 )
                 
                 if is_server_or_proxy_overload:
                     attempts += 1
                     
-                    # 1. 立刻輪換至下一個 Proxy 節點，避開當前超時的代理（如 Cloudflare 或 Netlify）
-                    chosen_proxy = self.get_next_proxy_url()
+                    # 1. 🚨 動態熔斷機制：一旦該模型報 503/504，強制將該模型全域降溫 45~75 秒，防止持續對已崩潰模型發送請求
+                    with self.lock:
+                        if key_obj:
+                            key_obj.mark_model_rate_limited(model, cooldown_seconds=60.0)
+                        if candidate_models and model in candidate_models:
+                            candidate_models.remove(model)
+                            candidate_models.append(model) # 移到最末位
                     
-                    # 2. 立刻將過載模型排到最後，強制換下一個模型接手
-                    if candidate_models and len(candidate_models) > 1:
-                        swapped_model = candidate_models.pop(0)
-                        candidate_models.append(swapped_model)
-                        next_model_hint = f"，立即切換至模型【{candidate_models[0]}】"
-                    else:
-                        next_model_hint = ""
+                    chosen_proxy = self.get_next_proxy_url()
+                    next_model_hint = f"，模型【{model}】熔斷冷卻 60 秒，自動切換至【{candidate_models[0] if candidate_models else '備援'}】"
 
-                    # 3. 外部備援大模型接管判定
-                    fallback_threshold = max(3, min(len(self.keys), 6))
-                    if attempts >= fallback_threshold and not has_pil_images:
-                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [伺服器異常備援接管]")
+                    # 2. 外部備援大模型接管（無附圖時提早於第 2 次 503 即切換）
+                    if attempts >= 2 and not has_pil_images:
+                        res_fallback, _ = self._generate_with_universal_fallback(contents, response_schema, temperature, task_desc=f"{task_desc} [503熔斷備援接管]")
                         if res_fallback: return res_fallback, None
 
-                    # 4. 指數退避等待
-                    backoff_wait = min(2.0 + (attempts * 1.2), 8.0) + random.uniform(0.5, 2.0)
-                    logging.warning(f"⚠️ [伺服器/代理異常 HTTP {e.code}] 第 {attempts} 次重試{next_model_hint}，切換代理並等待 {backoff_wait:.1f} 秒...")
+                    # 3. 隨機抖動退避（3~7 秒，避免所有 thread 同步重發）
+                    backoff_wait = random.uniform(3.0, 7.0) + (attempts * 0.8)
+                    logging.warning(f"⚠️ [伺服器異常 HTTP {e.code}] 第 {attempts} 次重試{next_model_hint}，等待 {backoff_wait:.1f} 秒...")
                     smart_sleep(backoff_wait)
                     continue
 
@@ -2791,7 +2798,7 @@ class GeminiFreeTierManager:
         
         while attempts < max_attempts:
             try:
-                import random
+                
                 # 🚨 突破 TPM 限制的核心：加入隨機抖動 (Jitter)，錯開多執行緒的併發請求
                 smart_sleep(random.uniform(2.5, 6.0))
                 
@@ -4275,7 +4282,7 @@ class ExamParser:
 
             for b_idx in range(0, len(pages), page_batch_size):
 
-                check_global_timeout() # 🚨 新增：每掃描幾頁前，先檢查一次全域時間！
+                check_global_timeout()
                 batch_pages = pages[b_idx : b_idx + page_batch_size]
                 logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
                 GLOBAL_METRICS.set_stage(f"📑 正在掃描題目卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁 (OCR 題幹與選項)")
@@ -4292,11 +4299,31 @@ class ExamParser:
                     has_official_ans_flag = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
 
                     prompt_stage_1 = f"""
-                    🚨【無解答試卷與解答頁過濾極度警告】🚨：
+                    🚨【最高優先級：試卷結構與題型剛性規範】🚨：
                     當前試卷官方解答狀況：{'【有官方解答】' if has_official_ans_flag else '【無官方解答（學校段考/定期考）】'}。
-                    1. **【解答頁/答案卷過濾】**：若本 PDF 的最後幾頁為「答案卷」、「手寫解答格」或「解答對照表」（頁面帶有班級、座號、得分欄位或 O/X 表格），**【絕對禁止】** 將解答頁當作試題擷取！只擷取真正的題目頁面。
-                    2. **【範例過濾】**：若第一頁有「作答注意事項」或「範例」，切勿擷取範例題。
 
+                    1. **【純附錄/週期表/封面過濾 vs 化學真題保護（極度重要）】**：
+                       - 🚫 **【整頁附錄/常數表過濾】**：化學科或物理科試卷封面、尾頁常附有獨立整頁的「元素週期表」、「參考常數表」、「作答注意事項」。若該區域**沒有題目問句、沒有題號、也沒有選項**，這純屬參考資料，**【絕對禁止】當作題目擷取**！
+                       - ✅ **【化學正式考題保護傘】**：如果題目是在考化學觀念（例如：「已知元素甲的原子序為 16...」、「依據元素週期表趨勢何者正確？」、「各原子量：H=1, C=12...求分子量」），這**100% 是正式考題，必須完整擷取**！絕對不要看見「原子序」或「週期表」就忽略題目！
+
+                    2. **【題型 (question_type) 嚴格精準分類】**：
+                       - `單選題`：題目含有單一正確選項 (如 A, B, C, D 或 1, 2, 3, 4)。
+                       - `多選題`：題目含有多個選項，正確答案可能為多個。
+                       - `選填題`：大考數學科的挖空填答格（如 [ 9 ]、[ 10-1 ]、A, B, C...），答案為數值或符號，**options 必須為空列表 []**。
+                       - `簡答題`：**【非選計算證明題專用】** 凡是手寫題、非選擇題、計算證明題、作答問答題（例如：98指考數乙 非選二(1)、二(2)），只要原題**沒有提供 A,B,C,D 選項供勾選**，題型【強制設為 `簡答題`】！**絕對禁止**把純計算證明題標記為 `混合題`！
+                       - `混合題`：**僅限於** 108 課綱新型大考中，該題明確包含「第(1)小題為選擇/勾選，第(2)小題為手寫說明」的複合大題。
+
+                    3. **【選項為圖表/幾何圖形/化學結構之擷取規範（極度重要）】**：
+                       - 如果選項 (A)~(E) 或 (1)~(5) 本身是圖片（例如：五個函數圖形、五個受力圖、五個細胞分裂圖、五個分子結構）：
+                       - **【嚴禁零散碎切】**：絕對不要把 A、B、C、D、E 切割成五個零碎的小框！
+                       - **【整排寬幅包裹】**：請直接框選一個**覆蓋全部選項的大型 Bounding Box**，放入該題的 `image_bboxes` 中（此時題幹 `has_image` 設為 `true`）。
+                       - 個別選項的 `has_image` 設為 `false`，個別選項的 `value` 統一填寫：`"【圖形選項，請參見題幹附圖】"`。
+
+                    4. **【英文科文意選填 (Word Bank) 專屬規範】**：
+                       - 整篇帶有空格（如 [ 31 ]、[ 32 ]...）的文章，必須完整放入每個小題的 `shared_context`。
+                       - 下方的單字庫（通常為 A 到 J 或 A 到 L）：**必須完整複製這組單字選項到每一個空格小題的 `options` 中**。
+                       - 該小題的 `question_text` 填入包含該空格的那一個完整英文句子（例如：`The researcher tried to ______ the mystery.`）。
+                    
                     🚨【是非題 (True/False) 標準化轉單選題剛性規則】🚨：
                     若題目為「是非題」（例如：1. $sin 26^\\circ = cos 64^\\circ$）：
                     - **【題型】**：必須將 `question_type` 強制設為 `"單選題"`。
@@ -4727,6 +4754,7 @@ class ExamParser:
 
                 for q in q_list:
                     q_text = str(q.get("question_text", "")).strip()
+                    q_num = str(q.get("question_number", "")).strip()
                     ans_text = str(q.get("answer", "")).strip()
                     cat_text = str(q.get("topic_category", "")).strip()
                     ana_text = str(q.get("question_analysis", "")).strip()
@@ -4734,9 +4762,18 @@ class ExamParser:
                     
                     combined_text = f"{q_text} | {ans_text} | {cat_text} | {ana_text}"
                     
-                    # 1. 命中任何佔位關鍵字
+                    # 1. 命中絕對幽靈佔位關鍵字
                     if any(gk in combined_text for gk in ghost_keywords):
                         logging.warning(f"🧹 [清除幽靈題目] 題號 {q.get('question_number')} 命中佔位特徵，已剔除。")
+                        continue
+
+                    # 🚨 2. 純週期表/常數表附錄過濾（帶有「真題保護傘」：有選項或有問句者一律視為真題保留）
+                    has_real_opts = len(opts) >= 2 and not all(str(opt.get("value", "")).strip() in dummy_opt_values for opt in opts)
+                    has_question_clue = any(k in q_text for k in ["何者", "下列", "試問", "求", "為何", "多少", "？", "?", "正確", "錯誤", "選出"])
+                    is_pure_table = bool(re.match(r'^(?:[【\[\s]*)(?:元素週期表|週期表|週期律表|原子量表|常數表|參考常數)', q_text))
+                    
+                    if (is_pure_table or q_num in ["週期表", "封面", "說明", "附錄"]) and not has_real_opts and not has_question_clue:
+                        logging.warning(f"🧹 [清除附錄頁] 題號 {q_num} 為純週期表/常數表附錄，已剔除。")
                         continue
                         
                     # 2. 題幹只是單純題號重複 (如:「九十六學年度指定科目考試物理考科第40題」或「第51題」)
@@ -5122,51 +5159,76 @@ class ExamParser:
                 if not set1 or not set2: return 0.0
                 return len(set1.intersection(set2)) / float(len(set1.union(set2)))
 
+            # 🚨 升級版：大題前綴與高相容度題組正規化引擎
+            def extract_group_base_tag(q_num_str: str) -> str:
+                """提取題號的大題標籤，例如 '二(1)' -> '二', '40-41' -> '40-41', '15(1)' -> '15'"""
+                s = str(q_num_str).strip()
+                m_cn = re.match(r'^([一二三四五六七八九十]+)', s)
+                if m_cn: return m_cn.group(1)
+                m_sub = re.match(r'^(\d+)[\-_(（]', s)
+                if m_sub: return m_sub.group(1)
+                return s
+
+            # 🚨 升級版：大題前綴與結構化題組 shared_context 強制歸一化引擎
+            def extract_group_base_tag(q_num_str: str) -> str:
+                """提取大題識別符，例如 '二(1)' -> '二', '40-41' -> '40-41', '15(a)' -> '15'"""
+                s = str(q_num_str).strip()
+                m_cn = re.match(r'^([一二三四五六七八九十]+)', s)
+                if m_cn: return m_cn.group(1)
+                m_sub = re.match(r'^(\d+)[\-_(（]', s)
+                if m_sub: return m_sub.group(1)
+                return ""
+
             group_pools = {}
             for i, q in enumerate(all_extracted_questions):
                 sc = q.get('shared_context', '').strip()
-                if not sc or is_generic_instruction(sc) or not is_authentic_group_context(sc):
-                    continue
+                q_num = str(q.get('question_number', ''))
+                base_tag = extract_group_base_tag(q_num)
+                
+                matched_key = None
+                for existing_key, pool in group_pools.items():
+                    prev_questions = pool["questions"]
+                    is_adjacent = (i - prev_questions[-1]["index"] <= 3)
+                    prev_base = extract_group_base_tag(prev_questions[-1]["data"].get("question_number", ""))
                     
-                matched_sc = None
-                for existing_sc in group_pools.keys():
-                    prev_questions = group_pools[existing_sc]["questions"]
-                    is_adjacent = (i - prev_questions[-1]["index"] <= 2) # 收緊至緊鄰的 2 題以內
-                    similarity = get_context_similarity(sc, existing_sc)
+                    # 條件1：大題標籤吻合（如都是非選「二」大題的子題）且相鄰
+                    same_major_group = bool(base_tag and base_tag == prev_base)
+                    # 條件2：上下文相似度高於 70% 且相鄰
+                    similarity = get_context_similarity(sc, pool["canonical_context"]) if sc else 0.0
                     
-                    # 🚨 只有當引言相似度高達 95% 以上，且確為緊鄰子題時才合併，嚴禁跨題組盲目擴散
-                    if similarity >= 0.95 and is_adjacent:
-                        matched_sc = existing_sc
+                    if (same_major_group and is_adjacent) or (similarity >= 0.70 and is_adjacent):
+                        matched_key = existing_key
                         break
-                            
-                if matched_sc:
-                    group_pools[matched_sc]["questions"].append({"index": i, "data": q})
-                else:
-                    group_pools[sc] = {
+
+                if matched_key:
+                    group_pools[matched_key]["questions"].append({"index": i, "data": q})
+                    # 動態擇優：若當前小題的 shared_context 更完整（長度更長、無截斷），更新為該組的標竿文本
+                    if len(sc) > len(group_pools[matched_key]["canonical_context"]):
+                        group_pools[matched_key]["canonical_context"] = sc
+                elif sc or base_tag:
+                    key_id = f"group_{base_tag}_{i}" if base_tag else f"group_sc_{i}"
+                    group_pools[key_id] = {
+                        "canonical_context": sc,
                         "questions": [{"index": i, "data": q}],
                         "image_paths": [],
                         "image_bboxes": [],
                         "_cropped_pil_images": []
                     }
 
-            for sc, pool in group_pools.items():
-                if len(pool["questions"]) < 2: continue
+            # 執行題組內容與附圖的 100% 絕對同步
+            for key_id, pool in group_pools.items():
+                if len(pool["questions"]) < 2:
+                    continue
                 
-                combined_context_parts = []
-                for item in pool["questions"]:
-                    part_sc = item["data"].get("shared_context", "").strip()
-                    if part_sc and part_sc not in combined_context_parts:
-                        if not any(part_sc in existing or existing in part_sc for existing in combined_context_parts):
-                            combined_context_parts.append(part_sc)
+                # 取得該題組中最完整、排版最漂亮的 shared_context
+                canonical_sc = pool["canonical_context"].strip()
                 
-                merged_shared_context = "\n\n".join(combined_context_parts)
-                    
                 for item in pool["questions"]:
                     q = item["data"]
                     pool["image_paths"].extend([p for p in q.get("image_paths", []) if "_Opt" not in p])
                     pool["image_bboxes"].extend(q.get("image_bboxes", []))
                     pool["_cropped_pil_images"].extend(q.get("_cropped_pil_images", []))
-                
+
                 unique_paths = list(dict.fromkeys(pool["image_paths"]))
                 unique_bboxes = []
                 for bbox in pool["image_bboxes"]:
@@ -5179,14 +5241,15 @@ class ExamParser:
                         seen_ids.add(id(img))
                         unique_pil_imgs.append(img)
                         
+                # 將完全一致的 shared_context 寫入同題組的所有子小題中，杜絕任何一字之差！
                 for item in pool["questions"]:
                     q = item["data"]
-                    q['shared_context'] = merged_shared_context
+                    q['shared_context'] = canonical_sc
                     q['image_paths'] = unique_paths
                     q['image_bboxes'] = unique_bboxes
                     q['_cropped_pil_images'] = unique_pil_imgs
                     q['has_image'] = len(unique_paths) > 0
-                    logging.info(f"  -> 🔗 [題組共享] 題號 {q['question_number']} 已自動共享並連結題組圖片與完整拼合上下文。")
+                    logging.info(f"  -> 🔗 [題組同步] 題號 {q['question_number']} 已套用統一題組背景與共用附圖。")
 
             # 🆕 完成第一階段掃描後，將題目結構安全寫入快取檔
             try:
@@ -6087,7 +6150,7 @@ class ExamParser:
                     futures.add(executor.submit(process_question_chunk, batch, active_batch_size))
                     if thread_spawn_count < max_workers:
                         thread_spawn_count += 1
-                        import random
+                        
                         time.sleep(random.uniform(0.15, 0.35))
                 
                 if not futures: break
@@ -6685,7 +6748,7 @@ if __name__ == "__main__":
             API_KEYS = [env_key]
             print("✅ 成功載入環境變數中的 GEMINI_API_KEY。")
     if API_KEYS:
-        import random
+        
         # 🚨 核心修改：在程式啟動時，將金鑰列表順序完全隨機洗牌打散
         # 這會打亂相同帳號、相鄰金鑰的派發順序，降低單一專案在短時間內被集中高頻呼叫的風險
         random.shuffle(API_KEYS)

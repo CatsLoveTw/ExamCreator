@@ -1,9 +1,14 @@
 name: Run Exam Parser Catcher
 
+# 保證任何時刻只有一個 Parser 正在執行
+concurrency:
+  group: exam-parser-exclusive-singleton
+  cancel-in-progress: false
+
 on:
   schedule:
-    # 每天 07:00 與 19:00 各自動執行一次（台灣時間下午3點與凌晨3點）
-    - cron: '0 7,19 * * *'
+    # 保底心跳機制（每 6 小時一次）：防止網路異常斷掉接力時，系統能自動重新開機喚醒
+    - cron: '0 */6 * * *'
   workflow_dispatch: # 支援手動在 GitHub 網頁點擊執行
     inputs:
       repair_only:
@@ -154,13 +159,14 @@ jobs:
           
           # 背景啟動穿透通道，對接本機 8080 遙測儀表板
           cloudflared tunnel --url http://127.0.0.1:8080 > cloudflare_tunnel.log 2>&1 &
-          sleep 12
-          
-          echo "======================================================================="
-          echo "🎉 [即時遙測中心網址已生成] 請複製下方網址在手機/電腦開起儀表板："
-          grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' cloudflare_tunnel.log || echo "⚠️ 穿透網址生成中，可於下一步查看完整 log"
-          echo "======================================================================="
-
+          for i in $(seq 1 30); do
+            URL=$(grep -o 'https://[-a-zA-Z0-9]*\.trycloudflare\.com' cloudflare_tunnel.log | head -n 1)
+            if [ -n "$URL" ]; then
+              echo "🎉 [即時遙測中心網址] $URL"
+              break
+            fi
+            sleep 1
+          done
       - name: Run parser script
         if: ${{ github.event.inputs.repair_only != 'true' }}
         timeout-minutes: 320
@@ -251,3 +257,44 @@ jobs:
 
           # 清除敏感金鑰與設定檔
           rm -f rclone.conf key.txt exam_images.zip exam_databases.zip
+
+      - name: 🔄 自動接力重啟下一輪 (24hr Loop Dispatcher)
+        if: always()
+        env:
+          AUTO_LOOP_PAT: ${{ secrets.AUTO_LOOP_PAT }}
+        run: |
+          echo "=========================================================="
+          echo "🏁 當前梯次已完成硬碟落盤與雲端上傳！"
+          echo "=========================================================="
+
+          # 1. 檢查是否觸發人工終止信號
+          if [ "${{ github.event.inputs.repair_only }}" == "true" ] || [ "${{ github.event.inputs.process_reported_tickets_only }}" == "true" ]; then
+            echo "🛑 本次為單次指定維護任務 (repair_only / ticket)，不觸發自動循環接力。"
+            exit 0
+          fi
+
+          if [ -z "$AUTO_LOOP_PAT" ]; then
+            echo "⚠️ 未設定 secrets.AUTO_LOOP_PAT，無法自動重啟。請依照指示設定 PAT。"
+            exit 0
+          fi
+
+          # 2. 短暫冷卻 30 秒（避免 GitHub API 頻率過密）
+          echo "⏳ 正在等待 30 秒冷卻緩衝..."
+          sleep 30
+
+          # 3. 取得當前 workflow 檔案名稱 (通常為 catcher.yml)
+          WORKFLOW_FILE=$(basename "${{ github.workflow_ref }}" | cut -d'@' -f1)
+          if [ -z "$WORKFLOW_FILE" ]; then WORKFLOW_FILE="catcher.yml"; fi
+
+          echo "🚀 正在觸發下一輪 GitHub Actions ($WORKFLOW_FILE)..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer $AUTO_LOOP_PAT" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$WORKFLOW_FILE/dispatches" \
+            -d "{\"ref\":\"${{ github.ref_name }}\"}")
+
+          if [ "$HTTP_STATUS" -eq 204 ]; then
+            echo "🎉 [接力成功] 204 No Content：下一輪 Action 已成功排入隊列，流水線將 24 小時持續運轉！"
+          else
+            echo "❌ [接力失敗] HTTP 代碼: $HTTP_STATUS，請檢查 PAT 是否具備 'repo' 與 'workflow' 權限。"
+          fi

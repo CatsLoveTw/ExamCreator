@@ -23,6 +23,42 @@ GHOST_KEYWORDS_EXTENDED = [
     "作答示例", "第壹部分作答示例", "劃記方式之說明", "例：若第", "無法從提供的影像中"
 ]
 
+def is_phantom_table_or_cover(q: dict) -> bool:
+    """
+    🚨 具備真題保護傘的「純附錄/週期表/封面」精確判定器
+    保障化學科含有『原子序』、『元素週期表』、『原子量』的正式題目 100% 不被誤刪！
+    """
+    q_num = str(q.get("question_number", "")).strip()
+    q_text = str(q.get("question_text", "")).strip()
+    opts = q.get("options", []) or []
+
+    # 1. 題號本身就是非題目字眼
+    if any(k in q_num for k in ["封面", "週期表", "說明", "附錄", "附表", "注意事項"]):
+        return True
+
+    # 2. 【核心保護】：只要有實體選項（2個以上非佔位符），100% 是真實考題，絕不可殺！
+    dummy_vals = {"A", "B", "C", "D", "E", "選項A", "選項B", "選項C", "選項D", ""}
+    has_real_options = len(opts) >= 2 and not all(str(o.get("value", "")).strip() in dummy_vals for o in opts)
+    if has_real_options:
+        return False
+
+    # 3. 【核心保護】：題幹含有明確的問句或解答導向特徵，100% 是手寫或簡答考題！
+    interrogative_keywords = ["何者", "下列", "試求", "試問", "計算", "說明", "為何", "多少", "？", "?", "選出", "正確", "錯誤", "寫出"]
+    if any(ik in q_text for ik in interrogative_keywords):
+        return False
+
+    # 4. 判定為「純週期表/純封面/純常數表」佔位題：
+    # 必須同時滿足：沒有問句、沒有選項，且內容主體開頭為週期表或附表標題
+    is_pure_table_header = bool(re.match(r'^(?:[【\[\s]*)(?:元素週期表|週期表|週期律表|原子量表|常數表|參考常數|常用常數表|第壹部分作答示例)', q_text))
+    if is_pure_table_header:
+        return True
+
+    # 題幹極短且完全由常數/週期表標題構成
+    if len(q_text) < 35 and any(k in q_text for k in ["週期表", "元素週期表", "原子量表", "常數表"]):
+        return True
+
+    return False
+
 PURGE_TOPIC_KEYWORDS = [
     "題目闕如", "無法判定", "placeholder", "請補件", "說明頁", 
     "內容缺失", "無法分類", "無實質試題", "資訊缺失", "未包含第",
@@ -245,6 +281,14 @@ def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
 def clean_latex_corruptions(text: str) -> str:
     if not isinstance(text, str) or not text: return text
     
+    # 🚨 1. 徹底清除 AI 幻覺產生的連續星號垃圾（如 ********************）
+    text = re.sub(r'\*{3,}', '', text)
+    # 🚨 2. 修復數學符號與 Markdown 粗體交疊的語法硬傷（例如 $ **a$ 或 $ **a**$ -> **$a$**）
+    text = re.sub(r'\$\s*\*\*([^\$]+?)\*\*\s*\$', r'**$\1$**', text)
+    text = re.sub(r'\*\*\s*\$([^\$]+?)\$\s*\*\*', r'**$\1$**', text)
+    text = re.sub(r'\$\s*\*\*([^\$]+?)\s*\$', r'**$\1$**', text)
+    text = re.sub(r'\$\s*([a-zA-Z0-9_\-]+)\s*\$', r'$\1$', text)
+    
     # 救回常見被損毀的符號
     text = re.sub(r'\\?fty\b', r'\\infty', text)
     text = re.sub(r'(?<!\\)\bimplies\b', r'\\implies', text)
@@ -288,6 +332,56 @@ def clean_latex_corruptions(text: str) -> str:
     text = re.sub(r' +', ' ', text)
 
     return text.strip()
+
+def harmonize_group_shared_context(questions: List[dict]) -> List[dict]:
+    """
+    題組 shared_context 歸一化引擎：
+    識別同一大題的子小題（如 二(1), 二(2), 二(3) 或 15(a), 15(b)），
+    挑選字數最齊全、排版最完整的 shared_context，統一覆蓋至同題組的所有子題。
+    """
+    def extract_group_base_tag(q_num_str: str) -> str:
+        s = str(q_num_str).strip()
+        m_cn = re.match(r'^([一二三四五六七八九十]+)', s)
+        if m_cn: return m_cn.group(1)
+        m_sub = re.match(r'^(\d+)[\-_(（]', s)
+        if m_sub: return m_sub.group(1)
+        return ""
+
+    groups: Dict[str, List[dict]] = {}
+    for q in questions:
+        q_num = str(q.get("question_number", "")).strip()
+        base_tag = extract_group_base_tag(q_num)
+        if base_tag:
+            if base_tag not in groups:
+                groups[base_tag] = []
+            groups[base_tag].append(q)
+
+    for base_tag, q_list in groups.items():
+        if len(q_list) > 1:
+            # 挑選出該題組中最完整（長度最長、無亂碼且無連鎖星號）的 shared_context
+            best_sc = ""
+            for q in q_list:
+                sc = clean_latex_corruptions(str(q.get("shared_context", "")).strip())
+                if len(sc) > len(best_sc):
+                    best_sc = sc
+            
+            if best_sc:
+                for q in q_list:
+                    q["shared_context"] = best_sc
+    return questions
+
+def heal_question_types(questions: List[dict]) -> List[dict]:
+    """
+    題型自癒修正器：
+    非選擇題/手寫計算證明題（沒有 options 選項，或 options 為空）
+    若被誤標記為「混合題」，強制扶正為「簡答題」。
+    """
+    for q in questions:
+        opts = q.get("options", []) or []
+        q_type = str(q.get("question_type", "")).strip()
+        if q_type == "混合題" and len(opts) == 0:
+            q["question_type"] = "簡答題"
+    return questions
 
 # -------------------------------------------------------------------------
 # 2. 知識點鋼鐵淨化器
@@ -482,8 +576,12 @@ def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[st
     if is_cross_subject_contamination(q, expected_subject):
         return False
 
-    # 幽靈關鍵字與作答規範過濾
+    # 幽靈關鍵字過濾
     if any(gk in combined for gk in GHOST_KEYWORDS_EXTENDED):
+        return False
+
+    # 🚨 精確排除純週期表/說明頁佔位題（自動避開正常的化學原子序考題）
+    if is_phantom_table_or_cover(q):
         return False
 
     # 題幹只是純標題（如「91年指考物理第32題」）
@@ -574,31 +672,33 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
             continue
 
         if clean_text_fp and len(clean_text_fp) >= 10:
-            if clean_text_fp in text_fps:
-                old_k = text_fps[clean_text_fp]
+            if clean_text_fp in text_fingerprints:
+                old_k = text_fingerprints[clean_text_fp]
                 fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
                 del merged_map[old_k]
                 merged_map[key] = fused_q
-                text_fps[clean_text_fp] = key
+                text_fingerprints[clean_text_fp] = key
                 continue
-            text_fps[clean_text_fp] = key
+            text_fingerprints[clean_text_fp] = key
 
         merged_map[key] = q
-            
 
     merged_list = list(merged_map.values())
     stats["merged"] = len(merged_list)
+
+    # 🚨 1. 執行題型扶正（無選項的「混合題」修正為「簡答題」）
+    merged_list = heal_question_types(merged_list)
+    # 🚨 2. 執行題組 shared_context 強制歸一化
+    merged_list = harmonize_group_shared_context(merged_list)
     
-    
-    # 執行分類清洗、年代校驗與 LaTeX 格式修復
+    # 🚨 3. 執行分類清洗與深度 LaTeX / 星號清理
     for q in merged_list:
         main_cat = sanitize_knowledge_point(q.get("topic_category", ""))
         cats = [sanitize_knowledge_point(c) for c in q.get("topic_categories", []) if c]
         q["topic_categories"] = list(dict.fromkeys(cats)) if cats else [main_cat]
         q["topic_category"] = q["topic_categories"][0]
         
-        # 深度 LaTeX 清洗（消滅裸露公式）
-        for k in ["question_text", "detailed_solution", "question_analysis", "solving_strategy", "scoring_rubric", "concept_review", "traps_and_warnings"]:
+        for k in ["question_text", "detailed_solution", "question_analysis", "solving_strategy", "scoring_rubric", "concept_review", "traps_and_warnings", "shared_context"]:
             if k in q: q[k] = clean_latex_corruptions(q[k])
 
     def safe_sort(x):
@@ -768,7 +868,11 @@ def run_database_repair_suite():
 
         merged_list = list(merged_map.values())
 
-        # 🚨 全面統一 exam_source 與 academic_year，讓前端網站 100% 聚合為同一張卡片！
+        # 🚨 1. 執行題型扶正與題組 shared_context 歸一化
+        merged_list = heal_question_types(merged_list)
+        merged_list = harmonize_group_shared_context(merged_list)
+
+        # 🚨 2. 全面統一 exam_source 與 academic_year，讓前端網站 100% 聚合為同一張卡片！
         for q in merged_list:
             q["academic_year"] = meta["academic_year"]
             q["exam_source"] = meta["exam_source"]
@@ -776,7 +880,7 @@ def run_database_repair_suite():
             cats = [sanitize_knowledge_point(c) for c in q.get("topic_categories", []) if c]
             q["topic_categories"] = list(dict.fromkeys(cats)) if cats else [main_cat]
             q["topic_category"] = q["topic_categories"][0]
-            for k in ["question_text", "detailed_solution", "question_analysis", "solving_strategy", "scoring_rubric", "concept_review", "traps_and_warnings"]:
+            for k in ["question_text", "detailed_solution", "question_analysis", "solving_strategy", "scoring_rubric", "concept_review", "traps_and_warnings", "shared_context"]:
                 if k in q: q[k] = clean_latex_corruptions(q[k])
 
         def safe_sort(x):
