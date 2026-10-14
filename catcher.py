@@ -3887,16 +3887,19 @@ class ExamParser:
     def process_exam_paper(self, subject: str, year: str, exam_type: str, mock_tag: str, q_pdf: str, a_pdf: Optional[str], rubric_pdf: Optional[str], output_dir: str, skip_cover: bool = False, school_name: str = ""):
         check_global_timeout()
     
-        # 🚨 1. 關鍵修復：在函式最開頭初始化 doc 為 None，防止未賦值錯誤
         doc = None
-        
-        # 🚨 函數最頂層初始化審查紀錄變數與鎖，確保最後收尾存檔時 100% 可存取
         validation_records = []
         val_log_lock = threading.Lock()
 
         safe_year = safe_filename(year)
         safe_subject = safe_filename(subject)
         paper_tag = f"[{year} {subject}]"
+
+        # 🚨 核心時序修復：進入考卷的第一毫秒，立刻更新全域儀表板當前考卷名稱！杜絕跨考卷顯示延遲
+        paper_label = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+        GLOBAL_METRICS.set_current_paper(paper_label, total_q=0, existing_partial_q=0)
+        GLOBAL_METRICS.set_stage(f"🚀 初始化考卷: {paper_label}")
+        logging.info(f"\n{'='*30} 📥 開始處理考卷：{paper_label} {'='*30}")
 
         # 💡 將題號對位邏輯拉到最頂端，供後續所有解析對齊模組共用
         def is_precise_match(q_data: dict, r_k: str) -> bool:
@@ -4109,7 +4112,15 @@ class ExamParser:
                     if missing_diagram_count > 0:
                         logging.info(f"🎉 [補繪完成] 已成功為 {spec_name} 補齊了 {missing_diagram_count} 張遺失的圖表！")
 
-                    logging.info(f"⏭️  {json_path} 已存在且題數完整 ({len(merged_checkpoint_list)} 題)，自動跳過。")
+                    # 🚨 核心修復：自動跳過已完工考卷時，必須累加 completed_papers 並更新 Web 儀表板！
+                    paper_label = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+                    with GLOBAL_METRICS.lock:
+                        # 避免啟動預掃描與早退重複累加
+                        if paper_label not in GLOBAL_METRICS.exam_progress or "完工" not in GLOBAL_METRICS.exam_progress[paper_label].get("status", ""):
+                            GLOBAL_METRICS.completed_papers += 1
+                        GLOBAL_METRICS.update_exam_progress(paper_label, len(merged_checkpoint_list), len(merged_checkpoint_list), "✅ 100% 完工 (已存在)")
+
+                    logging.info(f"⏭️  {json_path} 已存在且題數完整 ({len(merged_checkpoint_list)} 題)，已計入進度並自動跳過。")
                     if partial_exists:
                         try: os.remove(partial_json_path)
                         except Exception: pass
@@ -5429,11 +5440,10 @@ class ExamParser:
         # 💡 將已加載的【有效詳解】建立成對位索引表（以題號+題型為複合鍵，防止跨大題碰撞）
         partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
-        # 📊 連動更新遠端 Web 儀表板當前考卷與題目進度 (確保不污染總累計題數)
-        paper_label = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+        # 📊 正式進入 Stage 2 解題階段：更新該卷已鎖定的總題數與續傳題數
         GLOBAL_METRICS.set_current_paper(paper_label, len(all_extracted_questions), len(loaded_partial_questions))
-        GLOBAL_METRICS.update_exam_progress(paper_label, len(loaded_partial_questions), len(all_extracted_questions), "解題中...")
-        GLOBAL_METRICS.add_log(f"🚀 開始解析考卷：{paper_label} (總題數：{len(all_extracted_questions)})")
+        GLOBAL_METRICS.update_exam_progress(paper_label, len(loaded_partial_questions), len(all_extracted_questions), "🧠 名師詳解生成中...")
+        GLOBAL_METRICS.add_log(f"🧠 {paper_label} 第一階段掃描完畢，進入詳解生成 (總題數: {len(all_extracted_questions)})")
         
         task_queue = []
         for q in all_extracted_questions:
@@ -6825,8 +6835,60 @@ if __name__ == "__main__":
     # 2. 自動尋找所有要處理的試卷
     exam_tasks = auto_find_exam_sets(TARGET_DIRECTORIES)
     logging.info(f"🔍 總共在目錄中找到了 {len(exam_tasks)} 份試卷需要處理。")
+
+    # 🚨 核心優化：啟動時極速預掃描「現存已完工的資料庫」，讓 Web 儀表板一開機就能秒級呈現真實全庫進度！
+    pre_completed_count = 0
+    for task in exam_tasks:
+        s_name = task["subject"]
+        y_name = task["year"]
+        e_type = task["exam_type"]
+        m_tag = task["mock_tag"]
+        sch_name = task.get("school_name", "")
+        
+        # 取得正規化名稱
+        clean_s = re.sub(r'(?:考科|科)$', '', str(s_name).strip())
+        digits = "".join(filter(str.isdigit, str(y_name)))
+        y_val = int(digits) if digits else 111
+        
+        if e_type == "SCHOOL":
+            t_folder = os.path.join("學校定期考", safe_filename(sch_name) if sch_name else "通用學校")
+            sp_name = f"{y_val}學年度_{safe_filename(sch_name) if sch_name else '通用學校'}{m_tag}_{clean_s}"
+        elif e_type == "MOCK":
+            t_folder = "模擬考"
+            sp_name = f"{y_val}學年度_模擬考{m_tag}_{clean_s}"
+        elif e_type == "GSAT":
+            t_folder = "學測"
+            is_mu = "_補考" in str(m_tag) or "補考" in str(y_name)
+            sp_name = f"{y_val}學年度_學測{'_補考' if is_mu else ''}_{clean_s}"
+        else:
+            t_folder = "分科指考"
+            is_mu = "_補考" in str(m_tag) or "補考" in str(y_name)
+            ast_s = "分科" if y_val >= 111 else "指考"
+            sp_name = f"{y_val}學年度_{ast_s}{'_補考' if is_mu else ''}_{clean_s}"
+            
+        sp_name = re.sub(r'[\s\n\r\t]+', '', sp_name)
+        target_db = os.path.join(output_directory, t_folder, f"{sp_name}_database.json")
+        p_label = f"[{y_name}] {sch_name if sch_name else ''} {s_name} ({e_type})"
+        
+        # 檢查該試卷是否已存在且具備實體題目
+        if os.path.exists(target_db):
+            try:
+                with open(target_db, "r", encoding="utf-8") as jf:
+                    db_items = json.load(jf)
+                    min_q = 8 if any(k in clean_s for k in ["數", "math"]) else 15
+                    if len(db_items) >= min_q:
+                        pre_completed_count += 1
+                        GLOBAL_METRICS.update_exam_progress(p_label, len(db_items), len(db_items), "✅ 100% 完工 (歷史存檔)")
+            except Exception:
+                pass
+
     with GLOBAL_METRICS.lock:
-        GLOBAL_METRICS.total_papers = len(exam_tasks)  # ⚠️ 建議設 3 即可，因為單張考卷內部還有高達 25 個子執行緒
+        GLOBAL_METRICS.total_papers = len(exam_tasks)
+        GLOBAL_METRICS.completed_papers = pre_completed_count
+
+    logging.info(f"📊 [歷史進度盤點完畢] 全庫共 {len(exam_tasks)} 份試卷，已完工 {pre_completed_count} 份，剩餘 {len(exam_tasks) - pre_completed_count} 份待解析。")
+    GLOBAL_METRICS.add_log(f"📊 全庫進度已載入：{pre_completed_count}/{len(exam_tasks)} 卷已完工")
+
     max_exam_workers = 1
     logging.info(f"🚀 開始多張考卷並行處理 (Max Workers: {max_exam_workers})")
 
