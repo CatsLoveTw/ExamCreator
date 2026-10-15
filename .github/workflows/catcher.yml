@@ -261,40 +261,37 @@ jobs:
       - name: 🔄 自動接力重啟下一輪 (24hr Loop Dispatcher)
         if: always()
         env:
-          AUTO_LOOP_PAT: ${{ secrets.AUTO_LOOP_PAT }}
+          GH_TOKEN: ${{ secrets.AUTO_LOOP_PAT }}
         run: |
           echo "=========================================================="
           echo "🏁 當前梯次已完成硬碟落盤與雲端上傳！"
           echo "=========================================================="
 
-          # 1. 檢查是否觸發人工終止信號
+          # 1. 檢查是否為單次維護指令
           if [ "${{ github.event.inputs.repair_only }}" == "true" ] || [ "${{ github.event.inputs.process_reported_tickets_only }}" == "true" ]; then
-            echo "🛑 本次為單次指定維護任務 (repair_only / ticket)，不觸發自動循環接力。"
+            echo "🛑 本次為指定維護任務，不觸發自動循環接力。"
             exit 0
           fi
 
-          if [ -z "$AUTO_LOOP_PAT" ]; then
-            echo "⚠️ 未設定 secrets.AUTO_LOOP_PAT，無法自動重啟。請依照指示設定 PAT。"
+          if [ -z "$GH_TOKEN" ]; then
+            echo "⚠️ 未設定 secrets.AUTO_LOOP_PAT，無法自動重啟。"
             exit 0
           fi
 
-          # 2. 短暫冷卻 30 秒（避免 GitHub API 頻率過密）
+          # 2. 等待 30 秒冷卻緩衝
           echo "⏳ 正在等待 30 秒冷卻緩衝..."
           sleep 30
 
-          # 3. 取得當前 workflow 檔案名稱 (通常為 catcher.yml)
-          WORKFLOW_FILE=$(basename "${{ github.workflow_ref }}" | cut -d'@' -f1)
-          if [ -z "$WORKFLOW_FILE" ]; then WORKFLOW_FILE="catcher.yml"; fi
-
-          echo "🚀 正在觸發下一輪 GitHub Actions ($WORKFLOW_FILE)..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Authorization: Bearer $AUTO_LOOP_PAT" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$WORKFLOW_FILE/dispatches" \
-            -d "{\"ref\":\"${{ github.ref_name }}\"}")
-
-          if [ "$HTTP_STATUS" -eq 204 ]; then
-            echo "🎉 [接力成功] 204 No Content：下一輪 Action 已成功排入隊列，流水線將 24 小時持續運轉！"
+          echo "🚀 正在觸發下一輪 GitHub Actions (catcher.yml)..."
+          
+          # 🚨 使用 GitHub 官方 CLI 觸發，具備自動錯誤回顯
+          if gh workflow run catcher.yml --ref "${{ github.ref_name }}"; then
+            echo "🎉 [接力成功] 下一輪 Action 已成功排入隊列，流水線將持續運轉！"
           else
-            echo "❌ [接力失敗] HTTP 代碼: $HTTP_STATUS，請檢查 PAT 是否具備 'repo' 與 'workflow' 權限。"
+            echo "⚠️ [gh 指令回傳異常，嘗試以 REST API 偵錯呼叫]..."
+            curl -i -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/catcher.yml/dispatches" \
+              -d "{\"ref\":\"${{ github.ref_name }}\"}"
           fi
