@@ -162,10 +162,17 @@ def clean_ocr_answer_format(ans_str: str) -> str:
         cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
         return cleaned.strip(" ,;")
 
-    # 7. 一般答案：清除中文字元，但完整保留英數、逗號、負號、分數線 / 與小數點 .
+    # 7. 🚨 剛性純選項提取：若答案包含中文或多餘說明（例如 "(D) 丙生、丁生" 或 "D 丙生"）
+    # 優先提取最前面的純選項代號 (A-G 或 1-9)
+    opt_prefix_match = re.search(r'^[（\(]?([A-Ga-g1-9]+)[）\)]?', ans_str)
+    if opt_prefix_match and any(c.isalpha() for c in opt_prefix_match.group(1)):
+        # 若是選擇題標準字母，只取該純字母（大寫）
+        return opt_prefix_match.group(1).upper()
+
+    # 一般答案：清除中文字元，但完整保留英數、逗號、負號、分數線 / 與小數點 .
     cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
     cleaned = re.sub(r'[^\w,\-±/.]', '', cleaned)
-    return cleaned.strip(",")
+    return cleaned.strip(",()")
 
 def evaluate_solution_quality(q_obj: dict) -> int:
     """
@@ -518,11 +525,16 @@ def pre_validate_format(q_data: dict, sol_data: dict):
         det_sol = re.sub(r'\*\*【(?:列式|計算|數值|結論)給分點[^】]*】\*\*', '', det_sol)
         sol_data["detailed_solution"] = det_sol.strip()
             
-        # 2. 剛性約束客觀題之標準計分規則（杜絕隨機生成）
+        # 2. 剛性約束客觀題之標準計分規則（依考科動態適配配分）
+        sub_name = str(q_data.get("sub_subject", "")) + str(q_data.get("exam_source", ""))
+        is_comprehensive = any(k in sub_name for k in ["社會", "自然", "歷史", "地理", "公民", "生物", "地科", "理綜", "文綜"])
+        
+        default_pts = 2 if is_comprehensive else 5  # 學測社會/自然通常為 2 分/題；數學/分科單科通常為 4~5 分/題
+        
         if q_type == "單選題":
-            sol_data["scoring_rubric"] = "單選題每題 5 分（依考卷配分），答對得 5 分，答錯或未作答得 0 分，不倒扣。"
+            sol_data["scoring_rubric"] = f"單選題每題 {default_pts} 分（依考卷配分），答對得 {default_pts} 分，答錯或未作答得 0 分，不倒扣。"
         elif q_type == "多選題":
-            sol_data["scoring_rubric"] = "多選題每題 5 分，各選項獨立判定。所有選項全對得 5 分；錯 1 個選項得 3 分；錯 2 個選項得 1 分；錯 3 個以上或未作答得 0 分，不倒扣。"
+            sol_data["scoring_rubric"] = f"多選題每題 {default_pts} 分，各選項獨立判定。所有選項全對得 {default_pts} 分，答錯依考卷倒扣扣分標準計分，未作答得 0 分。"
         elif q_type == "選填題":
             sol_data["scoring_rubric"] = "選填題每題完全答對得滿分（依考卷配分，通常為 5~8 分），未完全答對、填錯任意一格或未作答得 0 分，不倒扣。"
     elif q_type in ["簡答題", "繪圖作圖題"] or is_hybrid:
@@ -4012,9 +4024,25 @@ class ExamParser:
                             pass
                         
                 merged_checkpoint_list = list(merged_checkpoint_map.values())
-                min_expected_q = 8 if any(k in subject for k in ["數", "math"]) else 15
                 
-                # 只有在已生成 database 且題目數量達到正常合理門檻時，才進行圖形巡檢並安全跳過！
+                # 🚨 核心修復：依據大考真實學科動態計算合理的最低題數門檻，絕不讓 72 題的考卷在 15~40 題被腰斬！
+                clean_sub_check = str(subject).strip()
+                if any(k in clean_sub_check for k in ["社會", "社考"]):
+                    min_expected_q = 65  # 學測社會 72 題，至少需達 65 題
+                elif any(k in clean_sub_check for k in ["自然", "自考", "理綜"]):
+                    min_expected_q = 60  # 學測自然 68 題，至少需達 60 題
+                elif any(k in clean_sub_check for k in ["英文", "英語"]):
+                    min_expected_q = 45  # 英文通常 50~56 題
+                elif any(k in clean_sub_check for k in ["國文", "國綜"]):
+                    min_expected_q = 38  # 國文通常 40~44 題
+                elif any(k in clean_sub_check for k in ["數", "math"]):
+                    min_expected_q = 10  # 數學通常 15~22 題
+                elif "國寫" in clean_sub_check:
+                    min_expected_q = 2   # 國寫 2 題
+                else:
+                    min_expected_q = 20  # 其餘單科分科測驗/指考通常 25~35 題
+                
+                # 只有在已生成 database 且題目數量達到真正的學科合理門檻時，才安全跳過！
                 if db_exists and len(merged_checkpoint_list) >= min_expected_q:
                     # 🔍 啟動圖片完整性巡檢 (Diagram Integrity Check)
                     missing_diagram_count = 0
@@ -5629,15 +5657,22 @@ class ExamParser:
                             derived_correct_keys = []
                             for opt in sol.get("options_analysis", []):
                                 exp = str(opt.get("explanation", "")).strip()
-                                # 🚨 繁簡雙向關鍵字容錯：支持多種肯定與否定語境的精確判定，防範 fallback 字典漏字造成的漏判
-                                is_correct = any(w in exp for w in ["正確", "正确", "對", "对", "應選", "应选", "合適", "合适", "最適", "最适", "選", "选"])
-                                is_incorrect = any(w in exp for w in ["錯誤", "错误", "不正確", "不正确", "不符", "不合"])
-                                if is_correct and not is_incorrect:
-                                    derived_correct_keys.append(opt.get("key", "").strip())
-                                elif "正確" in exp and "錯誤" not in exp:
-                                    derived_correct_keys.append(opt.get("key", "").strip())
+                                # 嚴格結尾匹配：只有在句尾明確宣告「正確」或「故選」者才採納，防止內文提及「甲正確」導致誤判
+                                is_conclusive_correct = bool(re.search(r'(?:此選項|該選項|故|本選項)?\s*(?:正確|為正確選項|符合題意)[。！!]*$', exp)) or ("正確" in exp and "錯誤" not in exp)
+                                is_conclusive_incorrect = bool(re.search(r'(?:此選項|該選項|故|本選項)?\s*(?:錯誤|不正確|不合題意)[。！!]*$', exp))
+                                
+                                if is_conclusive_correct and not is_conclusive_incorrect:
+                                    derived_correct_keys.append(opt.get("key", "").strip().upper())
                                     
-                            derived_ans = "".join(sorted(derived_correct_keys))
+                            # 🚨 單選題防多選幻覺硬性約束：若為單選題，但抓到了多個字母（如 BDE），代表正則被題幹的甲乙丙丁混淆，強制回退為官方答案！
+                            if q_data.get("question_type") == "單選題":
+                                if len(derived_correct_keys) == 1:
+                                    derived_ans = derived_correct_keys[0]
+                                else:
+                                    # 多個字母發生衝突，不採用幻覺字串，直接以官方答案為推導基準
+                                    derived_ans = str(q_data.get("answer", "")).strip().upper()
+                            else:
+                                derived_ans = "".join(sorted(list(set(derived_correct_keys))))
                             
                             # 💡 核心補件：若本試卷無官方解答（學校段考），自動將 AI 推導出的答案填入 answer 欄位中
                             if not q_data.get('has_official_answer', True):
@@ -5902,8 +5937,9 @@ class ExamParser:
                                 arbitrated_data = self.run_academic_arbitration(q_data, sol_data, conflict_clue)
                                 
                                 if arbitrated_data:
-                                    # 1. 自動覆寫官方答案欄位，修正為學術正確之答案
-                                    q_data['answer'] = arbitrated_data.get('chosen_answer', q_data['answer'])
+                                    # 1. 自動覆寫官方答案欄位，修正為學術正確之答案（🚨 強制正則清洗，只留純選項字母！）
+                                    raw_chosen = arbitrated_data.get('chosen_answer', q_data['answer'])
+                                    q_data['answer'] = clean_ocr_answer_format(str(raw_chosen))
                                     # 2. 將仲裁說明與「修正後的詳解」拼合，剔除所有硬凹迎合的文字
                                     q_data['detailed_solution'] = sol_data.get('detailed_solution', '') + "\n\n" + arbitrated_data.get('final_solution_append', '')
                                     is_valid_passed = True
@@ -5979,7 +6015,7 @@ class ExamParser:
                                         q_data['shared_context'] = recheck_dict.get('corrected_shared_context', q_data.get('shared_context', ''))
                                         q_data['question_text'] = recheck_dict.get('corrected_question_text', q_data.get('question_text', ''))
                                         q_data['options'] = recheck_dict.get('corrected_options', q_data.get('options', []))
-                                        q_data['answer'] = recheck_dict.get('corrected_answer', q_data.get('answer', ''))
+                                        q_data['answer'] = clean_ocr_answer_format(str(recheck_dict.get('corrected_answer', q_data.get('answer', ''))))
 
                                         # 處理補裁切
                                         if recheck_dict.get('found_new_images') and recheck_dict.get('new_image_bboxes'):
@@ -6239,11 +6275,26 @@ class ExamParser:
             return obj
 
         # 💡 [安全保存與品質嚴格驗證]
-        # 1. 嚴格過濾：只保留真正具備有效詳解的題目
-        valid_solved_questions = [q for q in all_final_questions if is_valid_solution(q.get("detailed_solution"))]
+        # 1. 嚴格過濾：必須同時具備 detailed_solution、question_analysis 與 options_analysis 才是有效題！
+        def is_really_complete(q):
+            if not is_valid_solution(q.get("detailed_solution")):
+                return False
+            if not str(q.get("question_analysis", "")).strip():
+                return False
+            return True
+
+        valid_solved_questions = [q for q in all_final_questions if is_really_complete(q)]
         
-        # 2. 判讀全卷是否 100% 成功完成
-        is_partial = len(valid_solved_questions) < len(all_extracted_questions)
+        # 2. 🚨 雙重完工判讀：除了數量等於提取題數，還必須達到本科最低合理題數門檻！
+        min_threshold_map = {"社會": 65, "自然": 60, "英文": 45, "國文": 38, "數": 10, "國寫": 2}
+        target_min = 20
+        for sub_k, min_v in min_threshold_map.items():
+            if sub_k in subject:
+                target_min = min_v
+                break
+
+        # 只要題數少於提取題數，或者少於該考科法定最低題數（如 43 < 65），【強制維持 partial】！
+        is_partial = (len(valid_solved_questions) < len(all_extracted_questions)) or (len(valid_solved_questions) < target_min)
 
         valid_solved_questions = clean_paths(valid_solved_questions)
         for q in valid_solved_questions:

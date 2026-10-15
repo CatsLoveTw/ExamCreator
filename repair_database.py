@@ -79,18 +79,23 @@ SUBJECT_HARD_LIMITS = {
 # =========================================================================
 # 台灣高中各科常規題數合理範圍 (最小值, 最大值) - 保護真題不被誤殺
 # =========================================================================
+# 🚨 完整納入大考學測/指考「自然科 (68題)」與「社會科 (72題)」完整題數標準
 EXAM_REASONABLE_RANGES = {
     "國寫": (2, 4),
     "數學甲": (12, 18), "數學乙": (11, 17), "數學A": (15, 22), "數學B": (15, 22), "數學": (12, 22),
     "物理": (22, 32), "化學": (22, 34), "生物": (40, 62), "地球科學": (35, 50),
-    "國文": (38, 46), "英文": (50, 60), "歷史": (36, 46), "地理": (36, 46), "公民與社會": (36, 46)
+    "國文": (38, 46), "英文": (50, 60), "歷史": (36, 46), "地理": (36, 46), "公民與社會": (36, 46),
+    "社會": (65, 75),  # 🚨 大考學測社會科標準題數通常為 72 題
+    "自然": (60, 70)   # 🚨 大考學測自然科標準題數通常為 68 題
 }
 
-# 保底單科天花板（超過此數且發生斷層才視為幽靈題）
+# 保底單科天花板
 STANDARD_MAX_QUESTIONS = {
     "國寫": 4, "數學甲": 20, "數學乙": 18, "數學A": 22, "數學B": 22, "數學": 22,
     "物理": 34, "化學": 36, "生物": 65, "地球科學": 52,
-    "國文": 48, "英文": 62, "歷史": 50, "地理": 50, "公民與社會": 50
+    "國文": 48, "英文": 62, "歷史": 50, "地理": 50, "公民與社會": 50,
+    "社會": 75,
+    "自然": 72
 }
 
 def register_cloud_purge(local_path: str):
@@ -654,12 +659,44 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     text_fingerprints = {}
 
     for q in db_questions + partial_questions:
+        # 🚨 1. 攔截像 Q37 這種未經 Stage 2 解析、完全沒有詳解內容的空殼題！
+        sol_text = str(q.get("detailed_solution", "")).strip()
+        if not sol_text or len(sol_text) < 20 or "超時或失敗" in sol_text:
+            stats["ghosts"] += 1
+            continue
+
         if not is_valid_question_strict(q, max_pdf_q, physical_q_set, expected_subject, exam_tag):
             stats["ghosts"] += 1
             continue
             
-        q_num = str(q.get("question_number", "")).strip()
+        # 🚨 2. 剛性答案格式清洗：只保留純代號（例如 "(D) 丙生、丁生" -> "D"）
+        for ans_key in ["answer", "official_answer"]:
+            if ans_key in q and q[ans_key]:
+                raw_ans = str(q[ans_key]).strip()
+                # 提取開頭或括號內的純選項英數字 (A-G 或 1-9)
+                m_opt = re.search(r'[（\(]?([A-Ga-g1-9]+)[）\)]?', raw_ans)
+                if m_opt:
+                    q[ans_key] = m_opt.group(1).upper()
+
+        # 🚨 3. 單選題防多選幻覺修復：若單選題被塞入多個字母，強制重設為官方答案
         q_type = str(q.get("question_type", "")).strip()
+        if q_type == "單選題":
+            der_ans = str(q.get("derived_answer", "")).strip()
+            # 如果單選題的 derived_answer 跑出 "BDE"、"ABCD" 等長度大於 1 的字串
+            if len(re.findall(r'[A-Z]', der_ans)) > 1:
+                q["derived_answer"] = q["answer"]
+                q["has_answer_discrepancy"] = False
+                q.pop("discrepancy_reason", None)
+                # 清除詳解尾部硬凹的「本題學理嚴謹推導之正確選項為：(B)(D)(E)」
+                if "綜上所述" in q.get("detailed_solution", ""):
+                    q["detailed_solution"] = q["detailed_solution"].split("綜上所述")[0].strip() + f"\n\n**綜上所述，本題正確選項為：({q['answer']})**"
+
+        # 🚨 4. 清理字串內殘留的字面量 '\\n'
+        for k in ["detailed_solution", "question_analysis", "solving_strategy"]:
+            if k in q and isinstance(q[k], str):
+                q[k] = q[k].replace("\\n", "\n")
+
+        q_num = str(q.get("question_number", "")).strip()
         key = (q_num, q_type)
         
         # 題幹純文字特徵指紋 (去除標點空格，取前 30 字)
