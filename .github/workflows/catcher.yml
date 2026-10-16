@@ -6,9 +6,6 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  schedule:
-    # 保底心跳機制（每 6 小時一次）：防止網路異常斷掉接力時，系統能自動重新開機喚醒
-    - cron: '0 */6 * * *'
   workflow_dispatch: # 支援手動在 GitHub 網頁點擊執行
     inputs:
       repair_only:
