@@ -137,11 +137,18 @@ def standardize_exam_metadata(year_str: str, exam_type: str, subject: str, mock_
         acad_year = f"{y_val}{sem_tag}定期考"
         exam_source = f"{y_val}學年度{sem_tag+'學期' if sem_tag else ''}{sch}{mock_tag}_{clean_sub}"
         type_folder = os.path.join("學校定期考", sch)
-    elif exam_type == "MOCK":
-        spec_name = f"{y_val}學年度_模擬考{mock_tag}_{clean_sub}"
-        acad_year = f"{y_val}模考{mock_tag}"
-        exam_source = f"{y_val}學年度模擬考{mock_tag}_{clean_sub}"
-        type_folder = "模擬考"
+    elif exam_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
+        # 🎯 模擬考細緻分類：學測模擬 vs 分科模擬，並按機構/地區分層
+        mock_sub_type = "學測模擬" if exam_type == "MOCK_GSAT" else ("分科模擬" if exam_type == "MOCK_AST" else "綜合模擬")
+        org_label = "全國模考"
+        for candidate_org in ["北模", "中模", "南模", "竹模", "全模", "翰林", "南一", "詮達", "全華", "漢樺", "文昌"]:
+            if candidate_org in mock_tag:
+                org_label = candidate_org
+                break
+        type_folder = os.path.join("模擬考", mock_sub_type, org_label)
+        spec_name = f"{y_val}學年度_{mock_sub_type}{mock_tag}_{clean_sub}"
+        acad_year = f"{y_val}{mock_sub_type[:2]}模"
+        exam_source = f"{y_val}學年度{mock_sub_type}{mock_tag}_{clean_sub}"
     elif exam_type == "GSAT":
         spec_name = f"{y_val}學年度_學測{makeup_tag}_{clean_sub}"
         acad_year = f"{y_val}學測{makeup_tag}"
@@ -249,11 +256,13 @@ def fuse_duplicate_question_solutions(q_base: dict, q_incoming: dict) -> dict:
     return primary
 
 def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
-    """跨目錄精準搜尋真正的實體【題目卷】PDF（絕對排除評分原則與答案卷）"""
-    # 若記錄的路徑存在且確為題目卷（不含解答/評分關鍵字）
+    """跨目錄精準搜尋真正的實體【題目卷】PDF（支援模擬考題解合卷與分卷，排除純評分卷）"""
     if candidate_pdf_path and os.path.exists(candidate_pdf_path):
         cand_base = os.path.basename(candidate_pdf_path)
-        if not any(bad in cand_base for bad in ["解答", "答案", "評分", "原則", "說明資料"]):
+        # 若為模擬考，詳解本或合卷本身就是題目與解析的真實來源，不可誤殺
+        if "模擬" in db_path or "模考" in db_path:
+            return candidate_pdf_path
+        elif not any(bad in cand_base for bad in ["解答", "答案", "評分", "原則", "說明資料"]):
             return candidate_pdf_path
         
     base_file = os.path.basename(db_path).replace("_database.json", "").replace("_partial_database.json", "")
@@ -261,11 +270,17 @@ def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
     year_str = year_m.group(1) if year_m else ""
     
     subj_kw = ""
-    for s_name in ["數學", "數甲", "數乙", "物理", "化學", "生物", "地科", "地球科學", "國文", "國寫", "英文", "歷史", "地理", "公民"]:
+    for s_name in ["數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", "物理", "化學", "生物", "地科", "地球科學", "國文", "國寫", "英文", "歷史", "地理", "公民與社會", "公民", "自然", "社會"]:
         if s_name in base_file:
             subj_kw = s_name; break
 
-    search_dirs = ["ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only", "school_exam_papers_only"]
+    # 提取機構關鍵字（如北模、中模、全模、翰林）
+    org_kw = ""
+    for o_cand in ["北模", "中模", "南模", "竹模", "全模", "翰林", "南一", "詮達", "全華", "漢樺", "文昌"]:
+        if o_cand in base_file:
+            org_kw = o_cand; break
+
+    search_dirs = ["mock_exam_papers_only", "ast_exam_papers_only", "gsat_exam_papers_only", "school_exam_papers_only"]
     for s_dir in search_dirs:
         if os.path.exists(s_dir):
             for root, dirs, files in os.walk(s_dir):
@@ -920,11 +935,24 @@ def run_database_repair_suite():
                 
                 is_makeup = "補考" in clean_name
                 
-                # 判斷大考類型
-                if "學測" in clean_name or "學科能力" in clean_name: e_type = "GSAT"
-                elif "模擬" in clean_name or "模考" in clean_name: e_type = "MOCK"
-                elif "定期" in clean_name or "段考" in clean_name or "學校" in root: e_type = "SCHOOL"
-                else: e_type = "AST"
+                # 判斷大考類型（🚨 最高優先級：優先過濾學校定期考與模擬考，避免「學測模擬」被誤當成「真實學測」！）
+                is_mock_kw = any(k in clean_name for k in ["模擬", "模考", "全模", "北模", "中模", "南模", "竹模", "全區", "中區", "詮達", "全華", "翰林", "南一", "文昌", "漢樺", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"])
+                is_school_kw = "學校" in root or any(k in clean_name for k in ["定期", "段考", "期中", "期末", "月考"])
+
+                if is_school_kw and not is_mock_kw:
+                    e_type = "SCHOOL"
+                elif is_mock_kw:
+                    # 🎯 模擬考精確雙軌判定
+                    if any(k in clean_name for k in ["指考", "分科", "數甲", "數乙", "數學甲", "數學乙"]):
+                        e_type = "MOCK_AST"
+                    elif any(k in clean_name for k in ["學測", "學科能力", "數A", "數B", "數學A", "數學B", "自然", "社會"]):
+                        e_type = "MOCK_GSAT"
+                    else:
+                        e_type = "MOCK_GSAT"
+                elif "學測" in clean_name or "學科能力" in clean_name:
+                    e_type = "GSAT"
+                else:
+                    e_type = "AST"
                 
                 # 判斷科目
                 subj = "未知"

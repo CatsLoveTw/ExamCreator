@@ -39,6 +39,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: 🧹 釋放 Runner 磁碟空間 (清理非必要套件釋放 25GB)
+        run: |
+          echo "正在釋放 GitHub Runner 磁碟空間以容納 7GB 模擬考題庫..."
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          df -h
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -59,16 +68,17 @@ jobs:
           pip install google-genai openai httpx pymupdf pillow matplotlib pydantic opencc-python-reimplemented
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Configure rclone & Gemini Keys
+      - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
+          GDRIVE_MOCK_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_MOCK_OAUTH_TOKEN }}
           GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
         run: |
           # 1. 將 Gemini 金鑰寫入本地 key.txt
           printf "%s\n" "$GEMINI_API_KEYS_ENV" > key.txt
           
-          # 2. 自動產生 rclone 設定檔
+          # 2. 產生主帳號 rclone 設定 [gdrive]
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
@@ -76,6 +86,20 @@ jobs:
           token = $GDRIVE_OAUTH_TOKEN_ENV
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
+
+          # 3. 模考專用帳號直接共用原資料夾 ID (儲存配額計入模考新帳號)
+          if [ -n "$GDRIVE_MOCK_OAUTH_TOKEN_ENV" ]; then
+            echo "🌟 檢測到模考專用 Google 帳號，共用原 Folder ID 並啟動容量分流！"
+            cat << EOF >> rclone.conf
+          [gdrive_mock]
+          type = drive
+          scope = drive
+          token = $GDRIVE_MOCK_OAUTH_TOKEN_ENV
+          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
+          EOF
+          else
+            echo "ℹ️ 未設定 GDRIVE_MOCK_OAUTH_TOKEN，模考圖片將暫存於主帳號 [gdrive]。"
+          fi
 
       - name: Pull Workspace from Google Drive (雙軌智慧拉取模式)
         run: |
@@ -111,11 +135,30 @@ jobs:
             echo "✅ 題庫資料庫已瞬間恢復完成！"
           fi
 
-          # 3. ⚡ 優先解壓 exam_images.zip 圖片高速包
+          # 3. ⚡ 優先解壓大考圖片高速包 exam_images.zip
           if [ -f "./gdrive_workspace/exam_images.zip" ]; then
-            echo "⚡ 找到圖片高速包 exam_images.zip，正在秒級解壓縮..."
+            echo "⚡ 找到大考圖片高速包 exam_images.zip，正在秒級解壓縮..."
             unzip -q -o "./gdrive_workspace/exam_images.zip" -d ./
-            echo "✅ 圖片庫已瞬間恢復完成！"
+            echo "✅ 大考圖片庫已恢復完成！"
+          fi
+
+          # 3.1 ⚡ 優先從模考專用帳號拉取並解壓 mock_exam_images.zip
+          MOCK_REMOTE="gdrive"
+          if grep -q "\[gdrive_mock\]" rclone.conf; then MOCK_REMOTE="gdrive_mock"; fi
+
+          echo "⬇️ 檢查並拉取模擬考專用圖片包 (${MOCK_REMOTE}:mock_exam_images.zip)..."
+          rclone copyto ${MOCK_REMOTE}:mock_exam_images.zip ./gdrive_workspace/mock_exam_images.zip --config rclone.conf -v || true
+          if [ -f "./gdrive_workspace/mock_exam_images.zip" ]; then
+            echo "⚡ 找到模考專用圖片高速包，正在秒級解壓縮..."
+            unzip -q -o "./gdrive_workspace/mock_exam_images.zip" -d ./
+            echo "✅ 模考圖片庫已恢復完成！"
+          fi
+
+          # 3.2 補足雲端模考散裝圖片（使用模考帳號身分拉取）
+          if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
+            echo "🔄 從模考帳號增量補齊模擬考散裝圖片..."
+            rclone copy gdrive_mock:exam_database_output/模擬考 ./exam_database_output/模擬考 \
+              --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
           fi
 
           # =========================================================================
@@ -135,7 +178,9 @@ jobs:
           cp -f ./gdrive_workspace/model_limits.json ./model_limits.json 2>/dev/null || true
           cp -f ./gdrive_workspace/key_status.txt ./key_status.txt 2>/dev/null || true
           cp -f ./gdrive_workspace/telemetry_history.json ./telemetry_history.json 2>/dev/null || true
+          cp -f ./gdrive_workspace/scheduler_state.json ./scheduler_state.json 2>/dev/null || true
           if [ ! -f "./model_limits.json" ]; then echo "{}" > ./model_limits.json; fi
+          if [ ! -f "./scheduler_state.json" ]; then echo "{\"mock_streak\": 0}" > ./scheduler_state.json; fi
 
       - name: 🛠️ 執行資料庫離線無損修復與重漏題仲裁
         run: |
@@ -202,7 +247,7 @@ jobs:
             --config rclone.conf -v
           echo "🎉 [第 1.5 階段完成] 題庫純淨正式包打包完成（已剔除所有 partial 暫存檔）！"
 
-          for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt telemetry_history.json; do
+          for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt telemetry_history.json scheduler_state.json; do
             if [ -f "./$state_file" ]; then
               rclone copyto "./$state_file" "gdrive:$state_file" --config rclone.conf -v
             fi
@@ -211,28 +256,55 @@ jobs:
           echo "🎉 [第一階段完成] JSON 資料庫已 100% 安全存入雲端！"
 
           # =========================================================
-          # === 第二階段：🚀 本地高速打包所有圖片為 exam_images.zip ===
+          # === 第二階段：🚀 雙軌分離高速打包 (大考圖片包 vs 模考專屬圖片包) ===
           # =========================================================
-          echo "📦 [第二階段] 正在將所有圖片高速壓縮為單一檔案 exam_images.zip..."
-          # 使用 -1 (快速壓縮) 或 -0 (僅儲存)，幾秒內完成數萬張圖片打包
-          zip -q -r -1 exam_images.zip exam_database_output -i "*/images/*"
-          
-          echo "⚡ 正在將 exam_images.zip 單一大檔高速推送至 Google Drive..."
-          rclone copyto ./exam_images.zip gdrive:exam_images.zip \
-            --drive-chunk-size 64M \
-            --config rclone.conf -v
-          echo "🎉 [第二階段完成] 圖片高速包已成功備份！下次啟動將享受秒級拉取！"
+          MOCK_REMOTE="gdrive"
+          if grep -q "\[gdrive_mock\]" rclone.conf; then MOCK_REMOTE="gdrive_mock"; fi
+
+          # A. 打包「學測、分科、指考、學校定期考」圖片為 exam_images.zip (100% 排除模擬考)
+          echo "📦 [第二階段 A] 正在打包大考與段考圖片包 exam_images.zip (排除所有模擬考圖片)..."
+          rm -f exam_images.zip
+          find exam_database_output -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.webp" \) ! -path "*/模擬考/*" 2>/dev/null | zip -q -1 exam_images.zip -@ || true
+
+          if [ -f "exam_images.zip" ]; then
+            echo "⚡ 正在將大考圖片包推送至主帳號 (gdrive:exam_images.zip)..."
+            rclone copyto ./exam_images.zip gdrive:exam_images.zip \
+              --drive-chunk-size 64M \
+              --config rclone.conf -v
+          fi
+
+          # B. 滴水不漏打包「模擬考」所有圖片為 mock_exam_images.zip (強制由模考專用帳號儲存)
+          echo "📦 [第二階段 B] 正在打包模考專用圖片包 mock_exam_images.zip (包含題目圖、選項圖、詳解圖)..."
+          rm -f mock_exam_images.zip
+          find exam_database_output/模擬考 -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.webp" \) 2>/dev/null | zip -q -1 mock_exam_images.zip -@ || true
+
+          if [ -f "mock_exam_images.zip" ]; then
+            echo "⚡ 正在將模考圖片包推送至專用帳號 (${MOCK_REMOTE}:mock_exam_images.zip)..."
+            # 🚨 以 MOCK_REMOTE 身份上傳，配額 100% 計入模考新帳號！
+            rclone copyto ./mock_exam_images.zip ${MOCK_REMOTE}:mock_exam_images.zip \
+              --drive-chunk-size 64M \
+              --config rclone.conf -v
+          fi
+          echo "🎉 [第二階段完成] 圖片雙軌分流打包備份完畢！"
 
           # =========================================================
-          # === 第三階段：散裝圖片背景同步 (保底增量備份) ===
+          # === 第三階段：散裝圖片分流同步 (保底增量備份) ===
           # =========================================================
-          echo "🖼️ [第三階段] 散裝圖片增量同步..."
+          echo "🖼️ [第三階段] 散裝圖片雙軌增量同步..."
+          # 主帳號增量備份 (100% 排除模擬考)
           rclone copy ./exam_database_output gdrive:exam_database_output \
-            --fast-list \
-            --transfers 16 \
-            --checkers 32 \
-            --drive-chunk-size 64M \
+            --exclude "模擬考/**" \
+            --fast-list --transfers 16 --checkers 32 --drive-chunk-size 64M \
             --config rclone.conf -v || true
+
+          # 模考專用帳號增量備份 (🚨 100% 使用 MOCK_REMOTE 身分上傳模擬考所有產出圖片)
+          if [ -d "./exam_database_output/模擬考" ]; then
+            echo "🖼️ 使用模考專用帳號身分 (${MOCK_REMOTE}) 同步模擬考所有圖片..."
+            rclone copy ./exam_database_output/模擬考 ${MOCK_REMOTE}:exam_database_output/模擬考 \
+              --include "*.png" --include "*.jpg" --include "*.jpeg" --include "*.webp" \
+              --fast-list --transfers 16 --checkers 32 --drive-chunk-size 64M \
+              --config rclone.conf -v || true
+          fi
 
           # =========================================================
           # 🧹 [終極清理] 批次銷毀雲端暫存，並消除 Google Drive 重複同名檔案
@@ -242,6 +314,10 @@ jobs:
             sort -u pending_cloud_purges.txt | while IFS= read -r cloud_file; do
               if [ -n "$cloud_file" ]; then
                 rclone deletefile "$cloud_file" --config rclone.conf --drive-use-trash=false >/dev/null 2>&1 || true
+                if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
+                  mock_cloud_file=$(echo "$cloud_file" | sed 's/^gdrive:/gdrive_mock:/')
+                  rclone deletefile "$mock_cloud_file" --config rclone.conf --drive-use-trash=false >/dev/null 2>&1 || true
+                fi
               fi
             done
             rm -f pending_cloud_purges.txt
@@ -253,7 +329,7 @@ jobs:
           echo "✅ 雲端同名副本已強制保留最新版本！"
 
           # 清除敏感金鑰與設定檔
-          rm -f rclone.conf key.txt exam_images.zip exam_databases.zip
+          rm -f rclone.conf key.txt exam_images.zip mock_exam_images.zip exam_databases.zip
 
       - name: 🔄 自動接力重啟下一輪 (24hr Loop Dispatcher)
         if: always()
