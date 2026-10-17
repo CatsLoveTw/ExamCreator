@@ -2310,12 +2310,18 @@ class GeminiFreeTierManager:
         text = re.sub(r'[\r\n]+ight(?=[)\]}|.])', r'\\right', text)
         text = text.replace(r"\r\right", r"\right").replace(r"\r\left", r"\left")
 
-        # 4. 🚨 救回因 \i 被不當吃掉導致的 \infty -> \fty，以及 \implies -> implies
-        text = re.sub(r'\\?fty\b', r'\\infty', text)
+        # 4. 🚨 救回因 \i 被不當吃掉導致的 \infty -> \fty（嚴格限制不可匹配既有的 \infty）
+        text = re.sub(r'(?:\\in\s*){2,}\\infty', r'\\infty', text)
+        text = re.sub(r'(?:\\in\s*)+\\infty', r'\\infty', text)
+        text = re.sub(r'(?<![a-zA-Z\\])(?<!\\in)(?<!in)\\?fty\b', r'\\infty', text)
         text = re.sub(r'(?<!\\)\bimplies\b', r'\\implies', text)
         text = re.sub(r'(?<!\\)\biff\b', r'\\iff', text)
         text = re.sub(r'\\?bsim\b', r'\\approx', text)
         text = re.sub(r'\\bar\{log\}', r'\\log', text)
+        text = re.sub(r'(?<!\\)\bightarrow\b', r'\\rightarrow', text)
+        text = re.sub(r'(?<!\\)ight(?=[\)\]\}|\.])', r'\\right', text)
+        text = re.sub(r'(?<!\\)eft(?=[\(\[\{])', r'\\left', text)
+        text = re.sub(r'\\break\b', r'\\\\', text)
 
         # 5. 精確修復控制字元
         replacements = {
@@ -3564,13 +3570,24 @@ class ExamParser:
             
             # 針對掃描檔（文字層為空）與數位檔的提示詞整合
             text_layer_str = f"\n\n=== 該頁數位文字層對照 ===\n{page_text_layer}" if page_text_layer else "\n\n（註：本頁為純影像掃描檔，請完全依據圖片視覺排版精確辨識）"
+            
+            # 取得考科的所有可能簡稱與別名，增強 OCR 定位容錯
+            subj_aliases = [target_subject]
+            if "數學甲" in target_subject or "數甲" in target_subject: subj_aliases += ["數學甲", "數甲", "數學甲考科", "高中數學甲"]
+            elif "數學乙" in target_subject or "數乙" in target_subject: subj_aliases += ["數學乙", "數乙", "數學乙考科", "高中數學乙"]
+            elif "數學A" in target_subject or "數A" in target_subject: subj_aliases += ["數學A", "數A", "數學A考科", "高中數學A"]
+            elif "數學B" in target_subject or "數B" in target_subject: subj_aliases += ["數學B", "數B", "數學B考科", "高中數學B"]
+            elif "國文" in target_subject: subj_aliases += ["國文", "國綜", "國語文", "國文考科"]
+            elif "公民" in target_subject: subj_aliases += ["公民與社會", "公民", "公社"]
+            alias_str = "、".join(list(dict.fromkeys(subj_aliases)))
+
             subject_guard_prompt = f"""
-            🚨【考科與學年度嚴格過濾警報（最高優先級）】🚨
-            本試卷目標考科：【{target_subject}】，目標學年度：【{target_year}】。
-            大考或模考的解答 PDF 常常是多科合一（包含國文、英文、數學、物理、化學、生物、歷史等）。
-            請務必先檢視本頁上方之【考科名稱標題】與【學年度】！
-            若本頁為其他科目的答案（例如目標是物理，本頁標題卻是數學乙、化學、國文等），你【必須且只能】輸出空列表 `{{"answers": []}}`！
-            絕對禁止跨科目提取任何答案！
+            🚨【考科與學年度精確定位指引（跨頁/多欄/中段答案定位）】🚨
+            目標考科：【{target_subject}】（包含別名：{alias_str}），目標學年度：【{target_year}】。
+            大考與模擬考的解答 PDF 常常是多科合一（同一頁可能包含多個科目，或目標科目出現在頁面中間段、特定直欄或表格區塊）：
+            1. **【全局與中段精準掃描】**：請仔細巡視本頁的「頁首、頁中、頁尾以及各獨立欄位或表格標題」，尋找標註有【{alias_str}】的專屬區塊！
+            2. **【區段隔離提取】**：若本頁包含多個科目（例如上方是國文/數乙，中間或下方是【{target_subject}】），請**專注且只提取標註為【{alias_str}】區塊內的題號與答案**，忽略其他科目的表格！
+            3. **【全頁無目標科目的判定】**：只有在確認「整頁完全沒有出現任何【{alias_str}】的標題、表格或答案」時，才回傳 `{{"answers": []}}`。切勿因為頁首是其他科目，就忽略頁面中段或下方的目標科目答案！
             """
             combined_prompt = subject_guard_prompt + "\n" + self.ANSWERS_OCR_PROMPT + text_layer_str
             
@@ -3608,70 +3625,84 @@ class ExamParser:
         doc.close()
         return all_answers, hit_page_indices
 
-    def _resolve_ocr_conflict(self, a_pdf: str, dict_1: dict, dict_2: dict, mismatched_keys: list) -> dict:
+    def _resolve_ocr_conflict(self, a_pdf: str, dict_1: dict, dict_2: dict, mismatched_keys: list, hit_pages: List[int] = None) -> dict:
         """
-        對衝突的題號進行二次比對與終極仲裁
+        對衝突的題號進行二次比對與終極仲裁（動態載入命中頁面，支援多頁仲裁）
         """
-        # 預設融合：先以更穩定的 dict_1 (3.5-flash) 為基準
         merged_dict = {**dict_2, **dict_1} 
-        
         task_id = uuid.uuid4().hex[:8]
+        temp_img_paths = []
+        
         try:
-            # 💡 採用 Pythonic 的 with 語法，防止異常發生時 PDF 檔案描述符發生洩漏
             with fitz.open(a_pdf) as doc:
-                pix = doc[0].get_pixmap(dpi=300)
-                img_path = os.path.abspath(f"temp_arbitrate_{task_id}.png")
-                pix.save(img_path)
+                target_pages = hit_pages if hit_pages else list(range(len(doc)))
+                for p_idx in target_pages:
+                    if 0 <= p_idx < len(doc):
+                        pix = doc[p_idx].get_pixmap(dpi=300)
+                        p_img = os.path.abspath(f"temp_arbitrate_{task_id}_p{p_idx}.png")
+                        pix.save(p_img)
+                        temp_img_paths.append(p_img)
         except Exception as e:
-            logging.error(f"仲裁時無法讀取解答卷第一頁: {e}")
+            logging.error(f"仲裁時讀取解答卷頁面失敗: {e}")
+            return merged_dict
+
+        if not temp_img_paths:
             return merged_dict
 
         class ArbitrationResult(BaseModel):
             resolutions: List[AnswerItem] = Field(description="對所有衝突題號的最終仲裁結果列表。")
 
         prompt = f"""
-        這是一份大考解答卷。我們在使用兩個不同的 AI 模型解析以下題號的標準答案時發生了衝突：
+        這是一份大考解答卷影像。我們在使用兩個不同的 AI 模型解析以下題號的標準答案時發生了衝突：
         衝突題號：{mismatched_keys}
         模型 1 的解析：{ {k: dict_1.get(k) for k in mismatched_keys} }
         模型 2 的解析：{ {k: dict_2.get(k) for k in mismatched_keys} }
 
         請你扮演「最終仲裁官」：
-        1. 仔細辨識原圖中，這些衝突題號對應的真實標準答案。
+        1. 仔細辨識傳入的解答原圖中，這些衝突題號對應的真實標準答案。
         2. 做出最準確的裁決，並將結果填入 Pydantic 結構中。
         """
 
+        opened_pils = []
         try:
-            with Image.open(img_path) as pil_img:
-                # 提升對比度與銳利度
-                from PIL import ImageEnhance
-                enhancer_contrast = ImageEnhance.Contrast(pil_img)
-                pil_img_enhanced = enhancer_contrast.enhance(1.6)
-                enhancer_sharp = ImageEnhance.Sharpness(pil_img_enhanced)
-                pil_img_enhanced = enhancer_sharp.enhance(1.4)
+            contents = [prompt]
+            from PIL import ImageEnhance
+            for ip in temp_img_paths:
+                p_im = Image.open(ip)
+                enhancer_contrast = ImageEnhance.Contrast(p_im)
+                p_im_enh = enhancer_contrast.enhance(1.5)
+                enhancer_sharp = ImageEnhance.Sharpness(p_im_enh)
+                p_im_enh = enhancer_sharp.enhance(1.3)
+                opened_pils.append(p_im)
+                contents.append(p_im_enh)
 
-                res, err = self.ai_manager.generate_with_retry(
-                    contents=[prompt, pil_img_enhanced],
-                    response_schema=ArbitrationResult,
-                    temperature=0.0,
-                    preferred_model="gemini-3.6-flash", # 使用 2026 最強模型進行終極仲裁
-                    enable_thinking=True,
-                    task_desc="[解答仲裁]"
-                )
-                if res and 'resolutions' in res:
-                    for item in res['resolutions']:
-                        ans_val = item['standard_answer']
-                        if ans_val is None or str(ans_val).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
-                            ans_val = "／"
-                        else:
-                            ans_val = str(ans_val).strip()
-                        merged_dict[item['question_number']] = ans_val
-                        logging.info(f"⚖️ [仲裁成功] 題號 {item['question_number']} 已被裁決為: {ans_val}")
+            res, err = self.ai_manager.generate_with_retry(
+                contents=contents,
+                response_schema=ArbitrationResult,
+                temperature=0.0,
+                preferred_model="gemini-3.6-flash",
+                enable_thinking=True,
+                task_desc="[解答仲裁]"
+            )
+            if res and 'resolutions' in res:
+                for item in res['resolutions']:
+                    ans_val = item['standard_answer']
+                    if ans_val is None or str(ans_val).strip() in ["", "None", "null", "／", "/", "\\", "無", "無答案", "－"]:
+                        ans_val = "／"
+                    else:
+                        ans_val = str(ans_val).strip()
+                    merged_dict[item['question_number']] = ans_val
+                    logging.info(f"⚖️ [仲裁成功] 題號 {item['question_number']} 已被裁決為: {ans_val}")
         except Exception as e:
             logging.error(f"執行解答仲裁失敗，將採用 Model 1 預設值: {e}")
         finally:
-            if os.path.exists(img_path):
-                try: os.remove(img_path)
+            for p_im in opened_pils:
+                try: p_im.close()
                 except Exception: pass
+            for ip in temp_img_paths:
+                if os.path.exists(ip):
+                    try: os.remove(ip)
+                    except Exception: pass
                 
         return merged_dict
 
@@ -3725,8 +3756,8 @@ class ExamParser:
         logging.warning(f"  -> Model 1 (3.5-flash): {ans_1_sub}")
         logging.warning(f"  -> Model 2 (3.1-lite): {ans_2_sub}")
         
-        # 4. 啟動第三輪：終極仲裁
-        resolved_dict = self._resolve_ocr_conflict(a_pdf, ans_dict_1, ans_dict_2, mismatched_keys)
+        # 4. 啟動第三輪：終極仲裁（傳入真實命中頁碼，不再盲目只讀第 1 頁）
+        resolved_dict = self._resolve_ocr_conflict(a_pdf, ans_dict_1, ans_dict_2, mismatched_keys, hit_pages=hit_pages)
         return json.dumps(resolved_dict, ensure_ascii=False), hit_pages
 
     def extract_text_from_pdf(self, pdf_path: Optional[str]) -> str:
@@ -4616,9 +4647,14 @@ class ExamParser:
                         q_data['question_page_image_paths'] = q_image_paths
                         q_data['answer_page_image_paths'] = a_image_paths
                         q_data['rubric_page_image_paths'] = rubric_image_paths
-                        # 標註本題是否有官方答案與學校名稱
-                        q_data['has_official_answer'] = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
                         q_data['school_name'] = school_name if exam_type == "SCHOOL" else ""
+
+                        # 🚨 核心修復：單題級別精確判定本題是否存在官方答案！
+                        # 只有當該題的 answer 真正存在且非空白時，has_official_answer 才為 True
+                        cur_ans = str(q_data.get('answer', '')).strip()
+                        has_real_ans = bool(cur_ans and cur_ans not in ["", "None", "null", "／", "/", "無", "無答案"])
+                        q_data['has_official_answer'] = has_real_ans
+                        q_data['official_answer'] = cur_ans if has_real_ans else ""
 
                         options = q_data.get('options', [])
                         is_alpha = any(str(opt.get('key', '')).isalpha() for opt in options)
@@ -4876,6 +4912,31 @@ class ExamParser:
                 except Exception as e:
                     logging.warning(f"⚠️ [解答 JSON 解析警告] 官方答案格式非標準 JSON，已自動降級防護: {e}")
                     ans_map = {}
+
+                # 🚨【核心架構修復：Python 強制將官方答案字典精準灌入題目】
+                # 不再盲目依賴 Stage 1 LLM 是否抄寫答案！只要 ans_map 有該題，直接灌入並設 has_official_answer = True
+                if ans_map:
+                    for q_item in all_extracted_questions:
+                        qn = str(q_item.get("question_number", "")).strip()
+                        matched_ans = None
+                        if qn in ans_map:
+                            matched_ans = ans_map[qn]
+                        else:
+                            # 模糊對比：例如題號為 1-5 中的 1，或選填 A 對應多列號
+                            for k_ans, v_ans in ans_map.items():
+                                if is_precise_match(q_item, k_ans):
+                                    matched_ans = v_ans
+                                    break
+                        
+                        if matched_ans and str(matched_ans).strip() not in ["", "None", "null", "／", "/", "無", "無答案"]:
+                            cleaned_match = clean_ocr_answer_format(str(matched_ans))
+                            q_item['answer'] = cleaned_match
+                            q_item['official_answer'] = cleaned_match
+                            q_item['has_official_answer'] = True
+                        else:
+                            # 官方答案表中無此題（例如非選擇題手寫題，或答案卷遺漏）
+                            q_item['official_answer'] = ""
+                            q_item['has_official_answer'] = False
                     
                 def get_base_q_num(q_num_str: str) -> str:
                     q_num_str = str(q_num_str).strip()
@@ -5512,12 +5573,12 @@ class ExamParser:
                     if q_text_prompt.strip() in ["", "______", "___"]:
                         q_text_prompt = f"【定位引導】：請針對 `shared_context` 中編號為 [{q_data['question_number']}] 的空格進行前後文邏輯與語意銜接分析，求出最適合填入第 [{q_data['question_number']}] 空格的正確選項。"
                     
-                    has_off_ans = q_data.get('has_official_answer', True)
-                    ans_label = f"【{q_data['answer']}】" if has_off_ans else "【無官方解答（請由你嚴謹推導並填入正確答案）】"
+                    has_off_ans = q_data.get('has_official_answer', False)
+                    ans_label = f"【{q_data['answer']}】" if (has_off_ans and q_data.get('answer')) else "【無官方解答（請由你嚴謹推導求出唯一正確答案）】"
                     
                     item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n是否有官方解答：{has_off_ans}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：{ans_label}\n"
-                    if not has_off_ans:
-                        item_desc += "⚠️【無官方答案特別提醒】：本試卷屬於學校定期考/段考，無官方解答。請務必在 `detailed_solution` 與 `options_analysis` 中寫出最嚴謹的推導，並將求得的最終答案填入 `answer` 欄位中！\n"
+                    if not has_off_ans or not q_data.get('answer'):
+                        item_desc += "⚠️【無官方答案剛性要求】：本題無官方標準解答。請你務必在 `detailed_solution` 中進行最扎實的推導，並在 `derived_answer` 中明確輸出你推導出的最終答案（如選擇題輸出純選項代號 A/B/C 或 1/2/3；選填題輸出數值如 3,3 或 1/3；非選證明題填寫 '證明題'）！系統將以你的推導答案作為本題的標準答案。\n"
                     
                     # 🚨【自動幾何圖解與多圖精確嵌入規範】🚨
                     safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
@@ -6056,21 +6117,37 @@ class ExamParser:
                                         except: pass
 
                         if is_valid_passed:
-                            # 🚨 紀錄官方原始答案與推導答案
-                            if not q_data.get("official_answer"):
-                                q_data["official_answer"] = str(q_data.get('answer', '')).strip()
-                            
-                            derived = item.get("_derived_ans", "").strip()
-                            if derived and derived != "（未順利推導出唯一正確選項）":
-                                q_data["derived_answer"] = derived
-                            else:
-                                q_data["derived_answer"] = q_data["official_answer"]
+                            # 🚨 1. 取得 AI 實質推導出的答案
+                            derived = str(sol_data.get("derived_answer", "")).strip() or item.get("_derived_ans", "").strip()
+                            if not derived or derived == "（未順利推導出唯一正確選項）":
+                                m_find = re.search(r'\*\*綜上所述[，,]\s*(?:本題)?(?:正確答案|正確選項|本題正確選項|選填題各畫卡格答案)?(?:為)?[：:\s]*\**\s*([^\n\*]+?)\**(?:\(|$|\n)', sol_data.get("detailed_solution", ""))
+                                if m_find:
+                                    raw_cand = m_find.group(1).strip()
+                                    pure_keys = re.findall(r'[A-Ga-g1-9]', raw_cand)
+                                    if pure_keys and q_data.get("question_type") in ["單選題", "多選題"]:
+                                        derived = "".join(pure_keys) if q_data.get("question_type") == "多選題" else pure_keys[0]
+                                    else:
+                                        derived = raw_cand.strip("()$* ")
 
-                            # 判定是否存在衝突
-                            has_conflict = item.get("_discrepancy_detected", False)
-                            q_data["has_answer_discrepancy"] = has_conflict
-                            if has_conflict:
-                                q_data["discrepancy_reason"] = f"學術嚴謹推導答案為【{q_data['derived_answer']}】，但官方原始紀錄為【{q_data['official_answer']}】（疑為答案卷錯位、印刷瑕疵或版本混淆）。"
+                            q_data["derived_answer"] = clean_ocr_answer_format(derived) if derived else ""
+
+                            # 🚨 2. 若本題無官方答案，has_official_answer 強制設為 false，並將 answer 欄位填入推導答案！
+                            has_off = q_data.get('has_official_answer', False) and bool(str(q_data.get('answer', '')).strip())
+                            if not has_off:
+                                q_data['has_official_answer'] = False
+                                q_data['official_answer'] = ""
+                                q_data['answer'] = q_data['derived_answer'] or "證明題" if "證" in q_data.get("question_text", "") else q_data.get("answer", "")
+                                q_data['has_answer_discrepancy'] = False
+                                q_data['discrepancy_reason'] = ""
+                            else:
+                                if not q_data.get("official_answer"):
+                                    q_data["official_answer"] = str(q_data.get('answer', '')).strip()
+                                has_conflict = item.get("_discrepancy_detected", False)
+                                q_data["has_answer_discrepancy"] = has_conflict
+                                if has_conflict:
+                                    q_data["discrepancy_reason"] = f"學術嚴謹推導答案為【{q_data['derived_answer']}】，但官方原始紀錄為【{q_data['official_answer']}】（疑為答案卷錯位、印刷瑕疵或版本混淆）。"
+                                else:
+                                    q_data["discrepancy_reason"] = ""
 
                             # 成功通過，加上客觀結論句（絕不精神分裂硬凹！）
                             effective_ans = q_data['derived_answer'] if has_conflict else q_data['official_answer']

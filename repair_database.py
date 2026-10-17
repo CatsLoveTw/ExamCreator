@@ -294,12 +294,27 @@ def clean_latex_corruptions(text: str) -> str:
     text = re.sub(r'\$\s*\*\*([^\$]+?)\s*\$', r'**$\1$**', text)
     text = re.sub(r'\$\s*([a-zA-Z0-9_\-]+)\s*\$', r'$\1$', text)
     
-    # 救回常見被損毀的符號
-    text = re.sub(r'\\?fty\b', r'\\infty', text)
+    # 🚨 1. 終極拯救被無限繁殖的 \in\in\in...\infty 災難
+    text = re.sub(r'(?:\\in\s*){2,}\\infty', r'\\infty', text)
+    text = re.sub(r'(?:\\in\s*)+\\infty', r'\\infty', text)
+    text = re.sub(r'(?<![a-zA-Z\\])(?<!\\in)(?<!in)\\?fty\b', r'\\infty', text)
+
+    # 🚨 2. 救回被吃掉反斜線的 ightarrow 與 ight/eft
+    text = re.sub(r'(?<!\\)\bightarrow\b', r'\\rightarrow', text)
     text = re.sub(r'(?<!\\)\bimplies\b', r'\\implies', text)
     text = re.sub(r'(?<!\\)\biff\b', r'\\iff', text)
     text = re.sub(r'\\?bsim\b', r'\\approx', text)
-    
+    text = re.sub(r'(?<=\\left[\(\[\{])(.*?)(?<!\\)ight([\)\]\}])', r'\1\\right\2', text)
+    text = re.sub(r'(?<!\\)ight(?=[\)\]\}|\.])', r'\\right', text)
+    text = re.sub(r'(?<!\\)eft(?=[\(\[\{])', r'\\left', text)
+
+    # 🚨 3. 救回矩陣非法 \break 換行與符號錯位
+    text = re.sub(r'\\break\b', r'\\\\', text)
+    text = text.replace(r'\blacksquare', r'\in')
+    text = re.sub(r'\\bgroup\s*(?:\\text\{\}|\s*\\quad\{\}|\{\})', '', text)
+    text = re.sub(r'\\([PQR])\b', r'\1', text) # 消除將點 P,Q,R 誤寫為段落符號 \P, \Q, \R
+    text = re.sub(r'\\z_([1-9])', r'z_\1', text)
+
     # 救回 \log 變異字元
     text = re.sub(r'\\bar\{log\}', r'\\log', text)
     text = re.sub(r'(?<!\\)\blog\b', r'\\log', text)
@@ -309,6 +324,13 @@ def clean_latex_corruptions(text: str) -> str:
     text = text.replace(r"\r\right", r"\right").replace(r"\r\left", r"\left").replace(r"\r", "")
     text = re.sub(r'[\x0c]rac(?![a-zA-Z])', r'\\frac', text)
     text = re.sub(r'(?<=\$)rac(?=\{)', r'\\frac', text)
+
+    # 🚨 4. 清除 $$ ... $$ 內部夾雜多餘 $ 造成的 KaTeX 渲染崩潰
+    def clean_nested_dollars(m):
+        inner = m.group(1)
+        cleaned_inner = inner.replace('$', '')
+        return f"$${cleaned_inner}$$"
+    text = re.sub(r'\$\$(.*?)\$\$', clean_nested_dollars, text, flags=re.DOTALL)
     
     # 🚨 自動修復裸露未加 $ 的公式（如 \vec{V}、\frac{...}、等號方程式）
     # 🚨 1. 自動包裹所有未在 $ 內的裸露 LaTeX (如 \vec{v}_0, -2\vec{v}_0, \frac{...}{...}, m_0)
@@ -669,14 +691,94 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
             stats["ghosts"] += 1
             continue
             
-        # 🚨 2. 剛性答案格式清洗：只保留純代號（例如 "(D) 丙生、丁生" -> "D"）
+        # 🚨 2. 剛性答案格式清洗與【空白答案自動救回器】
+        det_sol = str(q.get("detailed_solution", ""))
+        
+        # 情況 A：若 answer 為空，從 detailed_solution 末尾或總結句中自動提取正解
+        if not q.get("answer"):
+            m_sol_ans = re.search(r'\*\*綜上所述[，,]\s*(?:本題)?(?:正確答案|正確選項|本題正確選項|選填題各畫卡格答案)?(?:為)?[：:\s]*\**\s*([^\n\*]+?)\**(?:\(|$|\n)', det_sol)
+            if m_sol_ans:
+                candidate = m_sol_ans.group(1).strip()
+                # 清理 (1)(4) -> 1,4 或 14
+                extracted_keys = re.findall(r'[A-Ga-g1-9]', candidate)
+                if extracted_keys:
+                    q["answer"] = "".join(extracted_keys) if q.get("question_type") == "多選題" else extracted_keys[0]
+                elif candidate in ["證明題", "見評分", "無答案（全體給分）"]:
+                    q["answer"] = candidate
+                else:
+                    q["answer"] = candidate.strip("()")
+
+        # 情況 B：修正「選出錯誤選項」導致的 1234 假衝突（如 100 指考數甲 Q1）
+        q_text = str(q.get("question_text", ""))
+        is_asking_false = any(k in q_text for k in ["哪一個選項是錯誤", "何者錯誤", "選出錯誤", "何者不正確"])
+        if is_asking_false and q.get("has_answer_discrepancy"):
+            # 若為選錯誤題型，且官方答案為單一數字，清除偽衝突
+            if len(str(q.get("official_answer", ""))) == 1:
+                q["answer"] = q["official_answer"]
+                q["derived_answer"] = q["official_answer"]
+                q["has_answer_discrepancy"] = False
+                q["discrepancy_reason"] = ""
+                # 清除詳解尾部錯誤的假仲裁總結
+                if "**綜上所述" in q["detailed_solution"]:
+                    base_part = q["detailed_solution"].split("**綜上所述")[0].strip()
+                    q["detailed_solution"] = f"{base_part}\n\n**綜上所述，本題正確選項為：({q['answer']})**"
+
+        # 🚨 2. 剛性答案格式清洗、空白答案自癒與 has_official_answer 精確校正
+        det_sol = str(q.get("detailed_solution", ""))
+        cur_ans = str(q.get("answer", "")).strip()
+
+        # A. 若 answer 為空，啟動名師詳解逆向萃取器，100% 救回真實答案
+        if not cur_ans:
+            m_ans = re.search(r'\*\*綜上所述[，,]\s*(?:本題)?(?:正確答案|正確選項|本題正確選項|選填題各畫卡格答案)?(?:為)?[：:\s]*\**\s*([^\n\*]+?)\**(?:\(|$|\n)', det_sol)
+            if m_ans:
+                cand = m_ans.group(1).strip()
+                pure_keys = re.findall(r'[A-Ga-g1-9]', cand)
+                if pure_keys and q.get("question_type") in ["單選題", "多選題"]:
+                    cur_ans = "".join(pure_keys) if q.get("question_type") == "多選題" else pure_keys[0]
+                elif cand in ["證明題", "見評分", "無答案（全體給分）"]:
+                    cur_ans = cand
+                else:
+                    cur_ans = cand.strip("()$* ")
+            if not cur_ans and q.get("derived_answer"):
+                cur_ans = str(q["derived_answer"]).strip()
+            
+            q["answer"] = cur_ans
+            # 既然原本沒有答案，has_official_answer 必須設為 False，且無衝突
+            q["has_official_answer"] = False
+            q["official_answer"] = ""
+            q["derived_answer"] = cur_ans
+            q["has_answer_discrepancy"] = False
+            q["discrepancy_reason"] = ""
+
+        # B. 若官方答案確實存在且有效
+        elif q.get("has_official_answer") is not False:
+            if not q.get("official_answer"):
+                q["official_answer"] = cur_ans
+            if not q.get("derived_answer"):
+                q["derived_answer"] = cur_ans
+
+        # C. 修正「選出錯誤選項」導致的 1234 假衝突（如 100 指考數甲 Q1）
+        q_text = str(q.get("question_text", ""))
+        is_asking_false = any(k in q_text for k in ["哪一個選項是錯誤", "何者錯誤", "選出錯誤", "何者不正確"])
+        if is_asking_false and q.get("has_answer_discrepancy"):
+            off_a = str(q.get("official_answer", "")).strip()
+            if len(off_a) == 1:
+                q["answer"] = off_a
+                q["derived_answer"] = off_a
+                q["has_answer_discrepancy"] = False
+                q["discrepancy_reason"] = ""
+                if "**綜上所述" in q["detailed_solution"]:
+                    base_part = q["detailed_solution"].split("**綜上所述")[0].strip()
+                    q["detailed_solution"] = f"{base_part}\n\n**綜上所述，本題正確選項為：({off_a})**"
+
+        # D. 選項字母代號標準化
         for ans_key in ["answer", "official_answer"]:
             if ans_key in q and q[ans_key]:
                 raw_ans = str(q[ans_key]).strip()
-                # 提取開頭或括號內的純選項英數字 (A-G 或 1-9)
-                m_opt = re.search(r'[（\(]?([A-Ga-g1-9]+)[）\)]?', raw_ans)
-                if m_opt:
-                    q[ans_key] = m_opt.group(1).upper()
+                if raw_ans not in ["證明題", "無答案（全體給分）"]:
+                    m_opt = re.search(r'^[（\(]?([A-Ga-g1-9]+)[）\)]?$', raw_ans)
+                    if m_opt and q.get("question_type") in ["單選題", "多選題"]:
+                        q[ans_key] = m_opt.group(1).upper()
 
         # 🚨 3. 單選題防多選幻覺修復：若單選題被塞入多個字母，強制重設為官方答案
         q_type = str(q.get("question_type", "")).strip()
