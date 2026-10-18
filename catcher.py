@@ -7569,7 +7569,9 @@ if __name__ == "__main__":
                 with open(target_db, "r", encoding="utf-8") as jf:
                     db_items = json.load(jf)
                     min_q = 8 if any(k in clean_s for k in ["數", "math"]) else 15
-                    return len(db_items) >= min_q
+                    # 🚨 剛性校驗：題數達標 + 每一題都有實質詳解，才視為已完工！
+                    has_real_sols = all(len(str(q.get("detailed_solution", "")).strip()) >= 20 for q in db_items)
+                    return len(db_items) >= min_q and has_real_sols
             except Exception: pass
         return False
 
@@ -7618,7 +7620,8 @@ if __name__ == "__main__":
             exam_tasks.append(pending_officials[o_idx])
             o_idx += 1
 
-    logging.info(f"⚖️ [3:1 繼承佇列生成完畢] 佇列前 4 卷順序：{[t['exam_type'] + '-' + t['subject'] for t in exam_tasks[:4]]}")
+    preview_plan = [f"{i+1}.[{t['exam_type']}]{t['year']}{t['mock_tag']}_{t['subject']}" for i, t in enumerate(exam_tasks[:8])]
+    logging.info(f"⚖️ [3:1 繼承佇列排程確認] 前 8 卷執行計劃：\n  " + "\n  ".join(preview_plan))
 
     # 🚨 核心優化：啟動時極速預掃描「現存已完工的資料庫」，讓 Web 儀表板一開機就能秒級呈現真實全庫進度！
     pre_completed_count = 0
