@@ -699,6 +699,11 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
                 protected_official_count += 1
                 continue  # 🛡️ 官方真題享有最高級別豁免，絕對安全！
 
+            # 🚨 自動攔截清理：模考檔名若夾帶「_理組_」或「_高三_」舊版命名污染，強制判定為銷毀重跑！
+            if is_mock_or_school and any(bad in clean_f for bad in ["_理組_", "_文組_", "_高三_", "_高二_"]):
+                should_purge = True
+                purge_reason = "含有已淘汰之『理組/文組/高三』污染標籤，強制清理重跑"
+
             # 🚨 2. 檢測模擬考是否為「空殼題庫（無詳解）」或「扁平化丟失出版社標籤的污染檔案」
             should_purge = False
             purge_reason = ""
@@ -1324,5 +1329,45 @@ def run_database_repair_suite():
     print(f"🎉 處理完畢！共智慧合併 {total_merged_papers} 份大考題庫，斬除 {total_ghosts_purged} 筆多餘幽靈題。")
     print("=" * 75)
 
+def manual_purge_by_keyword(keyword: str):
+    """手動透過指令列或關鍵字，強制銷毀所有符合的題庫檔案與圖片目錄"""
+    import shutil
+    print(f"🗑️ [手動銷毀] 正在搜尋並銷毀包含關鍵字『{keyword}』的所有檔案與圖檔目錄...")
+    purged_cnt = 0
+    clean_kw = keyword.replace(" ", "")
+
+    for root, dirs, files in os.walk(DATABASE_DIR):
+        for f in files:
+            if clean_kw in f.replace(" ", "") and f.endswith((".json", ".txt")):
+                fp = os.path.join(root, f)
+                try:
+                    os.remove(fp)
+                    register_cloud_purge(fp)
+                    print(f"  -> 已刪除檔案: {f}")
+                    purged_cnt += 1
+                except Exception as e:
+                    print(f"  -> 無法刪除檔案 {f}: {e}")
+
+        for d in list(dirs):
+            if clean_kw in d.replace(" ", ""):
+                dp = os.path.join(root, d)
+                try:
+                    shutil.rmtree(dp, ignore_errors=True)
+                    register_cloud_purge(dp)
+                    print(f"  -> 🖼️ 已刪除圖片目錄: {d}")
+                    purged_cnt += 1
+                except Exception as e:
+                    print(f"  -> 無法刪除目錄 {d}: {e}")
+
+    print(f"✅ 銷毀完畢！共清理 {purged_cnt} 個項目，並已同步寫入 pending_cloud_purges.txt 登記雲端銷毀！")
+
 if __name__ == "__main__":
-    run_database_repair_suite()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--purge":
+        target_kw = sys.argv[2] if len(sys.argv) > 2 else ""
+        if target_kw:
+            manual_purge_by_keyword(target_kw)
+        else:
+            print("❌ 請指定要銷毀的關鍵字，例如: python repair_database.py --purge 107學年度_指考模擬_理組")
+    else:
+        run_database_repair_suite()

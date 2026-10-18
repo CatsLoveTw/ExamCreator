@@ -1147,8 +1147,8 @@ class CorrectedSource(BaseModel):
 class MockQuestionExplanation(BaseModel):
     question_number: str = Field(description="題號，例如 '1', '2', '10', '13', '14', '非選一'")
     answer: str = Field(description="本題在詳解本中標註的標準答案（如 '(4)', '7', 'x+4y+6=0', '4/3百萬元'）")
-    source_curriculum: str = Field(default="", description="詳解中印出的『出處』，如 '第二冊〈排列組合與機率〉'、'選修數學乙(上)〈微分〉'")
-    exam_target: str = Field(default="", description="詳解中印出的『目標』，如 '集合的取捨原理之應用'、'利用導函數求函數極大值'")
+    source_curriculum: str = Field(default="", description="詳解中明確印出的『出處』。🚨若原卷詳解完全未列出出處，請務必保持為空字串 ''，絕對嚴禁自行猜測捏造！")
+    exam_target: str = Field(default="", description="詳解中明確印出的『目標』。🚨若原卷詳解完全未列出目標，請務必保持為空字串 ''，絕對嚴禁自行猜測捏造！")
     explanation_text: str = Field(description="詳解中的完整推導文字、運算步驟與 LaTeX 數學/化學式。請原汁原味忠實呈現，涉及公式必須嚴格包裹在 $...$ 或 $$...$$ 中。")
     options_analysis: List[OptionAnalysisItem] = Field(default=[], description="若為選擇題且詳解有逐一分析 (1) ╳ ... (2) ○ ... 或 (A)~(E)，請獨立拆解為各選項對應條目；若為非選擇題或選填題則為空列表 []。")
     scoring_rubric: str = Field(default="", description="詳解中標註的『◎評分原則』或步驟給分說明（如：列式得 1 分、求出數值得 2 分），若無則留空。")
@@ -1324,6 +1324,56 @@ class FreeTierKey:
         else:
             self.model_rpd_exhausted["global"] = reset_time
             
+
+def purge_single_exam_suite(identifier: str) -> tuple[list, list]:
+    """
+    🚨 試卷全能銷毀手術刀：
+    精確刪除指定試卷的資料庫 JSON、暫存檔、images 圖片目錄，並自動登記至雲端銷毀清單！
+    """
+    purged_files = []
+    purged_dirs = []
+    if not identifier: return purged_files, purged_dirs
+
+    clean_id = re.sub(r'[\s\[\]\(\)]', '', identifier)
+    out_dir = "./exam_database_output"
+    if not os.path.exists(out_dir): return purged_files, purged_dirs
+
+    import shutil
+    for root, dirs, files in os.walk(out_dir):
+        # 1. 銷毀相關 JSON 檔案 (database, partial, raw, validator_log)
+        for f in files:
+            if (identifier in f or clean_id in f.replace(" ", "")) and f.endswith((".json", ".txt")):
+                full_p = os.path.join(root, f)
+                try:
+                    os.remove(full_p)
+                    purged_files.append(full_p)
+                    rel_p = os.path.relpath(full_p, out_dir).replace("\\", "/")
+                    with open("pending_cloud_purges.txt", "a", encoding="utf-8") as pf:
+                        pf.write(f"gdrive:exam_database_output/{rel_p}\n")
+                except Exception: pass
+
+        # 2. 連坐徹底銷毀對應的 images 圖檔目錄
+        for d in list(dirs):
+            if (identifier in d or clean_id in d.replace(" ", "")):
+                full_d = os.path.join(root, d)
+                try:
+                    shutil.rmtree(full_d, ignore_errors=True)
+                    purged_dirs.append(full_d)
+                    rel_d = os.path.relpath(full_d, out_dir).replace("\\", "/")
+                    with open("pending_cloud_purges.txt", "a", encoding="utf-8") as pf:
+                        pf.write(f"gdrive:exam_database_output/{rel_d}\n")
+                except Exception: pass
+
+    # 3. 即時重置儀表板考卷進度
+    with GLOBAL_METRICS.lock:
+        for k in list(GLOBAL_METRICS.exam_progress.keys()):
+            if identifier in k or clean_id in k.replace(" ", ""):
+                del GLOBAL_METRICS.exam_progress[k]
+                GLOBAL_METRICS.completed_papers = max(0, GLOBAL_METRICS.completed_papers - 1)
+
+    GLOBAL_METRICS.add_log(f"🗑️ 已徹底銷毀試卷 [{identifier}] 之所有資料庫檔案與圖片目錄！")
+    logging.info(f"🗑️ [手動銷毀完成] 已清除 {len(purged_files)} 個檔案、{len(purged_dirs)} 個目錄，並已登記雲端抹除。")
+    return purged_files, purged_dirs
 
 class LiveDashboardMetrics:
     def __init__(self):
@@ -1574,6 +1624,27 @@ def start_dashboard_web_server(port=8080, manager=None):
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "success", "message": "已觸發停機，即將退出進入 GHA 上傳"}).encode("utf-8"))
 
+            elif self.path == "/api/purge_paper":
+                try:
+                    content_len = int(self.headers.get('Content-Length', 0))
+                    body = self.rfile.read(content_len).decode('utf-8')
+                    req_data = json.loads(body)
+                    paper_key = req_data.get("paper_name", "").strip()
+
+                    purged_files, purged_dirs = purge_single_exam_suite(paper_key)
+                    self.send_response(200)
+                    self.send_header("Content-type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "status": "success",
+                        "message": f"已成功銷毀 {len(purged_files)} 個資料庫檔案與 {len(purged_dirs)} 個圖片目錄，並已登記雲端抹除！"
+                    }, ensure_ascii=False).encode("utf-8"))
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header("Content-type", "application/json; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
+
         def do_GET(self):
             if self.path == "/api/data":
                 self.send_response(200)
@@ -1770,7 +1841,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             <h2>📑 考卷進度與完工追蹤 (Exam Progress)</h2>
                             <div class="table-container">
                                 <table>
-                                    <thead><tr><th>考卷名稱</th><th>總題數</th><th>已完成</th><th>進度條</th><th>狀態</th></tr></thead>
+                                    <thead><tr><th>考卷名稱</th><th>總題數</th><th>已完成</th><th>進度條</th><th>狀態</th><th>手動管理</th></tr></thead>
                                     <tbody id="exam-rows"></tbody>
                                 </table>
                             </div>
@@ -1840,6 +1911,23 @@ def start_dashboard_web_server(port=8080, manager=None):
                         document.getElementById('start-date').value = pastWeek.toISOString().split('T')[0];
                         document.getElementById('end-date').value = today.toISOString().split('T')[0];
 
+                        async function purgeExamRecord(examName) {
+                            if (confirm(`⚠️ 確定要徹底銷毀【${examName}】嗎？\n\n這將會：\n1. 刪除該考卷的所有 JSON 資料庫檔案與 Partial 進度\n2. 徹底銷毀其 images 圖片目錄與 20 多張裁切圖\n3. 登記至雲端清除清單（稍後上傳時由 GDrive 同步抹除）\n4. 讓系統下一次能夠以全新的「官方詳解快車道」乾淨重跑！`)) {
+                                try {
+                                    const res = await fetch('/api/purge_paper', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ paper_name: examName })
+                                    });
+                                    const ret = await res.json();
+                                    alert(ret.message);
+                                    fetchData();
+                                } catch (e) {
+                                    alert('⚠️ 銷毀失敗：' + e);
+                                }
+                            }
+                        }
+                        
                         // 優雅停機請求觸發器
                         async function triggerGracefulStop() {
                             if (confirm('🛑 確定要提前優雅結束當前作業嗎？\\n系統將立即停止派發新題目、保存當前已解出的所有題目，並以 Exit 0 退出，自動進入 GitHub Actions 後續的 Google Drive 上傳步驟！')) {
@@ -2054,7 +2142,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             }
                             document.getElementById('key-rows').innerHTML = kHTML || '<tr><td colspan="5">無資料</td></tr>';
 
-                            // 渲染 考卷進度
+                            // 渲染 考卷進度（帶有一鍵銷毀重跑功能）
                             let eHTML = '';
                             for (const [exam, s] of Object.entries(aggExams)) {
                                 const total = s.total || 1;
@@ -2067,9 +2155,12 @@ def start_dashboard_web_server(port=8080, manager=None):
                                     <td>${comp}</td>
                                     <td><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct}%; background:${statusColor}"></div></div></td>
                                     <td style="color:${statusColor}">${s.status}</td>
+                                    <td>
+                                        <button onclick="purgeExamRecord('${exam}')" style="background:#ef4444; color:white; border:none; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:0.75rem; font-weight:bold;">🗑️ 銷毀重跑</button>
+                                    </td>
                                 </tr>`;
                             }
-                            document.getElementById('exam-rows').innerHTML = eHTML || '<tr><td colspan="5">此紀錄無考卷資訊</td></tr>';
+                            document.getElementById('exam-rows').innerHTML = eHTML || '<tr><td colspan="6">此紀錄無考卷資訊</td></tr>';
                         }
 
                         setInterval(fetchData, 3000);
@@ -4633,18 +4724,24 @@ class ExamParser:
         mock_sol_page_indices = []
         mock_sol_pdf_path = None
 
-        # 🚨 [頂層模考詳解檔定位] 不論是否有快取，保證 100% 精準定位詳解來源，啟動模考快車道！
+        # 🚨 [頂層模考詳解檔定位] 全面掃描：即使未特別標註二合一，只要單一 PDF 內含有詳解標題，自動啟動二合一快車道！
         if is_mock_paper:
-            if is_combined_pdf and q_pdf and os.path.exists(q_pdf):
+            # 優先檢查 q_pdf 是否本身為二合一試卷（包含第 11~24 頁之詳解頁面）
+            check_combined_candidate = q_pdf if (is_combined_pdf or not a_pdf or q_pdf == a_pdf) else None
+            if check_combined_candidate and os.path.exists(check_combined_candidate):
                 try:
-                    temp_doc = fitz.open(q_pdf)
-                    for p_i in range(len(temp_doc)):
-                        p_t = temp_doc[p_i].get_text("text")
-                        if any(k in p_t for k in ["[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", "試題詳解", "詳解本", "答案與解析", "答案與詳解"]) or ("出處：" in p_t and "解析：" in p_t):
-                            mock_sol_page_indices = list(range(p_i, len(temp_doc)))
-                            mock_sol_pdf_path = q_pdf
-                            logging.info(f"📑 [模考詳解鎖定] 二合一試卷：第 {p_i+1}~{len(temp_doc)} 頁為官方詳解本！")
-                            break
+                    temp_doc = fitz.open(check_combined_candidate)
+                    # 只有總頁數大於 6 頁才可能為題解合卷
+                    if len(temp_doc) >= 6:
+                        for p_i in range(1, len(temp_doc)): # 排除第 1 頁封面
+                            p_t = temp_doc[p_i].get_text("text")
+                            if any(k in p_t for k in ["[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", "試題詳解", "詳解本", "答案與解析", "答案與詳解", "選擇題答案確定稿"]) or ("出處：" in p_t and "解析：" in p_t) or ("【出處】" in p_t and "【解析】" in p_t):
+                                mock_sol_page_indices = list(range(p_i, len(temp_doc)))
+                                mock_sol_pdf_path = check_combined_candidate
+                                is_combined_pdf = True
+                                a_pdf = check_combined_candidate # 強制回填
+                                logging.info(f"📑 [模考題解合卷自動識別] 成功鎖定！第 {p_i+1}~{len(temp_doc)} 頁為官方真實詳解本！")
+                                break
                     temp_doc.close()
                 except Exception as e:
                     logging.warning(f"掃描二合一詳解頁失敗: {e}")
@@ -5952,17 +6049,27 @@ class ExamParser:
                             break
                             
                 if matched_exp:
-                    # 1. 題意分析：注入出處與測驗目標
+                    # 1. 題意分析：依原卷真實內容動態判定，絕不硬湊虛構標籤
                     src_curriculum = matched_exp.get("source_curriculum", "").strip()
                     ex_target = matched_exp.get("exam_target", "").strip()
+                    
+                    # 過濾常見佔位雜訊
+                    if any(bad in src_curriculum.lower() for bad in ["無", "未知", "未提供", "none", "null"]): src_curriculum = ""
+                    if any(bad in ex_target.lower() for bad in ["無", "未知", "未提供", "none", "null"]): ex_target = ""
+
                     analysis_parts = []
-                    if src_curriculum: analysis_parts.append(f"**【試題出處】**：{src_curriculum}")
-                    if ex_target: analysis_parts.append(f"**【測驗目標】**：{ex_target}")
-                    q["question_analysis"] = "\n".join(analysis_parts) if analysis_parts else "本題考查核心學科概念之綜合應用。"
+                    if src_curriculum: analysis_parts.append(f"📚 **【官方試題出處】**：{src_curriculum}")
+                    if ex_target: analysis_parts.append(f"🎯 **【官方測驗目標】**：{ex_target}")
 
-                    # 2. 解題思路
-                    q["solving_strategy"] = f"本題考點為 **{ex_target or src_curriculum or '學科核心觀念'}**，解題核心在於依據題目給定條件進行正規推導。"
+                    core_focus = ex_target or src_curriculum
+                    if core_focus:
+                        analysis_parts.append(f"💡 **【核心題意引導】**：本題重點評量 **{core_focus}**，解題關鍵在於提取題幹條件進行因果推演。")
+                        q["solving_strategy"] = f"💡 **【官方思維拆解】**：\n本題聚焦於 **{core_focus}**。依據官方詳解指引，解題突破口在於辨識核心條件，並依循學科定理完成推導。"
+                    else:
+                        analysis_parts.append("💡 **【核心題意引導】**：本題考查核心學科概念與題幹情境之綜合理解，解題關鍵在於精準掌握題目已知條件。")
+                        q["solving_strategy"] = "💡 **【解題思維拆解】**：\n依據官方詳解指引，解題突破口在於提取題目的關鍵條件，並按部就班依循學科定理完成推導。"
 
+                    q["question_analysis"] = "\n".join(analysis_parts)
                     # 3. 完整解法：組裝官方解析與詳解附圖
                     sol_body = matched_exp.get("explanation_text", "").strip()
                     sol_imgs = matched_exp.get("solution_image_paths", [])
@@ -7329,9 +7436,8 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     
                     # 🚨 若完全無吻合科目，設為 None，由 AI 依據原卷自行嚴謹推導，絕不抓其他科目的解答表！
                     final_a_file = matched_global
-                elif key[1] == "SCHOOL":
-                    # 學校段考保底機制：答案常直接附在題目 PDF 的最後一頁（如北一女試題）
-                    # 將題目 PDF 本身代入解答欄位，由解答 OCR 自動嘗試檢索尾頁解答表
+                elif key[1] in ["SCHOOL", "MOCK", "MOCK_GSAT", "MOCK_AST"]:
+                    # 🚨 模考與段考全自動合卷保底：若無獨立解答檔，通常詳解與答案直接附在題本後半部（24頁二合一合卷）
                     final_a_file = os.path.join(root, final_q_file)
                 else:
                     final_a_file = None
