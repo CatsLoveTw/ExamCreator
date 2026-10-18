@@ -7819,36 +7819,36 @@ if __name__ == "__main__":
         return False
 
     # 僅針對「尚未完成」的考卷進行精確 3:1 調度
+    # 🚨 精確分類：分流「已完工試卷」與「待處理試卷」，確保儀表板能完整統計全庫總進度
     pending_mocks = []
     pending_officials = []
+    completed_tasks = []
+
     for t in raw_exam_tasks:
-        if not is_task_already_completed(t):
+        if is_task_already_completed(t):
+            completed_tasks.append(t)
+        else:
             if t["exam_type"] in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
                 pending_mocks.append(t)
             else:
                 pending_officials.append(t)
 
-    logging.info(f"🎯 [真·待處理清單] 剩餘未完工：模擬考 {len(pending_mocks)} 份，學測/分科/段考 {len(pending_officials)} 份。")
+    logging.info(f"🎯 [真·待處理清單] 歷史已完工：{len(completed_tasks)} 份 | 剩餘未完工：模擬考 {len(pending_mocks)} 份，學測/分科/段考 {len(pending_officials)} 份。")
 
     exam_tasks = []
     m_idx, o_idx = 0, 0
     total_m, total_o = len(pending_mocks), len(pending_officials)
 
     # 🚀 第一步：根據上次中斷殘留的 streak 進行「自適應平滑補齊」
-    # 若上次已完成 1 張模考 (streak=1)，這次先補跑 2 張模考，隨後立刻排 1 張正式考
-    # 若上次已完成 2 張模考 (streak=2)，這次先補跑 1 張模考，隨後立刻排 1 張正式考
-    # 若上次已完成 3 張模考 (streak>=3)，這次起手第一張立刻排 1 張正式考！
     initial_mocks_needed = max(0, 3 - mock_streak) if mock_streak > 0 else 3
     if mock_streak >= 3:
-        initial_mocks_needed = 0  # 模考已滿 3 張，該輪到正式考了
+        initial_mocks_needed = 0
 
-    # 先補齊這輪缺額的模考
     for _ in range(initial_mocks_needed):
         if m_idx < total_m:
             exam_tasks.append(pending_mocks[m_idx])
             m_idx += 1
 
-    # 緊接著排入對應的 1 張正式考
     if (mock_streak > 0 or initial_mocks_needed > 0) and o_idx < total_o:
         exam_tasks.append(pending_officials[o_idx])
         o_idx += 1
@@ -7866,9 +7866,9 @@ if __name__ == "__main__":
     preview_plan = [f"{i+1}.[{t['exam_type']}]{t['year']}{t['mock_tag']}_{t['subject']}" for i, t in enumerate(exam_tasks[:8])]
     logging.info(f"⚖️ [3:1 繼承佇列排程確認] 前 8 卷執行計劃：\n  " + "\n  ".join(preview_plan))
 
-    # 🚨 核心優化：啟動時極速預掃描「現存已完工的資料庫」，讓 Web 儀表板一開機就能秒級呈現真實全庫進度！
+    # 🚨 核心優化：以【全庫所有試卷 raw_exam_tasks】為母體進行掃描，秒級呈現真實全庫 160+ 份完工進度！
     pre_completed_count = 0
-    for task in exam_tasks:
+    for task in raw_exam_tasks:
         s_name = task["subject"]
         y_name = task["year"]
         e_type = task["exam_type"]
