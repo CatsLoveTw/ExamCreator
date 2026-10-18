@@ -302,6 +302,12 @@ def find_actual_pdf(db_path: str, candidate_pdf_path: str = "") -> str:
                         if any(bad in f for bad in ["解答", "答案", "評分", "原則", "說明資料", "更正"]):
                             continue
                         if year_str and year_str in f:
+                            # 🚨 嚴格隔離國文與國寫，防止國文比對到只有 2 題的國寫 PDF！
+                            if subj_kw == "國文" and any(k in f for k in ["國寫", "寫作"]):
+                                continue
+                            if subj_kw == "國寫" and not any(k in f for k in ["國寫", "寫作"]):
+                                continue
+
                             if subj_kw and (subj_kw in f or subj_kw in root):
                                 if any(good in f for good in ["題目", "試題", "試卷", "考科"]):
                                     return os.path.join(root, f)
@@ -703,6 +709,19 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
             if is_mock_or_school and any(bad in clean_f for bad in ["_理組_", "_文組_", "_高三_", "_高二_"]):
                 should_purge = True
                 purge_reason = "含有已淘汰之『理組/文組/高三』污染標籤，強制清理重跑"
+
+            # 🚨 自動攔截清理：模考若由大模型自由推導（含『同學們，我們來深入解析』），判定為未載入詳解本之舊版本，強制銷毀重跑！
+            if is_mock_or_school and not should_purge:
+                try:
+                    with open(full_p, "r", encoding="utf-8") as jf:
+                        d_check = json.load(jf)
+                    if isinstance(d_check, list) and len(d_check) > 0:
+                        first_sol = str(d_check[0].get("detailed_solution", ""))
+                        if "同學們，我們來深入解析" in first_sol or "同學們，我們來" in first_sol:
+                            should_purge = True
+                            purge_reason = "模考誤用 AI 自由發揮模板，未載入官方真實詳解本，強制清理重跑！"
+                except Exception:
+                    pass
 
             # 🚨 2. 檢測模擬考是否為「空殼題庫（無詳解）」或「扁平化丟失出版社標籤的污染檔案」
             should_purge = False
@@ -1285,13 +1304,20 @@ def run_database_repair_suite():
         merged_list.sort(key=safe_sort)
 
         current_count = len(merged_list)
-        r_min, r_max = EXAM_REASONABLE_RANGES.get(clean_sub, (12, 50))
         
-        # 🚨 剛性題數門檻：若有實體 PDF，必須達到實體題數的 90% 以上（且至少達到 r_min），杜絕 20 題只做 15 題就假完工！
+        # 🚨 [歷史課綱動態門檻]：106 年以前的舊學測/指考國文只有 23~26 題，107 年後國綜獨立才有 42 題！
+        if clean_sub == "國文":
+            r_min = 38 if y_val >= 107 else 20
+        elif clean_sub == "國寫":
+            r_min = 2
+        else:
+            r_min, _ = EXAM_REASONABLE_RANGES.get(clean_sub, (12, 50))
+        
+        # 🚨 剛性題數門檻：若實體掃描題數低於 r_min，以實體題數為主（容許 ±2 題浮動）；日誌顯示嚴格對齊實際檢驗值！
         if max_pdf_q > 0:
-            target_threshold = max(r_min, int(max_pdf_q * 0.9))
+            target_threshold = min(max_pdf_q, r_min) if max_pdf_q < r_min else max(r_min, int(max_pdf_q * 0.9))
             is_complete = (current_count >= target_threshold)
-            display_threshold = max_pdf_q
+            display_threshold = target_threshold
         else:
             is_complete = (current_count >= r_min)
             display_threshold = r_min

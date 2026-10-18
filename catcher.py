@@ -1927,7 +1927,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                                 }
                             }
                         }
-                        
+
                         // 優雅停機請求觸發器
                         async function triggerGracefulStop() {
                             if (confirm('🛑 確定要提前優雅結束當前作業嗎？\\n系統將立即停止派發新題目、保存當前已解出的所有題目，並以 Exit 0 退出，自動進入 GitHub Actions 後續的 Google Drive 上傳步驟！')) {
@@ -4369,16 +4369,25 @@ class ExamParser:
         validation_records = []
         val_log_lock = threading.Lock()
 
+        # 🚨 [全域最頂層宣告] 在函式第一行完成考科名稱標準化，徹底根除 free variable referenced before assignment 致命崩潰！
+        clean_subj_name = re.sub(r'(?:考科|科)$', '', str(subject).strip())
+        if clean_subj_name in ["高中數學甲", "數甲"]: clean_subj_name = "數學甲"
+        elif clean_subj_name in ["高中數學乙", "數乙"]: clean_subj_name = "數學乙"
+        elif clean_subj_name in ["高中數學A", "數A"]: clean_subj_name = "數學A"
+        elif clean_subj_name in ["高中數學B", "數B"]: clean_subj_name = "數學B"
+        elif clean_subj_name in ["國綜", "國語文"]: clean_subj_name = "國文"
+        elif clean_subj_name in ["國語文寫作", "寫作測驗"]: clean_subj_name = "國寫"
+
         safe_year = safe_filename(year)
         safe_subject = safe_filename(subject)
         paper_tag = f"[{year} {subject}]"
 
-        # 🚨 補考標籤必須在組合 paper_label 前提早宣告，徹底消除 UnboundLocalError 致命崩潰！
+        # 🚨 補考標籤提早宣告
         is_makeup = any(k in str(mock_tag) or k in str(year) for k in ["補考", "補辦", "代考"])
         makeup_tag = "_補考" if is_makeup else ""
         makeup_src = "補考_" if is_makeup else ""
 
-        # 🚨 核心時序修復：格式化考卷名稱，杜絕模考塞入假學校名、精準輸出出版社與期別！
+        # 🚨 格式化考卷名稱
         clean_tag = mock_tag.strip('_')
         if exam_type == "SCHOOL":
             sch_disp = school_name or "學校定期考"
@@ -4452,15 +4461,6 @@ class ExamParser:
             year_digits = year
 
         # 1. 決定大類資料夾名稱與學校獨立目錄（注入上下學期標籤，防止 114上 與 114下 同名覆蓋）
-        # 🚨 全面統一考科名稱（拔除「考科」、「科」等干擾字，避免前端分裂卡片）
-        clean_subj_name = re.sub(r'(?:考科|科)$', '', str(subject).strip())
-        if clean_subj_name in ["高中數學甲", "數甲"]: clean_subj_name = "數學甲"
-        elif clean_subj_name in ["高中數學乙", "數乙"]: clean_subj_name = "數學乙"
-        elif clean_subj_name in ["高中數學A", "數A"]: clean_subj_name = "數學A"
-        elif clean_subj_name in ["高中數學B", "數B"]: clean_subj_name = "數學B"
-        elif clean_subj_name in ["國綜", "國語文"]: clean_subj_name = "國文"
-        elif clean_subj_name in ["國語文寫作", "寫作測驗"]: clean_subj_name = "國寫"
-
         sem_tag = "上" if "上學期" in str(year) else ("下" if "下學期" in str(year) else "")
 
         try: y_val = int(year_digits)
