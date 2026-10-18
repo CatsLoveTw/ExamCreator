@@ -3115,6 +3115,17 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         "            break\n"
         "        except Exception:\n"
         "            pass\n\n"
+        "# 🚨 雲端環境保底防護：若無中文字體，即刻下載輕量中文字型！\n"
+        "if _loaded_font_name == 'sans-serif':\n"
+        "    import urllib.request\n"
+        "    _fallback_font = 'TaipeiSansTCBeta-Regular.ttf'\n"
+        "    if not os.path.exists(_fallback_font):\n"
+        "        try:\n"
+        "            urllib.request.urlretrieve('https://github.com/dottgonzo/taipei-sans-tc/raw/master/TaipeiSansTCBeta-Regular.ttf', _fallback_font)\n"
+        "            fm.fontManager.addfont(_fallback_font)\n"
+        "            _loaded_font_name = fm.FontProperties(fname=_fallback_font).get_name()\n"
+        "        except Exception:\n"
+        "            pass\n\n"
         "plt.rcParams['font.sans-serif'] = [_loaded_font_name, 'Noto Sans CJK TC', 'Noto Sans TC', 'Microsoft JhengHei', 'DejaVu Sans', 'sans-serif']\n"
         "plt.rcParams['axes.unicode_minus'] = False\n"
         "plt.rcParams['text.usetex'] = False\n"
@@ -3596,6 +3607,19 @@ class ExamParser:
         extracted_explanations = {}
         task_id = uuid.uuid4().hex[:6]
         
+        # 💡 [斷點續傳機制] 建立詳解本專屬的分頁快取檔
+        cache_file = os.path.join(img_dir, f"mock_sol_cache_{spec_name}.json").replace("\\", "/")
+        processed_pages = []
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+                    extracted_explanations = cache_data.get("explanations", {})
+                    processed_pages = cache_data.get("processed_pages", [])
+                logging.info(f"📂 [模考詳解快取] 成功載入已萃取的 {len(processed_pages)} 頁詳解進度，將自動跳過這些頁面！")
+            except Exception as e:
+                logging.warning(f"讀取模考詳解快取失敗: {e}")
+        
         try:
             doc = fitz.open(sol_pdf_path)
         except Exception as e:
@@ -3604,6 +3628,8 @@ class ExamParser:
 
         for p_idx in sol_page_indices:
             check_global_timeout()
+            if p_idx in processed_pages:
+                continue # 💡 跳過已成功處理過的頁面
             if p_idx >= len(doc): continue
             page = doc[p_idx]
             pix = page.get_pixmap(dpi=300)
@@ -3676,9 +3702,27 @@ class ExamParser:
                 if os.path.exists(temp_img_path):
                     try: os.remove(temp_img_path)
                     except Exception: pass
+                    
+            # 💡 [斷點續傳機制] 每一頁萃取完畢立刻寫入快取，防範 40 頁巨型 PDF 中途斷線
+            if p_idx not in processed_pages:
+                processed_pages.append(p_idx)
+                try:
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "explanations": extracted_explanations,
+                            "processed_pages": processed_pages
+                        }, f, ensure_ascii=False, indent=4)
+                except Exception:
+                    pass
 
         doc.close()
         logging.info(f"🎉 [模考詳解萃取完畢] 全卷共成功收錄 {len(extracted_explanations)} 道題目的官方完整詳解與評分量規！")
+        
+        # 完工後安全刪除快取檔
+        if os.path.exists(cache_file):
+            try: os.remove(cache_file)
+            except Exception: pass
+            
         return extracted_explanations
     
     def heal_mock_question_consistency(self, q_data: dict, explanation_data: dict) -> dict:
@@ -4666,6 +4710,18 @@ class ExamParser:
             # =========================================================
             # 【第一階段】：分頁批次掃描與附圖裁切
             # =========================================================
+            # 💡 [斷點續傳機制] 初始化題目卷的批次快取
+            stage1_cache_path = json_path.replace("_database.json", "_stage1_cache.json")
+            stage1_cache = {"processed_pages": [], "questions": []}
+            if os.path.exists(stage1_cache_path):
+                try:
+                    with open(stage1_cache_path, "r", encoding="utf-8") as f:
+                        stage1_cache = json.load(f)
+                    all_extracted_questions = stage1_cache.get("questions", [])
+                    logging.info(f"📂 [Stage 1 續傳] 載入已掃描的 {len(stage1_cache.get('processed_pages', []))} 頁題目進度！")
+                except Exception as e:
+                    logging.warning(f"讀取 Stage 1 快取失敗: {e}")
+
             pages = []
             for page_num in range(len(doc)):
                 # 1. 排除已標定的解答頁
@@ -4693,6 +4749,13 @@ class ExamParser:
 
                 check_global_timeout()
                 batch_pages = pages[b_idx : b_idx + page_batch_size]
+                
+                # 💡 [斷點續傳機制] 檢查本批次是否已經被完整掃描過
+                unprocessed_pages = [p for p in batch_pages if p not in stage1_cache.get("processed_pages", [])]
+                if not unprocessed_pages:
+                    logging.info(f"  -> ⏭️ [Stage 1 快取跳過] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁先前已成功掃描，直接跳過。")
+                    continue
+                    
                 logging.info(f"正在批次分析 [{year} {subject}] 試卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁...")
                 GLOBAL_METRICS.set_stage(f"📑 正在掃描題目卷第 {batch_pages[0]+1} ~ {batch_pages[-1]+1} 頁 (OCR 題幹與選項)")
                 
@@ -5038,45 +5101,18 @@ class ExamParser:
                                                 cropped_imgs.append(Image.open(duplicate_path))
                                             continue
                                         
-                                        x0_raw = (xmin_val / 1000.0) * page.rect.width
-                                        y0_raw = (ymin_val / 1000.0) * page.rect.height
-                                        x1_raw = (xmax_val / 1000.0) * page.rect.width
-                                        y1_raw = (ymax_val / 1000.0) * page.rect.height
-
-                                        x0 = max(page.rect.width * 0.03, min(x0_raw, page.rect.width * 0.97))
-                                        x1 = max(page.rect.width * 0.03, min(x1_raw, page.rect.width * 0.97))
-                                        y0 = max(page.rect.height * 0.065, min(y0_raw, page.rect.height * 0.935))
-                                        y1 = max(page.rect.height * 0.065, min(y1_raw, page.rect.height * 0.935))
-
-                                        width_pct = (xmax_val - xmin_val) / 10.0
-                                        height_pct = (ymax_val - ymin_val) / 10.0
-                                        
-                                        if width_pct < 2.5 or height_pct < 2.5:
-                                            continue
-                                        
-                                        x_pad = page.rect.width * 0.08
-                                        y_pad_top = page.rect.height * 0.08
-                                        y_pad_bot = page.rect.height * 0.04
-                                        
-                                        rect = fitz.Rect(x0 - x_pad, y0 - y_pad_top, x1 + x_pad, y1 + y_pad_bot)
-                                        rect = rect.intersect(page.rect)
-
+                                        # 🚨 修正：呼叫具備「防止文字邊緣切斷」智能防禦的 execute_crop！
+                                        safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
                                         try:
-                                            clip_pix = page.get_pixmap(clip=rect, dpi=300)
-                                            safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
-                                            
-                                            img_filename = f"Q{safe_q_num}_{b_idx}.png"
-                                            img_filepath = os.path.join(img_dir, img_filename)
-                                            clip_pix.save(img_filepath)
-                                            
-                                            normalized_path = img_filepath.replace("\\", "/")
-                                            q_data['image_paths'].append(normalized_path)
-                                            cropped_imgs.append(Image.open(img_filepath))
-
-                                            batch_crops_cache[p_num].append({
-                                                "bbox": bbox,
-                                                "path": normalized_path
-                                            })
+                                            new_img_paths = self.execute_crop(page, [bbox], img_dir, f"Q{safe_q_num}_{b_idx}")
+                                            for path in new_img_paths:
+                                                if path not in q_data['image_paths']:
+                                                    q_data['image_paths'].append(path)
+                                                    cropped_imgs.append(Image.open(path))
+                                                    batch_crops_cache[p_num].append({
+                                                        "bbox": bbox,
+                                                        "path": path
+                                                    })
                                         except Exception as e:
                                             logging.error(f"裁切題幹圖片失敗: {e}")
 
@@ -5108,41 +5144,19 @@ class ExamParser:
                                                     cropped_imgs.append(Image.open(duplicate_path))
                                                 continue
                                             
-                                            x0 = (xmin_val / 1000.0) * page.rect.width
-                                            y0 = (ymin_val / 1000.0) * page.rect.height
-                                            x1 = (xmax_val / 1000.0) * page.rect.width
-                                            y1 = (ymax_val / 1000.0) * page.rect.height
-
-                                            width_pct = (xmax_val - xmin_val) / 10.0
-                                            height_pct = (ymax_val - ymin_val) / 10.0
-                                            
-                                            if width_pct < 2.0 or height_pct < 2.0:
-                                                continue
-                                                
-                                            x_pad = page.rect.width * 0.07
-                                            y_pad_top = page.rect.height * 0.06
-                                            y_pad_bot = page.rect.height * 0.03
-                                            
-                                            rect = fitz.Rect(x0 - x_pad, y0 - y_pad_top, x1 + x_pad, y1 + y_pad_bot)
-                                            rect = rect.intersect(page.rect)
-
+                                            # 🚨 修正：選項附圖同步採用智能裁切
+                                            safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
+                                            opt_key = safe_filename(str(opt.get('key', 'X')).replace(" ", ""))
                                             try:
-                                                clip_pix = page.get_pixmap(clip=rect, dpi=300)
-                                                safe_q_num = safe_filename(str(q_data.get('question_number', 'X')).replace(" ", ""))
-                                                opt_key = safe_filename(str(opt.get('key', 'X')).replace(" ", ""))
-                                                
-                                                img_filename = f"Q{safe_q_num}_Opt{opt_key}_{b_idx}.png"
-                                                img_filepath = os.path.join(img_dir, img_filename)
-                                                clip_pix.save(img_filepath)
-                                                
-                                                normalized_path = img_filepath.replace("\\", "/")
-                                                opt['image_paths'].append(normalized_path)
-                                                cropped_imgs.append(Image.open(img_filepath))
-
-                                                batch_crops_cache[p_num].append({
-                                                    "bbox": bbox,
-                                                    "path": normalized_path
-                                                })
+                                                new_img_paths = self.execute_crop(page, [bbox], img_dir, f"Q{safe_q_num}_Opt{opt_key}_{b_idx}")
+                                                for path in new_img_paths:
+                                                    if path not in opt['image_paths']:
+                                                        opt['image_paths'].append(path)
+                                                        cropped_imgs.append(Image.open(path))
+                                                        batch_crops_cache[p_num].append({
+                                                            "bbox": bbox,
+                                                            "path": path
+                                                        })
                                             except Exception as e:
                                                 logging.error(f"裁切選項 {opt_key} 圖片失敗: {e}")
 
@@ -5156,6 +5170,28 @@ class ExamParser:
                     for img in batch_pil_imgs:
                         try: img.close()
                         except Exception: pass
+                        
+                # 💡 [斷點續傳機制] 在本批次成功後，立刻將進度與目前提取到的題目安全寫入快取
+                stage1_cache["processed_pages"].extend(unprocessed_pages)
+                
+                # 為了避免 Pydantic 或 PIL Image 不能被 JSON 序列化，進行深拷貝與清理
+                clean_extracted_questions = []
+                for q_item in all_extracted_questions:
+                    q_copy = dict(q_item)
+                    q_copy.pop('_cropped_pil_images', None)
+                    clean_extracted_questions.append(q_copy)
+                    
+                stage1_cache["questions"] = clean_extracted_questions
+                try:
+                    with open(stage1_cache_path, "w", encoding="utf-8") as f:
+                        json.dump(stage1_cache, f, ensure_ascii=False, indent=4)
+                except Exception as e:
+                    logging.warning(f"即時寫入 Stage 1 批次快取失敗: {e}")
+
+            # 在整個 Stage 1 迴圈順利完成後，清理暫存的 cache 檔
+            if os.path.exists(stage1_cache_path):
+                try: os.remove(stage1_cache_path)
+                except Exception: pass
 
             def filter_ghost_questions(q_list):
                 valid_q = []
@@ -7067,8 +7103,9 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     exam_type = "MOCK_GSAT" # 預設以學測模考為基準
 
             # 🚨 優先匹配出版社與品牌（避免「全國高中聯合測驗」吃掉「南一版/翰林版」）
-            publisher_match = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺)', filename_clean)
-            league_match = re.search(r'(北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|台北區|臺北區|北區|南區|高雄區)', filename_clean)
+            # 💡 修正：將搜尋目標改為 combined_path_text，確保寫在「資料夾名稱」上的標籤也能被精準捕捉！
+            publisher_match = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺)', combined_path_text)
+            league_match = re.search(r'(北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|台北區|臺北區|北區|南區|高雄區)', combined_path_text)
 
             if publisher_match:
                 org_str = publisher_match.group(1)
@@ -7080,7 +7117,7 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 org_str = "全國"
 
             # 提取次數或期別 (精確識別 第四次, 第4次, 4模, E4 等)
-            times_match = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', filename_clean)
+            times_match = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', combined_path_text)
             times_str = ""
             if times_match:
                 raw_t = next(g for g in times_match.groups() if g is not None)

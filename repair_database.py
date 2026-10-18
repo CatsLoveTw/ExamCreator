@@ -1071,7 +1071,8 @@ def run_database_repair_suite():
                     pub_m = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺|北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中市|台中區|台北區|臺北區|北區|南區|高雄區)', clean_name + root)
                     org_str = pub_m.group(1) if pub_m else "全國"
                     # 提取次數/期別
-                    times_m = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', clean_name)
+                    # 🚨 修正：搜索範圍必須加上 root 路徑，否則會丟失資料夾層級的次數標籤！
+                    times_m = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', clean_name + root)
                     times_str = ""
                     if times_m:
                         raw_t = next(g for g in times_m.groups() if g is not None)
