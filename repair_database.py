@@ -705,6 +705,10 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
                 protected_official_count += 1
                 continue  # 🛡️ 官方真題享有最高級別豁免，絕對安全！
 
+            # 🚨 [核心初始化] 必須在此宣告，徹底杜絕 UnboundLocalError 致命未綁定錯誤！
+            should_purge = False
+            purge_reason = ""
+
             # 🚨 自動攔截清理：模考檔名若夾帶「_理組_」或「_高三_」舊版命名污染，強制判定為銷毀重跑！
             if is_mock_or_school and any(bad in clean_f for bad in ["_理組_", "_文組_", "_高三_", "_高二_"]):
                 should_purge = True
@@ -722,10 +726,6 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
                             purge_reason = "模考誤用 AI 自由發揮模板，未載入官方真實詳解本，強制清理重跑！"
                 except Exception:
                     pass
-
-            # 🚨 2. 檢測模擬考是否為「空殼題庫（無詳解）」或「扁平化丟失出版社標籤的污染檔案」
-            should_purge = False
-            purge_reason = ""
 
             # 讀取並檢驗內容是否含有詳解
             try:

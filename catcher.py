@@ -3739,8 +3739,9 @@ class ExamParser:
                - 若頁首或頁中有「答案表格」（如：1. ABD, 2. CD, 3. D, 4. B, 5. E, 6.(1) 10kg, 6.(2) 20m/s...），請務必將答案精確對應至每一題的 `answer` 欄位！
                - 小題格式請標準化（例如：6.(1) 對應題號 '6(1)'，9.(2) 對應題號 '9(2)'）。
             2. **question_number (題號)**：如 '1', '2', '6(1)', '6(2)', '14'。
-            3. **source_curriculum 與 exam_target**：
-               - 若有印出『出處：』或『目標：』請提取；若為單元複習卷（如範圍為位能與力學能守恆），出處填入卷頭範圍標題（如：'基礎物理(二)B 第七單元 位能與力學能守恆'）。
+            3. **source_curriculum 與 exam_target（🚨 事前防偽造剛性禁令）**：
+               - 只有在試卷版面上【明確印出】『出處：...』或『目標：...』時才進行提取。
+               - 🚨 若版面上根本沒有印出出處或測驗目標（例如純文字解答、無單元範圍標示），這兩個欄位【必須強制留空字串 ""】，絕對禁止自行腦補、猜測或從題目反推！
             4. **explanation_text (詳細解析)**：
                - 完整提取該題之全部推導、公式列式、受力分析或文字說明。
                - 數學與物理公式必須嚴格轉為 LaTeX（如 $\\frac{{1}}{{2}}mv^2$, $U = mgh$）。
@@ -6188,7 +6189,38 @@ class ExamParser:
                     has_off_ans = q_data.get('has_official_answer', False)
                     ans_label = f"【{q_data['answer']}】" if (has_off_ans and q_data.get('answer')) else "【無官方解答（請由你嚴謹推導求出唯一正確答案）】"
                     
-                    item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n是否有官方解答：{has_off_ans}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n手寫評分標準：{q_data.get('scoring_criteria', '無')}\n官方答案：{ans_label}\n"
+                    # 🚨 [事前主動防禦一：核心題目背景組裝]
+                    item_desc = f"=== 待解第 {idx} 題 ===\n題號：{q_data['question_number']}\n題型：{q_data['question_type']}\n具體科目分類：{q_sub}\n是否有官方解答：{has_off_ans}\n共同背景：{q_data.get('shared_context', '無')}\n題幹：{q_text_prompt}\n選項：\n{options_list_str}\n官方答案：{ans_label}\n"
+
+                    # 🚨 [事前主動防禦二：核心官方詳解文字實體透傳（徹底消除 AI 盲猜！）]
+                    off_exp = str(q_data.get('official_explanation', '')).strip()
+                    if off_exp:
+                        item_desc += f"""
+📢【官方解析本提供的本題真實解析與推導步驟（事前最高指導原則）】：
+>>> 
+{off_exp}
+<<<
+⚠️【名師任務】：請務必仔細研讀上方官方詳解的推導骨架與算式，在此基礎上以補教名師口吻進行教學昇華，絕對不可脫離官方思維自創怪異解法！
+"""
+
+                    # 🚨 [事前主動防禦三：手寫評分細則事前精準對齊]
+                    sc_crit = str(q_data.get('scoring_criteria', '')).strip()
+                    if sc_crit:
+                        item_desc += f"""
+📑【官方公布之手寫題評分原則（事前剛性約束）】：
+>>>
+{sc_crit}
+<<<
+⚠️【名師任務】：本題為非選擇題，你的推導過程必須嚴格涵蓋上方官方評分細則中的每一個步驟給分點！
+"""
+
+                    # 🚨 [事前主動防禦四：題型專屬事前禁令（杜絕格式混淆與多選幻覺）]
+                    q_t = q_data.get('question_type', '')
+                    if q_t in ["選填題", "簡答題", "繪圖作圖題"]:
+                        item_desc += "🚫【非選擇題/選填題事前禁令】：本題無實體選項，你的 `options_analysis` 欄位【必須且只能】輸出空列表 `[]`，絕對禁止輸出任何選項分析物件！\n"
+                    elif q_t == "單選題":
+                        item_desc += "🎯【單選題事前禁令】：本題為單選題，正確選項只有 1 個，`derived_answer` 必須為單一字母或數字（如 'A' 或 '3'），絕對禁止輸出多個選項代號！\n"
+
                     if not has_off_ans or not q_data.get('answer'):
                         item_desc += "⚠️【無官方答案剛性要求】：本題無官方標準解答。請你務必在 `detailed_solution` 中進行最扎實的推導，並在 `derived_answer` 中明確輸出你推導出的最終答案（如選擇題輸出純選項代號 A/B/C 或 1/2/3；選填題輸出數值如 3,3 或 1/3；非選證明題填寫 '證明題'）！系統將以你的推導答案作為本題的標準答案。\n"
                     
