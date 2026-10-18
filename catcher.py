@@ -43,6 +43,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 GLOBAL_START_TIME = time.time()
 MAX_EXECUTION_TIME_SECONDS = 5.0 * 3600  # 5 小時安全時間上限，保證在 6h GHA 砍掉前優雅退出
+GLOBAL_ERRATA_MAP = {}  # 🚨 全域解答更正通知快取庫 {(subject, q_num): corrected_answer}
 
 class TimeoutSafetyException(Exception):
     """自定義異常：當執行時間接近 GitHub Actions 上限時觸發安全保存與退出"""
@@ -597,11 +598,21 @@ def record_completed_exam_to_scheduler(exam_type: str):
             logging.error(f"寫入 {SCHEDULER_STATE_FILE} 失敗: {e}")
 
 def save_partial_progress_immediately(partial_json_path: str, questions_list: list):
-    """每當有題目成功通過驗證，立刻將記憶體中的最新進度安全寫入硬碟（具備全域執行緒安全鎖）"""
+    """每當有題目成功通過驗證，立刻將記憶體中的最新進度安全寫入硬碟（具備全域執行緒安全鎖與快照重試）"""
     with PARTIAL_SAVE_LOCK:
         try:
-            # 過濾出有效詳解並清洗路徑
-            valid_qs = [q for q in questions_list if is_valid_solution(q.get("detailed_solution"))]
+            # 🚨 嘗試安全快照拷貝，徹底消除多線程併發時的 RuntimeError: list changed size during iteration
+            snapshot_list = None
+            for _ in range(3):
+                try:
+                    snapshot_list = questions_list[:]
+                    break
+                except RuntimeError:
+                    time.sleep(0.01)
+            if snapshot_list is None:
+                return
+
+            valid_qs = [q for q in snapshot_list if is_valid_solution(q.get("detailed_solution"))]
             
             # 深拷貝並剔除不可序列化的 PIL 影像物件
             clean_qs = []
@@ -821,24 +832,14 @@ PROMPT_STAGE_2_MAIN = """
    - 2分：多重複合陷阱、干擾項與正解極其相似（如微小語意差距、極端邊界反例）。
 
 🚨【評分理由格式剛性要求】：
-在 `difficulty_reason` 欄位中，【必須】條列各維度得分與具體理由，格式如下：
-「本題評為 X 分。
-1. 概念跨度（X分）：[說明考查之學科觀念與冊次]
-2. 思維深度/運算量（X分）：[理科說明推導步數；文科說明閱讀推理與思辨深度]
-3. 情境包裝（X分）：[說明是否含有長篇情境或圖表]
-4. 陷阱強度（X分）：[說明干擾選項或邏輯陷阱]
-總計得分：X + X + X + X = X 分。」
-🚨 若本題因原卷缺漏或封面說明而無實質試題，難度【強制設為 1 分】，嚴禁評為高分！
-
-🚨【評分理由格式剛性要求】：
 在 `difficulty_reason` 欄位中，【必須】詳細列出上述四個維度的具體給分依據與加總算式，格式範例如下：
 「本題評為 X 分。
-1. 概念跨度（X分）：[具體說明涉及哪些概念]
-2. 運算負擔（X分）：[具體說明推導步數與計算量]
-3. 情境包裝（X分）：[說明是否含有圖表或情境]
-4. 陷阱強度（X分）：[說明具體陷阱所在]
+1. 概念跨度（X分）：[具體說明涉及哪些概念與冊次]
+2. 運算負擔/思維深度（X分）：[理科說明推導步數與計算量；文科說明閱讀推理與思辨深度]
+3. 情境包裝（X分）：[說明是否含有圖表或長篇情境]
+4. 陷阱強度（X分）：[說明干擾選項或具體陷阱所在]
 總計得分：X + X + X + X = X 分。」
-🚨 若本題因原卷缺漏或封面說明而無實質計算，難度【強制設為 1 分】，嚴禁評為高分！
+🚨 若本題因原卷缺漏或封面說明而無實質試題，難度【強制設為 1 分】，嚴禁評為高分！
 
 【三、邏輯一致性自我校驗與防偽原則（Self-Correction & Anti-Fabrication Loop）】
         0. 🚨【圖片精確性確認與重掃描機制】：請仔細檢查你收到的題目圖片。如果發現圖片裁剪錯誤（例如圖片中印著的題號不是當前題號）、圖片模糊，或者關鍵公式/表格被切掉，你必須將 `suspects_image_mismatch` 設為 `true`。系統將自動啟動重掃描補件與重新裁剪機制，以確保下一輪生成時能拿到最完美的圖片！
@@ -1688,7 +1689,7 @@ def start_dashboard_web_server(port=8080, manager=None):
                             <div style="font-size: 0.8rem; color: #94a3b8; margin-top: 4px;">多模態大考解題管線 ‧ 全方位算力排程中樞</div>
                         </div>
                         <div style="display: flex; gap: 10px; align-items: center;">
-                            <button classbtn btn-stop" onclick="triggerGracefulStop()">🛑 優雅停機存檔 (進入 GHA 上傳)</button>
+                            <button class="btn btn-stop" onclick="triggerGracefulStop()">🛑 優雅停機存檔 (進入 GHA 上傳)</button>
                         </div>
                     </div>
 
@@ -3158,13 +3159,13 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
     
     for attempt in range(1, max_attempts + 1):
         try:
-            # 🚀 繪圖多階梯策略：首選極速 3.1-flash-lite (30 RPM)，重試依序升級 3.5-flash-lite -> 3.5-flash
+            # 🚀 繪圖多階梯策略：首選最新 3.5-flash-lite (指令遵從力與坐標感大幅躍升)，重試依序升級 3.5-flash -> 3.6-flash
             if attempt == 1:
-                target_draw_model = "gemini-3.1-flash-lite"
-            elif attempt == 2:
                 target_draw_model = "gemini-3.5-flash-lite"
-            else:
+            elif attempt == 2:
                 target_draw_model = "gemini-3.5-flash"
+            else:
+                target_draw_model = "gemini-3.6-flash"
             
             res, _ = ai_manager.generate_with_retry(
                 contents=[current_prompt],
@@ -3536,7 +3537,7 @@ class ExamParser:
                         contents=[prompt, pil_img],
                         response_schema=RubricPage,
                         temperature=0.0,
-                        preferred_model="gemini-3.1-flash-lite",
+                        preferred_model="gemini-3.5-flash-lite",  # 🚨 升級為最新 3.5-Lite，大幅提升 Bounding Box 坐標與表格框選精度
                         enable_thinking=False
                     )
                     if res and 'items' in res:
@@ -3740,12 +3741,11 @@ class ExamParser:
         # -------------------------------------------------------------
         # 第一層：本地秒級規則自癒 (Zero-API Cost)
         # -------------------------------------------------------------
-        # 1. 從詳解文字尾端提取明確的結論答案（如：故選 (3)、故選 (1)(2)(4)、故答案為 7）
+        # 1. 從詳解文字尾端提取明確的結論答案（全面支援：故選、故本題選、正確選項為、故選：等）
         conclusive_ans = ""
-        m_opt = re.search(r'故選\s*[（\(]?([A-Ga-g1-9,\(\)]+)[）\)]?', sol_text)
+        m_opt = re.search(r'(?:故(?:本題)?選|正確選項(?:為)?)[：:\s]*[（\(【]?([A-Ga-g1-9,\(\)（）\s、]+)[）\)】]?', sol_text)
         if m_opt:
-            raw_c = m_opt.group(1).replace("(", "").replace(")", "").replace(" ", "").replace(",", "")
-            # 若包含多個數字，排序去重
+            raw_c = m_opt.group(1).replace("(", "").replace(")", "").replace("（", "").replace("）", "").replace(" ", "").replace(",", "").replace("、", "")
             if any(c.isdigit() for c in raw_c):
                 conclusive_ans = "".join(sorted(list(dict.fromkeys(re.findall(r'\d', raw_c)))))
             else:
@@ -4207,9 +4207,9 @@ class ExamParser:
                 contents=arbitration_contents,
                 response_schema=AcademicArbitration,
                 temperature=0.0,
-                preferred_model="gemini-3.5-flash",
+                preferred_model="gemini-3.8-flash",  # 🚨 升級為最高旗艦 3.8-flash，確保學術爭議判定具備最高認知水準
                 enable_thinking=True,
-                task_desc="[終極學術仲裁]"
+                task_desc="[終極學術仲裁 (Gemini 3.8)]"
             )
             if res:
                 with GLOBAL_METRICS.lock:
@@ -4247,16 +4247,7 @@ class ExamParser:
             # 確保資料庫中僅有非選擇題/手寫題包含評分標準，徹底消除選擇題（如 Q31, Q53）被寫入評分說明之 Bug。
             if q_type in ["單選題", "多選題"]:
                 q["scoring_criteria"] = ""
-                
-            # 2. 【方案 1：選填題「挖空結構與答案長度」自動比對器】
-                
-            # 🚨 [防禦性機制 - 提案三：選擇題「評分標準」反向去污染清洗器]
-            # 若為選擇題，硬性將第一階段可能因 AI 讀取大篇幅 Rubric 產生的幻覺與錯位 scoring_criteria 清空，
-            # 確保資料庫中僅有非選擇題/手寫題包含評分標準，徹底消除選擇題（如 Q31, Q53）被寫入評分說明之 Bug。
-            if q_type in ["單選題", "多選題"]:
-                q["scoring_criteria"] = ""
-                
-                
+
             # 2. 【方案 1：選填題「挖空結構與答案長度」自動比對器】
             if q_type == "選填題":
                 q_text = q.get("question_text", "")
@@ -4291,45 +4282,77 @@ class ExamParser:
         safe_subject = safe_filename(subject)
         paper_tag = f"[{year} {subject}]"
 
-        # 🚨 核心時序修復：進入考卷的第一毫秒，立刻更新全域儀表板當前考卷名稱！杜絕跨考卷顯示延遲
-        paper_label = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+        # 🚨 補考標籤必須在組合 paper_label 前提早宣告，徹底消除 UnboundLocalError 致命崩潰！
+        is_makeup = any(k in str(mock_tag) or k in str(year) for k in ["補考", "補辦", "代考"])
+        makeup_tag = "_補考" if is_makeup else ""
+        makeup_src = "補考_" if is_makeup else ""
+
+        # 🚨 核心時序修復：格式化考卷名稱，杜絕模考塞入假學校名、精準輸出出版社與期別！
+        clean_tag = mock_tag.strip('_')
+        if exam_type == "SCHOOL":
+            sch_disp = school_name or "學校定期考"
+            paper_label = f"[{year}] {sch_disp} {clean_tag} {subject} ({exam_type})".replace("  ", " ")
+        elif exam_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
+            paper_label = f"[{year}] {clean_tag} {subject} ({exam_type})".replace("  ", " ")
+        else:
+            makeup_disp = " 補考" if is_makeup else ""
+            paper_label = f"[{year}]{makeup_disp} {subject} ({exam_type})"
+        paper_label = re.sub(r'\s+', ' ', paper_label).strip()
+
         GLOBAL_METRICS.set_current_paper(paper_label, total_q=0, existing_partial_q=0)
         GLOBAL_METRICS.set_stage(f"🚀 初始化考卷: {paper_label}")
         logging.info(f"\n{'='*30} 📥 開始處理考卷：{paper_label} {'='*30}")
 
-        # 💡 將題號對位邏輯拉到最頂端，供後續所有解析對齊模組共用
+        # 💡 將題號對位邏輯拉到最頂端（🚨 強化版：嚴格隔離非選中文大題「一(1)」與選擇題「1」，防範張冠李戴）
         def is_precise_match(q_data: dict, r_k: str) -> bool:
-            q_num = str(q_data.get('question_number', ''))
-            q_digits = re.findall(r'\d+', q_num)
-            r_digits = re.findall(r'\d+', r_k)
+            q_num = str(q_data.get('question_number', '')).strip()
+            r_k = str(r_k).strip()
+            if q_num == r_k:
+                return True
             
             cn_mapping = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
             q_cn = [cn_mapping[c] for c in q_num if c in cn_mapping]
             r_cn = [cn_mapping[c] for c in r_k if c in cn_mapping]
             
+            # 🚨 關鍵防禦：若一方包含中文字（如「一(1)」、「非選二」）而另一方為純數字（如「1」），絕不可單憑數字碰撞判定為同一題！
+            if bool(q_cn) != bool(r_cn):
+                return False
             if q_cn and r_cn and q_cn != r_cn:
                 return False
-            if q_digits and r_digits:
+
+            q_digits = re.findall(r'\d+', q_num)
+            r_digits = re.findall(r'\d+', r_k)
+            
+            # 若兩者都有數字且長度相同（如 15(a) 對應 15(1)）
+            if q_digits and r_digits and len(q_digits) == len(r_digits):
                 return q_digits == r_digits
-            return q_num.strip() == r_k.strip()
+            return False
         
         subjects_stem = ["數學", "數A", "數B", "數學乙", "數學甲", "數甲", "數乙", "物理", "化學", "生物", "地球科學", "自然"]
         is_stem = any(t in subject for t in subjects_stem)
 
-        # Stage 1 用 Flash-Lite 極速掃描
+        # 🚨 [情境分流模型架構]：依據考科智商需求分流，理科保證頂級推導，文科兼顧高速吞吐
         stage_1_models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
         stage_1_model = stage_1_models[0]
-        # 🚀 核心修復：將 Lite 模型納入主輪替池，讓 3.7 / 3.6 / 3.5 / 3.5-lite / 3.1-lite 全五款模型均勻吃滿配額
-        tier1_pool = [
+
+        # 1. 理科高難推理池 (嚴禁任何 Lite 模型混入，保證微積分、幾何座標化、力學推導之學術水準)
+        stem_reasoning_pool = [
             "gemini-3.8-flash",
-            "gemini-3.7-flash", 
-            "gemini-3.6-flash", 
-            "gemini-3.5-flash", 
-            "gemini-3.5-flash-lite", 
-            "gemini-3.1-flash-lite"
+            "gemini-3.7-flash",
+            "gemini-3.6-flash"
         ]
+        # 2. 文科與通識均衡池 (注重語意剖析與篇章脈絡，兼顧高 QPS 與低消耗)
+        humanities_pool = [
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite"
+        ]
+        
+        # 依科目自動綁定
+        is_hard_stem = any(s in clean_subj_name for s in ["數", "物理", "化學", "自然"])
+        tier1_pool = stem_reasoning_pool if is_hard_stem else humanities_pool
         stage_2_model = tier1_pool[0]
-        validator_model = tier1_pool[1]
+        validator_model = tier1_pool[1 % len(tier1_pool)]
         # stage_2_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         # validator_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
         
@@ -4347,9 +4370,6 @@ class ExamParser:
         elif clean_subj_name in ["國綜", "國語文"]: clean_subj_name = "國文"
         elif clean_subj_name in ["國語文寫作", "寫作測驗"]: clean_subj_name = "國寫"
 
-        is_makeup = any(k in str(mock_tag) or k in str(year) for k in ["補考", "補辦", "代考"])
-        makeup_tag = "_補考" if is_makeup else ""
-        makeup_src = "補考_" if is_makeup else ""
         sem_tag = "上" if "上學期" in str(year) else ("下" if "下學期" in str(year) else "")
 
         try: y_val = int(year_digits)
@@ -4538,8 +4558,7 @@ class ExamParser:
                     if missing_diagram_count > 0:
                         logging.info(f"🎉 [補繪完成] 已成功為 {spec_name} 補齊了 {missing_diagram_count} 張遺失的圖表！")
 
-                    # 🚨 核心修復：自動跳過已完工考卷時，必須累加 completed_papers 並更新 Web 儀表板！
-                    paper_label = f"[{year}] {school_name if school_name else ''} {subject} ({exam_type})"
+                    # 🚨 核心修復：自動跳過已完工考卷時，必須累加 completed_papers 並更新 Web 儀表板！（沿用頂層標準格式化 paper_label）
                     with GLOBAL_METRICS.lock:
                         # 避免啟動預掃描與早退重複累加
                         if paper_label not in GLOBAL_METRICS.exam_progress or "完工" not in GLOBAL_METRICS.exam_progress[paper_label].get("status", ""):
@@ -4608,6 +4627,36 @@ class ExamParser:
         val_log_lock = threading.Lock()
         all_extracted_questions = []
 
+        # 🚨 [頂層變數初始化] 徹底杜絕快取命中時的 UnboundLocalError 崩潰！
+        is_mock_paper = exam_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]
+        is_combined_pdf = (a_pdf is not None and os.path.abspath(q_pdf) == os.path.abspath(a_pdf))
+        mock_sol_page_indices = []
+        mock_sol_pdf_path = None
+
+        # 🚨 [頂層模考詳解檔定位] 不論是否有快取，保證 100% 精準定位詳解來源，啟動模考快車道！
+        if is_mock_paper:
+            if is_combined_pdf and q_pdf and os.path.exists(q_pdf):
+                try:
+                    temp_doc = fitz.open(q_pdf)
+                    for p_i in range(len(temp_doc)):
+                        p_t = temp_doc[p_i].get_text("text")
+                        if any(k in p_t for k in ["[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", "試題詳解", "詳解本", "答案與解析", "答案與詳解"]) or ("出處：" in p_t and "解析：" in p_t):
+                            mock_sol_page_indices = list(range(p_i, len(temp_doc)))
+                            mock_sol_pdf_path = q_pdf
+                            logging.info(f"📑 [模考詳解鎖定] 二合一試卷：第 {p_i+1}~{len(temp_doc)} 頁為官方詳解本！")
+                            break
+                    temp_doc.close()
+                except Exception as e:
+                    logging.warning(f"掃描二合一詳解頁失敗: {e}")
+            elif a_pdf and os.path.exists(a_pdf):
+                try:
+                    mock_sol_pdf_path = a_pdf
+                    with fitz.open(a_pdf) as temp_a_doc:
+                        mock_sol_page_indices = list(range(len(temp_a_doc)))
+                    logging.info(f"📑 [模考詳解鎖定] 獨立詳解卷：共 {len(mock_sol_page_indices)} 頁。")
+                except Exception as e:
+                    logging.warning(f"讀取獨立詳解卷失敗: {e}")
+
         # 🆕 1. 優先檢查是否有第一階段題目快取檔
         if os.path.exists(raw_extracted_json_path):
             logging.info(f"⚡ [Stage 1 快取命中] 找到已擷取的題目快取：{raw_extracted_json_path}")
@@ -4616,8 +4665,7 @@ class ExamParser:
                 with open(raw_extracted_json_path, "r", encoding="utf-8") as f:
                     all_extracted_questions = json.load(f)
                     
-                # 🚨 關鍵動態修復：重新校驗官方解答屬性，防止舊版快取遺留誤判
-                has_official_now = (a_pdf is not None and os.path.exists(a_pdf) and exam_type in ["GSAT", "AST", "MOCK"])
+                has_official_now = (a_pdf is not None and os.path.exists(a_pdf) and exam_type in ["GSAT", "AST", "MOCK", "MOCK_GSAT", "MOCK_AST"])
                 for q_cached in all_extracted_questions:
                     if has_official_now:
                         q_cached['has_official_answer'] = True
@@ -4630,42 +4678,15 @@ class ExamParser:
 
         # 🆕 2. 只有在無快取時，才進入龐大的第一階段 PDF 轉圖與全套 OCR 掃描
         if not all_extracted_questions:
-            # 5. 判斷是否為模擬考以及題目卷與解答卷型態
-            is_mock_paper = exam_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]
-            is_combined_pdf = (a_pdf is not None and os.path.abspath(q_pdf) == os.path.abspath(a_pdf))
-            
             logging.info("📸 正在將原卷與解答 PDF 轉換成黃金 300 DPI 整頁圖片...")
             GLOBAL_METRICS.set_stage(f"📸 正在將試卷與解答 PDF 轉換為 300 DPI 整頁影像 ({year} {subject})")
-            
-            mock_sol_page_indices = [] # 記錄模擬考詳解本的頁碼 (0-based)
-            mock_sol_pdf_path = None
 
             if is_combined_pdf:
                 all_rendered_pages = self.pdf_to_images(q_pdf, "page", img_dir, dpi=300)
-                
-                # 🚨 模擬考 / 複習考題解二合一智慧切分：找出詳解起始頁（支援 [參考詳解] 等標籤）
-                temp_doc = fitz.open(q_pdf)
-                sol_start_page = -1
-                for p_i in range(len(temp_doc)):
-                    p_t = temp_doc[p_i].get_text("text")
-                    has_sol_title = any(k in p_t for k in [
-                        "[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", 
-                        "考科詳解", "試題詳解", "詳解本", "答案與解析", "答案與詳解"
-                    ]) or ("出處：" in p_t and "解析：" in p_t)
-                    
-                    if has_sol_title:
-                        sol_start_page = p_i
-                        break
-                temp_doc.close()
-
-                if sol_start_page != -1:
-                    # 詳解頁：從起始頁開始直到最末頁
-                    mock_sol_page_indices = list(range(sol_start_page, len(all_rendered_pages)))
-                    mock_sol_pdf_path = q_pdf
-                    # 題目頁：起始頁之前的所有頁面
-                    q_image_paths = all_rendered_pages[:sol_start_page]
+                sol_start_p = mock_sol_page_indices[0] if mock_sol_page_indices else -1
+                if sol_start_p != -1:
+                    q_image_paths = all_rendered_pages[:sol_start_p]
                     a_image_paths = [all_rendered_pages[i] for i in mock_sol_page_indices]
-                    logging.info(f"📑 [二合一試卷精準切分] 第 1~{sol_start_page} 頁為題目卷，第 {sol_start_page+1}~{len(all_rendered_pages)} 頁為官方詳解本！")
                 else:
                     ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
                     if ans_page_indices:
@@ -4674,20 +4695,12 @@ class ExamParser:
                     else:
                         q_image_paths = all_rendered_pages
                         a_image_paths = []
-
                 if not ans_text:
                     ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
             else:
                 q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
                 a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300)
-                ans_text, _ = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
-                ans_page_indices = []
-                
-                # 分卷情況：若 a_pdf 為獨立詳解本
-                if is_mock_paper and a_pdf and os.path.exists(a_pdf):
-                    mock_sol_pdf_path = a_pdf
-                    with fitz.open(a_pdf) as temp_a_doc:
-                        mock_sol_page_indices = list(range(len(temp_a_doc)))
+                ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
 
             rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
             rubric_text = self.extract_text_from_pdf(rubric_pdf)
@@ -5640,17 +5653,7 @@ class ExamParser:
                 if not set1 or not set2: return 0.0
                 return len(set1.intersection(set2)) / float(len(set1.union(set2)))
 
-            # 🚨 升級版：大題前綴與高相容度題組正規化引擎
-            def extract_group_base_tag(q_num_str: str) -> str:
-                """提取題號的大題標籤，例如 '二(1)' -> '二', '40-41' -> '40-41', '15(1)' -> '15'"""
-                s = str(q_num_str).strip()
-                m_cn = re.match(r'^([一二三四五六七八九十]+)', s)
-                if m_cn: return m_cn.group(1)
-                m_sub = re.match(r'^(\d+)[\-_(（]', s)
-                if m_sub: return m_sub.group(1)
-                return s
-
-            # 🚨 升級版：大題前綴與結構化題組 shared_context 強制歸一化引擎
+            # 🚨 大題前綴與題組 shared_context 強制歸一化引擎
             def extract_group_base_tag(q_num_str: str) -> str:
                 """提取大題識別符，例如 '二(1)' -> '二', '40-41' -> '40-41', '15(a)' -> '15'"""
                 s = str(q_num_str).strip()
@@ -5658,7 +5661,7 @@ class ExamParser:
                 if m_cn: return m_cn.group(1)
                 m_sub = re.match(r'^(\d+)[\-_(（]', s)
                 if m_sub: return m_sub.group(1)
-                return ""
+                return s
 
             group_pools = {}
             for i, q in enumerate(all_extracted_questions):
@@ -5918,6 +5921,7 @@ class ExamParser:
         # =========================================================================
         # 🚀 [模擬考專屬快車道] 官方詳解本一鍵直接組裝，完全跳過 Stage 2/3 推導！
         # =========================================================================
+        task_queue = [] # 🚨 頂層安全初始化，防範 NameError 致命崩潰！
         if is_mock_paper and mock_sol_pdf_path and mock_sol_page_indices:
             logging.info(f"⚡ [啟動模考快車道] 正在直接從官方詳解本視覺萃取原汁原味解析...")
             official_mock_exps = self.extract_mock_explanations_visual(
@@ -5983,8 +5987,11 @@ class ExamParser:
                     else:
                         q["options_analysis"] = "本題為非選擇題/選填題，無選項可供分析。"
 
-                    # 5. 評分標準、難度評分與知識點
-                    q["scoring_rubric"] = matched_exp.get("scoring_rubric", "") or "依考卷標準計分。"
+                    # 5. 評分標準、難度評分與知識點（🚨 官方評分原則同步寫入 scoring_criteria）
+                    official_rubric = matched_exp.get("scoring_rubric", "").strip()
+                    q["scoring_rubric"] = official_rubric or "依考卷標準計分。"
+                    if official_rubric:
+                        q["scoring_criteria"] = official_rubric
                     q["difficulty_level"] = matched_exp.get("difficulty_level", 5)
                     q["difficulty_reason"] = matched_exp.get("difficulty_reason", f"出處涵蓋：{src_curriculum or '常規課程'}。")
                     
@@ -6259,32 +6266,9 @@ class ExamParser:
                                     valid_batch[idx]["_discrepancy_detected"] = True
                                     valid_batch[idx]["_derived_ans"] = derived_ans if derived_ans else "（未順利推導出唯一正確選項）"
                                     logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
-                                
-                    # 4. 執行原有的 Markdown 格式化轉換
-                    # 🚨 [防禦性機制 - 提案二：選填題/非選題格式自動化預校驗器]
-                    for idx, sol in enumerate(salvaged_solutions):
-                        q_data = valid_batch[idx]["q_data"]
-                        
+
                         # 呼叫預校驗器進行格式與類型清洗
                         pre_validate_format(q_data, sol)
-                        
-                        # 🚨 [防禦性機制 - 提案一：雙重不一致「學術裁決與防硬凹」仲裁機制 (第一階段：偵測)]
-                        # 針對選擇題，提取 AI 真正判定為「正確」的選項
-                        if q_data.get("question_type") in ["單選題", "多選題"] and isinstance(sol.get("options_analysis"), list):
-                            derived_correct_keys = [opt.get("key", "").strip() for opt in sol.get("options_analysis", []) if "正確" in opt.get("explanation", "")]
-                            derived_ans = "".join(sorted(derived_correct_keys))
-                            official_ans = str(q_data.get('answer', '')).strip()
-                            
-                            # 雙向清理格式（去除所有逗號與空格），確保多選題 '3,4' 與 '34' 等價比對
-                            derived_clean = derived_ans.replace(",", "").replace(" ", "")
-                            official_clean = official_ans.replace(",", "").replace(" ", "")
-                            
-                            # 若有官方答案才進行對照衝突檢查
-                            if q_data.get('has_official_answer', True) and derived_clean and official_clean and derived_clean != official_clean:
-                                # 發現嚴重衝突！標記此題存在學術不對位，以便後續強制觸發學術仲裁
-                                valid_batch[idx]["_discrepancy_detected"] = True
-                                valid_batch[idx]["_derived_ans"] = derived_ans
-                                logging.warning(f"⚖️ [不一致預警] 題號 {q_data['question_number']}：AI 實質推導出 '{derived_ans}'，但官方紀錄為 '{official_ans}'。已標記進行強制仲裁！")
 
                     # === 2026 架構：步驟四 - 自動幾何/函數/科學圖解生成 ===
                     for idx, sol in enumerate(salvaged_solutions):
@@ -6794,12 +6778,14 @@ class ExamParser:
                     except Exception as e:
                         logging.error(f"批次處理執行緒發生例外: {e}")
                 
-                # 檢查是否接近 5 小時全域執行上限
-                if time.time() - GLOBAL_START_TIME > MAX_EXECUTION_TIME_SECONDS:
-                    logging.critical("⏱️ [全域時間預警] 已達 5 小時執行上限！將強制停止新任務，安全保存已完成之進度...")
+                # 🚨 檢查是否接近 5 小時全域上限或收到 Web 控制台「🛑 優雅停機」指令！
+                try:
+                    check_global_timeout()
+                except TimeoutSafetyException as tse:
+                    logging.critical(f"🛑 [全域中斷觸發] {tse}！正在立即取消其餘批次並安全退出...")
                     for f in futures:
                         f.cancel()
-                    raise TimeoutSafetyException("已達 5 小時安全時間上限。")
+                    raise tse
 
                 if rpd_hit:
                     for f in futures:
@@ -6860,11 +6846,15 @@ class ExamParser:
 
         valid_solved_questions = [q for q in all_final_questions if is_really_complete(q)]
         
-        # 2. 🚨 雙重完工判讀：除了數量等於提取題數，還必須達到本科最低合理題數門檻！
-        min_threshold_map = {"社會": 65, "自然": 60, "英文": 45, "國文": 38, "數": 10, "國寫": 2}
+        # 2. 🚨 雙重完工判讀：依據【已正規化學科 clean_subj_name】精確核對法定題數下限！
+        min_threshold_map = {
+            "社會": 65, "自然": 60, "英文": 45, "國文": 38, 
+            "數學甲": 12, "數學乙": 10, "數學A": 15, "數學B": 15, "數學": 10, 
+            "國寫": 2
+        }
         target_min = 20
         for sub_k, min_v in min_threshold_map.items():
-            if sub_k in subject:
+            if sub_k in clean_subj_name:
                 target_min = min_v
                 break
 
@@ -6898,7 +6888,21 @@ class ExamParser:
             # 只要還有任何一題失敗/超時，絕對不產生最終 database，保留 raw 暫存等待下次重跑！
             with open(partial_json_path, "w", encoding="utf-8") as f:
                 json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
+            # 🚨 清理舊的同名正式庫，防止正式庫與 partial 同時存在造成狀態衝突
+            if os.path.exists(json_path):
+                try:
+                    os.remove(json_path)
+                    rel_p = os.path.relpath(json_path, output_dir).replace("\\", "/")
+                    with open("pending_cloud_purges.txt", "a", encoding="utf-8") as f_pg:
+                        f_pg.write(f"gdrive:exam_database_output/{rel_p}\n")
+                except Exception:
+                    pass
             logging.warning(f"💾 [未全數完成 - 自動留存 Raw] [{year} {subject}] 全卷共 {len(all_extracted_questions)} 題，已成功完成 {len(valid_solved_questions)} 題高品質詳解。失敗/超時之題目已保留於 Raw 快取中，下次執行將自動補跑！")
+
+            # 🚨 核心阻斷：若是因為每日額度耗盡 (RPD) 而中斷，保存進度後立刻向上拋出異常，終止後續考卷盲跑！
+            if rpd_hit:
+                logging.critical(f"🛑 [全域額度耗盡] 考卷 {spec_name} 進度已落盤，觸發全域配額耗盡保護，準備進入 GHA 上傳！")
+                raise RPDExhaustedException("每日 API 金鑰額度皆已耗盡。")
         else:
             # 全卷 100% 每題都有完美詳解，才正式寫入資料庫並清除 Raw 快取
             with open(json_path, "w", encoding="utf-8") as f:
@@ -6993,15 +6997,17 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         if rel_dir_path and rel_dir_path != ".":
             dir_parts = [p for p in rel_dir_path.replace("\\", "/").split("/") if p and p != "." and p not in ["school_exam_papers_only", "ast_exam_papers_only", "gsat_exam_papers_only", "mock_exam_papers_only", "學校定期考", "分科指考", "學測", "模擬考"]]
 
-        # 1. 智慧提取學校名稱（多層目錄保底取第一層）
+        # 1. 智慧提取學校名稱（🚨 嚴格限制：僅限學校段考目錄，且剔除學年度/全國/公私立等非學校字詞）
         school_name = ""
-        if dir_parts:
-            school_name = dir_parts[0]  # 第一層永遠是學校名稱（如：北一女中、建國中學）
-
-        if not school_name:
-            sch_match = re.search(r'([\u4e00-\u9fa5]{2,10}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', filename_clean)
-            if sch_match:
-                school_name = sch_match.group(1)
+        if "school_exam_papers_only" in rel_dir_path:
+            if dir_parts:
+                school_name = dir_parts[0]
+            if not school_name:
+                sch_match = re.search(r'([\u4e00-\u9fa5]{2,8}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', filename_clean)
+                if sch_match:
+                    cand_sch = sch_match.group(1)
+                    if not any(k in cand_sch for k in ["學年度", "學期", "全國", "公私立", "全區", "聯合", "模擬"]):
+                        school_name = cand_sch
 
         # 2. 智慧提取學年度與上下學期 (解析 109_1, 108_1, 114_1, 112_高三_2 等)
         year_match = re.search(r'(\d{2,3})(?:學年度|年|E\d+|_|\b)', filename_clean)
@@ -7102,33 +7108,42 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 else:
                     exam_type = "MOCK_GSAT" # 預設以學測模考為基準
 
-            # 🚨 優先匹配出版社與品牌（避免「全國高中聯合測驗」吃掉「南一版/翰林版」）
-            # 💡 修正：將搜尋目標改為 combined_path_text，確保寫在「資料夾名稱」上的標籤也能被精準捕捉！
-            publisher_match = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺)', combined_path_text)
-            league_match = re.search(r'(北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|台北區|臺北區|北區|南區|高雄區)', combined_path_text)
+            # 🚨 優先匹配出版社與品牌（納入「全國高中」、「全國公私立」、「各公立」精準映射至「全模」）
+            publisher_match = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺|三民|常春藤)', combined_path_text)
+            league_match = re.search(r'(北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中區|台中市|臺中市|台北區|臺北區|北區|南區|高雄區|全國高中|全國公私立|公私立高級中學|全國聯合|公私立高中|各公立高中)', combined_path_text)
 
             if publisher_match:
                 org_str = publisher_match.group(1)
             elif league_match:
-                org_str = league_match.group(1)
-                org_map = {"北北基": "北模", "台北區": "北模", "臺北區": "北模", "新北基": "北模", "台中區": "中模", "台中市": "中模", "中區": "中模", "高雄區": "南模", "全區": "全模"}
-                org_str = org_map.get(org_str, org_str)
+                raw_l = league_match.group(1)
+                org_map = {
+                    "北北基": "北模", "台北區": "北模", "臺北區": "北模", "新北基": "北模", "北區": "北模",
+                    "台中區": "中模", "台中市": "中模", "臺中市": "中模", "中區": "中模",
+                    "高雄區": "南模", "南區": "南模",
+                    "竹模": "竹模", "竹苗區": "竹模", "新竹區": "竹模",
+                    "全模": "全模", "全區": "全模", "全國高中": "全模", "全國公私立": "全模", "公私立高級中學": "全模", "全國聯合": "全模", "公私立高中": "全模", "各公立高中": "全模"
+                }
+                org_str = org_map.get(raw_l, "全模")
             else:
-                org_str = "全國"
+                org_str = "全模" if ("mock" in rel_dir_path.lower() or "模" in combined_path_text) else "全國"
 
-            # 提取次數或期別 (精確識別 第四次, 第4次, 4模, E4 等)
-            times_match = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', combined_path_text)
+            # 提取次數或期別 (支援：第X次、第X模、EX、X模、第X回、(X) 等多種格式)
+            times_match = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*[次回]|第\s*([0-9]+)\s*模|E([1-8])|([1-8])\s*模|[（\(]([1-8一二三四五六七八])[）\)])', combined_path_text)
             times_str = ""
             if times_match:
                 raw_t = next(g for g in times_match.groups() if g is not None)
                 cn_to_num = {'一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10'}
                 t_digit = cn_to_num.get(raw_t, raw_t)
                 times_str = f"第{t_digit}次"
+            elif re.search(r'第二學期|下學期', combined_path_text):
+                times_str = "下學期"
+            elif re.search(r'第一學期|上學期', combined_path_text):
+                times_str = "上學期"
             else:
                 times_str = "全期"
 
-            tag_parts = [p for p in [grade_str, stream_str, org_str, times_str] if p]
-            mock_tag = f"_{'_'.join(tag_parts)}" if tag_parts else f"_{org_str}_{times_str}"
+            # 🚨 剛性命名一致化：模考標籤僅保留「品牌_期別」（如 _全模_第2次、_南一_第4次），嚴禁夾帶高三/理組，徹底終結修復引擎衝突與重複解析！
+            mock_tag = f"_{org_str}_{times_str}"
 
         # 6. 判斷文件角色 (Role) - 🚨 剛性過濾與角色分離
         clean_no_ext = os.path.splitext(filename_clean)[0]
@@ -7177,12 +7192,10 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             "role": role,
             "is_compilation": is_compilation
         }
-        
-    # 🚨 全局解答更正通知快取庫 {(year, subject, q_num): corrected_answer}
-    GLOBAL_ERRATA_MAP = {}
 
     def extract_errata_from_pdf(errata_pdf_path: str):
         """從解答更正通知 PDF 中提早萃取官方勘誤表格"""
+        global GLOBAL_ERRATA_MAP
         try:
             doc = fitz.open(errata_pdf_path)
             full_txt = ""
@@ -7190,13 +7203,11 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             doc.close()
             
             # 尋找「科目 題號 原答案 更正答案」表格行
-            # 如：國文 39 ABCD ABD 或 ABCD
             lines = full_txt.splitlines()
             for line in lines:
                 m = re.search(r'([\u4e00-\u9fa5]{2,5})\s+(\d+|[A-Ga-g])\s+([A-Ga-g0-9、\s]+?)\s+([A-Ga-g0-9、\s]+|送分|全體給分)', line)
                 if m:
                     subj, qn, orig, corr = m.group(1).strip(), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
-                    # 規範化更正表科目名稱
                     if subj in ["國綜", "國語文"]: subj = "國文"
                     elif subj in ["數A", "高中數學A"]: subj = "數學A"
                     elif subj in ["數B", "高中數學B"]: subj = "數學B"
@@ -7252,6 +7263,40 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 if not q_candidates:
                     continue
                 final_q_file = sorted(q_candidates, key=lambda x: len(x), reverse=True)[0]
+
+                # 💡 [真理校準] 若模考缺少品牌或次數 (含 "全期" 或 "下學期")，偷瞄 PDF 第 1 頁首段標題 100% 救回！
+                cur_m_tag = key[2]
+                if key[1] in ["MOCK", "MOCK_GSAT", "MOCK_AST"] and any(k in cur_m_tag for k in ["全期", "下學期", "上學期", "全國"]):
+                    q_full_peek_path = os.path.join(root, final_q_file)
+                    try:
+                        peek_doc = fitz.open(q_full_peek_path)
+                        if len(peek_doc) > 0:
+                            p_txt = peek_doc[0].get_text("text")[:600].replace(" ", "").replace("\n", "")
+                            p_pub = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺|三民)', p_txt)
+                            p_leg = re.search(r'(北北基|新北基|北模|中模|南模|竹模|全模|全國公私立|公私立高級中學|全國高中|全國聯合)', p_txt)
+                            p_tim = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*[次回]|第\s*([0-9]+)\s*模|E([1-8])|([1-8])\s*模)', p_txt)
+
+                            c_org = p_pub.group(1) if p_pub else (p_leg.group(1) if p_leg else "")
+                            if c_org in ["全國公私立", "公私立高級中學", "全國高中", "全國聯合"]: c_org = "全模"
+                            elif c_org in ["北北基", "新北基"]: c_org = "北模"
+
+                            c_tim = ""
+                            if p_tim:
+                                raw_t = next(g for g in p_tim.groups() if g is not None)
+                                cn_map = {'一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8'}
+                                c_tim = f"第{cn_map.get(raw_t, raw_t)}次"
+
+                            if c_org or c_tim:
+                                sub_tags = [p for p in cur_m_tag.split("_") if p and p not in ["全期", "全國", "下學期", "上學期"]]
+                                if c_org and not any(k in sub_tags for k in ["北模", "中模", "南模", "竹模", "全模", "南一", "翰林", "龍騰", "康熹", "泰宇", "全華", "詮達", "文昌"]):
+                                    sub_tags.append(c_org)
+                                if c_tim and not any("第" in p and "次" in p for p in sub_tags):
+                                    sub_tags.append(c_tim)
+                                if sub_tags:
+                                    cur_m_tag = f"_{'_'.join(sub_tags)}"
+                        peek_doc.close()
+                    except Exception:
+                        pass
                 
                 # 尋找解答檔：若題目為補考，則答案檔「必須」為補考；若題目非補考，答案檔「嚴禁」為補考！
                 is_q_makeup = "_補考" in key[2]
@@ -7299,8 +7344,8 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                 exam_sets.append({
                     "year": key[0],
                     "exam_type": key[1],
-                    "mock_tag": key[2],
-                    "school_name": key[3],
+                    "mock_tag": cur_m_tag,
+                    "school_name": key[3] if key[1] == "SCHOOL" else "",
                     "subject": key[4],
                     "q_pdf": os.path.join(root, final_q_file),
                     "a_pdf": final_a_file,
@@ -7414,11 +7459,11 @@ def process_single_ticket_rerun(ticket: dict, parser: ExamParser, target_dirs: L
     for p in target_q.get('image_paths', []):
         if os.path.exists(p): contents.append(Image.open(p))
             
-    # 5. 呼叫大模型進行深度重生
-    logging.info("🧠 正在調用大模型執行單題名師級解析重生...")
+    # 5. 呼叫頂級大模型進行深度重生
+    logging.info("🧠 正在調用旗艦大模型執行單題名師級解析重生...")
     sol_batch, _ = parser.ai_manager.generate_with_retry(
         contents=contents, response_schema=QuestionSolutionBatch,
-        temperature=0.2, preferred_model="gemini-3.5-flash", enable_thinking=True, task_desc=f"[工單重跑 {uid}]"
+        temperature=0.2, preferred_model="gemini-3.8-flash", enable_thinking=True, task_desc=f"[工單旗艦重跑 {uid}]"  # 🚨 人工工單一律出動 3.8-flash
     )
     
     if sol_batch and 'solutions' in sol_batch and sol_batch['solutions']:
@@ -7470,14 +7515,20 @@ def execute_all_pending_tickets(parser: ExamParser, target_dirs: List[str], outp
     if not pending: return
     
     logging.info(f"📬 [檢測到待辦工單] 共有 {len(pending)} 道題目被使用者標記有瑕疵，啟動定向重跑程序...")
-    for t in pending:
-        success = process_single_ticket_rerun(t, parser, target_dirs, output_dir)
-        if success:
-            t["status"] = "resolved"
-            t["resolved_at"] = time.strftime('%Y-%m-%d %H:%M:%S')
-            
-    with open(TICKETS_FILE, "w", encoding="utf-8") as tf:
-        json.dump(tickets, tf, ensure_ascii=False, indent=4)
+    try:
+        for t in pending:
+            success = process_single_ticket_rerun(t, parser, target_dirs, output_dir)
+            if success:
+                t["status"] = "resolved"
+                t["resolved_at"] = time.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                if t.get("status") == "pending":
+                    t["status"] = "failed"
+                t["failed_at"] = time.strftime('%Y-%m-%d %H:%M:%S')
+    finally:
+        # 🚨 即使遇到超時中斷，也必定將已成功修復的工單狀態寫回磁碟！
+        with open(TICKETS_FILE, "w", encoding="utf-8") as tf:
+            json.dump(tickets, tf, ensure_ascii=False, indent=4)
         
 # ==========================================
 # 5. 執行進入點
@@ -7500,14 +7551,13 @@ if __name__ == "__main__":
         print(f"打散後最後一組: {API_KEYS[-1][:15]}...")
     # 推薦使用 flash 模型處理多模態 (Vision) 任務，速度快且便宜
     MODELS = [
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",         
-        "gemini-3.5-flash",       
-        "gemini-3.5-flash-lite",    
-        "gemini-3.1-flash-lite",          
-        "gemini-3-flash", 
-        "gemini-2.5-flash"         
+        "gemini-3.8-flash",        # 旗艦算力：負責學術仲裁、工單重跑、理科高難推導
+        "gemini-3.7-flash",        # 次旗艦：負責名師一題多解、另解速解推演
+        "gemini-3.6-flash",        # 均衡主力：負責審查批判、文科名師詳解
+        "gemini-3.5-flash",        # 視覺主力：負責模考詳解萃取、單題補漏、代碼修復
+        "gemini-3.5-flash-lite",   # 最新極速端點：負責試卷 OCR、評分標準框選、圖表繪製、模考自癒
+        "gemini-3.1-flash-lite",   # 備援極速端點：負責大批次純文字掃描
+        "gemini-2.5-flash"         # 兜底備援
     ]
     
     manager = GeminiFreeTierManager(api_keys=API_KEYS, models=MODELS)
@@ -7549,6 +7599,11 @@ if __name__ == "__main__":
                         u_task["status"] = "completed"
                         u_task["completed_at"] = time.strftime('%Y-%m-%d %H:%M:%S')
                         logging.info(f"🎉 [優先任務完成] 試卷 {u_task['file_prefix']} 已成功產出資料庫！")
+                    except (TimeoutSafetyException, RPDExhaustedException) as exit_err:
+                        u_task["status"] = "pending"  # 保持 pending，下次續跑
+                        with open(UPLOAD_TASKS_FILE, "w", encoding="utf-8") as tf:
+                            json.dump(upload_tasks, tf, ensure_ascii=False, indent=4)
+                        raise exit_err
                     except Exception as task_err:
                         u_task["status"] = "failed"
                         u_task["error_msg"] = str(task_err)
@@ -7576,7 +7631,15 @@ if __name__ == "__main__":
     # 💡 判斷一份任務是否「真的已經 100% 完工」
     def is_task_already_completed(t):
         s_name, y_name, e_type, m_tag, sch_name = t["subject"], t["year"], t["exam_type"], t["mock_tag"], t.get("school_name", "")
+        # 🚨 嚴格學科正規化（避免 數甲 找不到 數學甲，導致每次開機都重解）
         clean_s = re.sub(r'(?:考科|科)$', '', str(s_name).strip())
+        if clean_s in ["高中數學甲", "數甲"]: clean_s = "數學甲"
+        elif clean_s in ["高中數學乙", "數乙"]: clean_s = "數學乙"
+        elif clean_s in ["高中數學A", "數A"]: clean_s = "數學A"
+        elif clean_s in ["高中數學B", "數B"]: clean_s = "數學B"
+        elif clean_s in ["國綜", "國語文"]: clean_s = "國文"
+        elif clean_s in ["國語文寫作", "寫作測驗"]: clean_s = "國寫"
+
         digits = "".join(filter(str.isdigit, str(y_name)))
         y_val = int(digits) if digits else 111
         if e_type == "SCHOOL":
@@ -7605,8 +7668,13 @@ if __name__ == "__main__":
             try:
                 with open(target_db, "r", encoding="utf-8") as jf:
                     db_items = json.load(jf)
-                    min_q = 8 if any(k in clean_s for k in ["數", "math"]) else 15
-                    # 🚨 剛性校驗：題數達標 + 每一題都有實質詳解，才視為已完工！
+                    # 🚨 精準門檻：國寫永遠只有 2 大題，絕不可要求 15 題！
+                    if clean_s == "國寫":
+                        min_q = 2
+                    elif any(k in clean_s for k in ["數", "math"]):
+                        min_q = 8
+                    else:
+                        min_q = 15
                     has_real_sols = all(len(str(q.get("detailed_solution", "")).strip()) >= 20 for q in db_items)
                     return len(db_items) >= min_q and has_real_sols
             except Exception: pass
@@ -7669,17 +7737,29 @@ if __name__ == "__main__":
         m_tag = task["mock_tag"]
         sch_name = task.get("school_name", "")
         
-        # 取得正規化名稱
+        # 🚨 取得全域標準正規化名稱
         clean_s = re.sub(r'(?:考科|科)$', '', str(s_name).strip())
+        if clean_s in ["高中數學甲", "數甲"]: clean_s = "數學甲"
+        elif clean_s in ["高中數學乙", "數乙"]: clean_s = "數學乙"
+        elif clean_s in ["高中數學A", "數A"]: clean_s = "數學A"
+        elif clean_s in ["高中數學B", "數B"]: clean_s = "數學B"
+        elif clean_s in ["國綜", "國語文"]: clean_s = "國文"
+        elif clean_s in ["國語文寫作", "寫作測驗"]: clean_s = "國寫"
+
         digits = "".join(filter(str.isdigit, str(y_name)))
         y_val = int(digits) if digits else 111
         
         if e_type == "SCHOOL":
             t_folder = os.path.join("學校定期考", safe_filename(sch_name) if sch_name else "通用學校")
             sp_name = f"{y_val}學年度_{safe_filename(sch_name) if sch_name else '通用學校'}{m_tag}_{clean_s}"
-        elif e_type == "MOCK":
-            t_folder = "模擬考"
-            sp_name = f"{y_val}學年度_模擬考{m_tag}_{clean_s}"
+        elif e_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
+            ast_short = "分科" if y_val >= 111 else "指考"
+            mock_sub_type = "學測模擬" if e_type == "MOCK_GSAT" else (f"{ast_short}模擬" if e_type == "MOCK_AST" else "模擬考")
+            org_label = "全國"
+            for cand in ["北模", "中模", "南模", "竹模", "全模", "翰林", "南一", "龍騰", "康熹", "泰宇", "詮達", "全華", "漢樺", "文昌"]:
+                if cand in m_tag: org_label = cand; break
+            t_folder = os.path.join("模擬考", mock_sub_type, org_label)
+            sp_name = f"{y_val}學年度_{mock_sub_type}{m_tag}_{clean_s}"
         elif e_type == "GSAT":
             t_folder = "學測"
             is_mu = "_補考" in str(m_tag) or "補考" in str(y_name)
@@ -7692,14 +7772,24 @@ if __name__ == "__main__":
             
         sp_name = re.sub(r'[\s\n\r\t]+', '', sp_name)
         target_db = os.path.join(output_directory, t_folder, f"{sp_name}_database.json")
-        p_label = f"[{y_name}] {sch_name if sch_name else ''} {s_name} ({e_type})"
+        clean_t = m_tag.strip('_')
+        if e_type == "SCHOOL":
+            p_label = f"[{y_name}] {sch_name or '學校定期考'} {clean_t} {s_name} ({e_type})".replace("  ", " ")
+        elif e_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
+            p_label = f"[{y_name}] {clean_t} {s_name} ({e_type})".replace("  ", " ")
+        else:
+            p_label = f"[{y_name}] {s_name} ({e_type})"
+        p_label = re.sub(r'\s+', ' ', p_label).strip()
         
         # 檢查該試卷是否已存在且具備實體題目
         if os.path.exists(target_db):
             try:
                 with open(target_db, "r", encoding="utf-8") as jf:
                     db_items = json.load(jf)
-                    min_q = 8 if any(k in clean_s for k in ["數", "math"]) else 15
+                    # 🚨 國寫僅有 2 題，精確適配門檻
+                    if clean_s == "國寫": min_q = 2
+                    elif any(k in clean_s for k in ["數", "math"]): min_q = 8
+                    else: min_q = 15
                     if len(db_items) >= min_q:
                         pre_completed_count += 1
                         GLOBAL_METRICS.update_exam_progress(p_label, len(db_items), len(db_items), "✅ 100% 完工 (歷史存檔)")

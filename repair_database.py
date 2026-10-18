@@ -1058,26 +1058,47 @@ def run_database_repair_suite():
                 else:
                     e_type = "AST"
 
-                # 🚨 提早從檔名或舊路徑提取完整的 mock_tag（保留 南一_第4次、北模_第1次 等標籤！）
+                # 🚨 提早從檔名或舊路徑提取完整的 mock_tag（保留 全模_第2次、南一_第4次、北模_第1次 等標籤！）
                 mock_tag = ""
                 school_name = ""
                 if e_type == "SCHOOL":
-                    sch_match = re.search(r'([\u4e00-\u9fa5]{2,10}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', clean_name + root)
-                    school_name = sch_match.group(1) if sch_match else "通用學校"
+                    sch_match = re.search(r'([\u4e00-\u9fa5]{2,8}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', clean_name + root)
+                    cand_sch = sch_match.group(1) if sch_match else ""
+                    if cand_sch and not any(k in cand_sch for k in ["學年度", "學期", "全國", "公私立", "全區", "聯合", "模擬"]):
+                        school_name = cand_sch
+                    else:
+                        school_name = "通用學校"
                     exam_m = re.search(r'((?:第[一二三四五六七八九十0-9]+次?)?(?:定期考|段考|期中考|期末考|月考))', clean_name)
                     mock_tag = f"_{exam_m.group(1)}" if exam_m else "_段考"
                 elif e_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
-                    # 提取品牌/聯盟
-                    pub_m = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺|北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中市|台中區|台北區|臺北區|北區|南區|高雄區)', clean_name + root)
-                    org_str = pub_m.group(1) if pub_m else "全國"
+                    # 提取品牌/聯盟 (全面支援「全國高中」、「全國公私立」映射為「全模」)
+                    pub_m = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺|三民)', clean_name + root)
+                    leg_m = re.search(r'(北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中市|台中區|台北區|臺北區|北區|南區|高雄區|全國高中|全國公私立|公私立高級中學|全國聯合|公私立高中)', clean_name + root)
+                    
+                    if pub_m:
+                        org_str = pub_m.group(1)
+                    elif leg_m:
+                        raw_leg = leg_m.group(1)
+                        leg_map = {
+                            "北北基": "北模", "台北區": "北模", "臺北區": "北模", "新北基": "北模", "北區": "北模",
+                            "台中區": "中模", "台中市": "中模", "中區": "中模", "高雄區": "南模", "南區": "南模",
+                            "全模": "全模", "全區": "全模", "全國高中": "全模", "全國公私立": "全模", "公私立高級中學": "全模", "全國聯合": "全模", "公私立高中": "全模"
+                        }
+                        org_str = leg_map.get(raw_leg, "全模")
+                    else:
+                        org_str = "全模"
+                        
                     # 提取次數/期別
-                    # 🚨 修正：搜索範圍必須加上 root 路徑，否則會丟失資料夾層級的次數標籤！
-                    times_m = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', clean_name + root)
+                    times_m = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*[次回]|第\s*([0-9]+)\s*模|E([1-8])|([1-8])\s*模|[（\(]([1-8一二三四五六七八])[）\)])', clean_name + root)
                     times_str = ""
                     if times_m:
                         raw_t = next(g for g in times_m.groups() if g is not None)
                         cn_map = {'一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8'}
                         times_str = f"第{cn_map.get(raw_t, raw_t)}次"
+                    elif re.search(r'第二學期|下學期', clean_name + root):
+                        times_str = "下學期"
+                    elif re.search(r'第一學期|上學期', clean_name + root):
+                        times_str = "上學期"
                     else:
                         times_str = "全期"
                     mock_tag = f"_{org_str}_{times_str}"
