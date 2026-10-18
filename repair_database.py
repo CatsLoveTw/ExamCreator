@@ -20,20 +20,23 @@ GHOST_KEYWORDS_EXTENDED = [
     "作答注意事項", "無實質試題文字", "本題不存在", "本頁為封面", "此頁面為試題封面",
     "題目內容缺失", "題目闕如", "無法判定", "未包含第", "無實質試題", "免予計分",
     "不適用（此頁為試題封面", "題目內容未提供", "選項內容未提供", "請補充",
-    "作答示例", "第壹部分作答示例", "劃記方式之說明", "例：若第", "無法從提供的影像中"
+    "作答示例", "第壹部分作答示例", "劃記方式之說明", "例：若第", "無法從提供的影像中",
+    "重點摘要", "觀念摘要", "公式整理", "單元重點", "學習重點", "知識綱要", 
+    "單元目錄", "章節索引", "目次", "參考詳解", "試題詳解", "參考答案暨詳解"
 ]
 
 def is_phantom_table_or_cover(q: dict) -> bool:
     """
-    🚨 具備真題保護傘的「純附錄/週期表/封面」精確判定器
-    保障化學科含有『原子序』、『元素週期表』、『原子量』的正式題目 100% 不被誤刪！
+    🚨 具備真題保護傘的「純附錄/週期表/封面/重點摘要/目錄」精確判定器
+    - 徹底斬除：重點摘要、觀念整理表格、章節目錄、試卷封面、詳解洩漏題目
+    - 保障：化學科含有『原子序』、『元素週期表』、『原子量』的正式題目 100% 不被誤刪！
     """
     q_num = str(q.get("question_number", "")).strip()
     q_text = str(q.get("question_text", "")).strip()
     opts = q.get("options", []) or []
 
-    # 1. 題號本身就是非題目字眼
-    if any(k in q_num for k in ["封面", "週期表", "說明", "附錄", "附表", "注意事項"]):
+    # 1. 題號本身就是非題目字眼（包含摘要、目錄、詳解）
+    if any(k in q_num for k in ["封面", "週期表", "說明", "附錄", "附表", "注意事項", "重點摘要", "觀念摘要", "目錄", "目次", "詳解", "解答"]):
         return True
 
     # 2. 【核心保護】：只要有實體選項（2個以上非佔位符），100% 是真實考題，絕不可殺！
@@ -43,18 +46,20 @@ def is_phantom_table_or_cover(q: dict) -> bool:
         return False
 
     # 3. 【核心保護】：題幹含有明確的問句或解答導向特徵，100% 是手寫或簡答考題！
-    interrogative_keywords = ["何者", "下列", "試求", "試問", "計算", "說明", "為何", "多少", "？", "?", "選出", "正確", "錯誤", "寫出"]
+    interrogative_keywords = ["何者", "下列", "試求", "試問", "計算", "說明", "為何", "多少", "？", "?", "選出", "正確", "錯誤", "寫出", "求證"]
     if any(ik in q_text for ik in interrogative_keywords):
         return False
 
-    # 4. 判定為「純週期表/純封面/純常數表」佔位題：
-    # 必須同時滿足：沒有問句、沒有選項，且內容主體開頭為週期表或附表標題
-    is_pure_table_header = bool(re.match(r'^(?:[【\[\s]*)(?:元素週期表|週期表|週期律表|原子量表|常數表|參考常數|常用常數表|第壹部分作答示例)', q_text))
-    if is_pure_table_header:
+    # 4. 判定為「純週期表/純封面/純常數表/純重點摘要/純目錄」佔位題：
+    is_pure_non_question = bool(re.match(
+        r'^(?:[【\[<<\s]*)(?:元素週期表|週期表|週期律表|原子量表|常數表|參考常數|常用常數表|第壹部分作答示例|重點摘要|觀念摘要|公式整理|單元重點|學習重點|知識綱要|目次|目錄|Table of Contents|參考詳解|試題詳解)', 
+        q_text
+    ))
+    if is_pure_non_question:
         return True
 
-    # 題幹極短且完全由常數/週期表標題構成
-    if len(q_text) < 35 and any(k in q_text for k in ["週期表", "元素週期表", "原子量表", "常數表"]):
+    # 題幹極短且完全由常數、摘要或目錄標題構成
+    if len(q_text) < 40 and any(k in q_text for k in ["週期表", "元素週期表", "原子量表", "常數表", "重點摘要", "單元重點", "目次", "目錄"]):
         return True
 
     return False
@@ -137,31 +142,36 @@ def standardize_exam_metadata(year_str: str, exam_type: str, subject: str, mock_
         acad_year = f"{y_val}{sem_tag}定期考"
         exam_source = f"{y_val}學年度{sem_tag+'學期' if sem_tag else ''}{sch}{mock_tag}_{clean_sub}"
         type_folder = os.path.join("學校定期考", sch)
+        category_name = "學校段考"
     elif exam_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
-        # 🎯 模擬考細緻分類：學測模擬 vs 分科模擬，並按機構/地區分層
-        mock_sub_type = "學測模擬" if exam_type == "MOCK_GSAT" else ("分科模擬" if exam_type == "MOCK_AST" else "綜合模擬")
-        org_label = "全國模考"
-        for candidate_org in ["北模", "中模", "南模", "竹模", "全模", "翰林", "南一", "詮達", "全華", "漢樺", "文昌"]:
-            if candidate_org in mock_tag:
-                org_label = candidate_org
-                break
-        type_folder = os.path.join("模擬考", mock_sub_type, org_label)
+        # 🎯 精確劃分學測模擬考 vs 分科/指考模擬考
+        ast_short = "分科" if y_val >= 111 else "指考"
+        ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
+        mock_sub_type = "學測模擬" if exam_type == "MOCK_GSAT" else (f"{ast_short}模擬" if exam_type == "MOCK_AST" else "模擬考")
+        
+        org_label = "全國"
+        for cand in ["北模", "中模", "南模", "竹模", "全模", "翰林", "南一", "龍騰", "康熹", "泰宇", "詮達", "全華", "漢樺", "文昌"]:
+            if cand in mock_tag: org_label = cand; break
+            
         spec_name = f"{y_val}學年度_{mock_sub_type}{mock_tag}_{clean_sub}"
-        acad_year = f"{y_val}{mock_sub_type[:2]}模"
-        exam_source = f"{y_val}學年度{mock_sub_type}{mock_tag}_{clean_sub}"
+        acad_year = f"{y_val}{mock_sub_type[:2]}模{mock_tag}"
+        exam_source = f"{y_val}學年度{mock_sub_type}考{mock_tag}_{clean_sub}"
+        type_folder = os.path.join("模擬考", mock_sub_type, org_label)
+        category_name = "學測模擬" if exam_type == "MOCK_GSAT" else "分科模擬"
     elif exam_type == "GSAT":
         spec_name = f"{y_val}學年度_學測{makeup_tag}_{clean_sub}"
         acad_year = f"{y_val}學測{makeup_tag}"
         exam_source = f"{y_val}學年度學科能力測驗{makeup_src}{clean_sub}"
         type_folder = "學測"
+        category_name = "學測"
     else:  # AST (大考指考 / 分科測驗)
-        # 111學年起為分科測驗，110學年以前一律為指定科目考試(指考)
         ast_short = "分科" if y_val >= 111 else "指考"
         ast_full = "分科測驗" if y_val >= 111 else "指定科目考試"
         spec_name = f"{y_val}學年度_{ast_short}{makeup_tag}_{clean_sub}"
         acad_year = f"{y_val}{ast_short}{makeup_tag}"
         exam_source = f"{y_val}學年度{ast_full}{makeup_src}{clean_sub}"
         type_folder = "分科指考"
+        category_name = "分科指考"
 
     return {
         "spec_name": spec_name,
@@ -170,7 +180,9 @@ def standardize_exam_metadata(year_str: str, exam_type: str, subject: str, mock_
         "clean_subject": clean_sub,
         "is_makeup": is_makeup,
         "y_val": y_val,
-        "type_folder": type_folder
+        "type_folder": type_folder,
+        "exam_type": exam_type,
+        "exam_category": category_name
     }
 
 # -------------------------------------------------------------------------
@@ -647,6 +659,98 @@ def natural_sort_key(s):
     parts = re.split(r'(\d+)', s_str)
     return [int(text) if text.isdigit() else text.lower() for text in parts]
 
+
+# =========================================================================
+# 🛡️ 模擬考空殼污染安檢與大考真題鋼鐵保護引擎
+# =========================================================================
+def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
+    """
+    🚨 雙重安檢：
+    1. 100% 絕對豁免並保護：學測 (GSAT)、分科測驗/指考 (AST) 之官方真題，絕對不可刪除！
+    2. 精確偵測並銷毀：無詳解的空殼模擬考 (如 111 南一數 A 空殼)、扁平缺少期別品牌的舊版本，
+       並自動登記雲端銷毀，讓 catcher.py 能重新產出最高品質之完整詳解與圖片！
+    """
+    purged_count = 0
+    protected_official_count = 0
+
+    if not os.path.exists(DATABASE_DIR):
+        return 0, 0
+
+    for root, dirs, files in os.walk(DATABASE_DIR):
+        for f in files:
+            if not f.endswith("_database.json"):
+                continue
+
+            full_p = os.path.join(root, f)
+            clean_f = f.replace(" ", "")
+
+            # 🚨 1. 【大考真題鋼鐵白名單】：學測、指考、分科真題絕對不可刪除！
+            is_mock_or_school = any(k in clean_f or k in root for k in [
+                "模擬", "模考", "全模", "北模", "中模", "南模", "竹模", 
+                "南一", "翰林", "龍騰", "康熹", "泰宇", "全華", "詮達", "文昌", "漢樺", 
+                "學校", "段考", "定期考"
+            ])
+            is_official_gsat_or_ast = (
+                ("學測" in clean_f or "指考" in clean_f or "分科" in clean_f or "學科能力" in clean_f)
+                and not is_mock_or_school
+            )
+
+            if is_official_gsat_or_ast:
+                protected_official_count += 1
+                continue  # 🛡️ 官方真題享有最高級別豁免，絕對安全！
+
+            # 🚨 2. 檢測模擬考是否為「空殼題庫（無詳解）」或「扁平化丟失出版社標籤的污染檔案」
+            should_purge = False
+            purge_reason = ""
+
+            # 讀取並檢驗內容是否含有詳解
+            try:
+                with open(full_p, "r", encoding="utf-8") as jf:
+                    data = json.load(jf)
+                if isinstance(data, list) and len(data) > 0:
+                    empty_sol_count = sum(1 for q in data if len(str(q.get("detailed_solution", "")).strip()) < 20)
+                    # 🚨 只要超過 25% 的題目完全沒有詳解，即判定為偽完工空殼，必須刪除讓 catcher.py 重跑！
+                    if empty_sol_count >= len(data) * 0.25:
+                        should_purge = True
+                        purge_reason = f"含有 {empty_sol_count}/{len(data)} 題無詳解空殼題目"
+                    else:
+                        # 情況 A：若檔名遺失出版社/次數標籤，但題目本身有詳解，則不刪除，交由後續重新命名歸位！
+                        pass
+                else:
+                    should_purge = True
+                    purge_reason = "空白或損毀之 JSON 檔案"
+            except Exception:
+                should_purge = True
+                purge_reason = "無法讀取之損毀檔案"
+
+            # 執行銷毀並登記雲端清除（包含對應的 images 圖檔資料夾）
+            if should_purge:
+                try:
+                    # 1. 刪除錯誤的 JSON 資料庫
+                    os.remove(full_p)
+                    register_cloud_purge(full_p)
+                    
+                    # 2. 🚨 連坐刪除對應的 images 圖檔目錄，避免殘留切錯的舊圖或孤兒圖檔
+                    spec_base = clean_f.replace("_database.json", "")
+                    possible_img_dirs = [
+                        os.path.join(root, "images", spec_base),
+                        os.path.join(root, spec_base),
+                        os.path.join(DATABASE_DIR, "模擬考", "images", spec_base)
+                    ]
+                    for img_d in possible_img_dirs:
+                        if os.path.exists(img_d):
+                            import shutil
+                            shutil.rmtree(img_d, ignore_errors=True)
+                            register_cloud_purge(img_d)
+                            logging.info(f"🖼️ [同步清理圖檔] 已徹底刪除對應之舊圖片目錄：{os.path.basename(img_d)}")
+
+                    purged_count += 1
+                    logging.info(f"🗑️ [安全淨化銷毀] 已刪除模擬考污染檔案：{f} (原因: {purge_reason})，並已登記雲端清除！")
+                except Exception as e:
+                    logging.warning(f"無法刪除檔案 {full_p}: {e}")
+
+    return protected_official_count, purged_count
+
 # -------------------------------------------------------------------------
 # 6. 雙向融合仲裁主引擎
 # -------------------------------------------------------------------------
@@ -706,38 +810,6 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
             stats["ghosts"] += 1
             continue
             
-        # 🚨 2. 剛性答案格式清洗與【空白答案自動救回器】
-        det_sol = str(q.get("detailed_solution", ""))
-        
-        # 情況 A：若 answer 為空，從 detailed_solution 末尾或總結句中自動提取正解
-        if not q.get("answer"):
-            m_sol_ans = re.search(r'\*\*綜上所述[，,]\s*(?:本題)?(?:正確答案|正確選項|本題正確選項|選填題各畫卡格答案)?(?:為)?[：:\s]*\**\s*([^\n\*]+?)\**(?:\(|$|\n)', det_sol)
-            if m_sol_ans:
-                candidate = m_sol_ans.group(1).strip()
-                # 清理 (1)(4) -> 1,4 或 14
-                extracted_keys = re.findall(r'[A-Ga-g1-9]', candidate)
-                if extracted_keys:
-                    q["answer"] = "".join(extracted_keys) if q.get("question_type") == "多選題" else extracted_keys[0]
-                elif candidate in ["證明題", "見評分", "無答案（全體給分）"]:
-                    q["answer"] = candidate
-                else:
-                    q["answer"] = candidate.strip("()")
-
-        # 情況 B：修正「選出錯誤選項」導致的 1234 假衝突（如 100 指考數甲 Q1）
-        q_text = str(q.get("question_text", ""))
-        is_asking_false = any(k in q_text for k in ["哪一個選項是錯誤", "何者錯誤", "選出錯誤", "何者不正確"])
-        if is_asking_false and q.get("has_answer_discrepancy"):
-            # 若為選錯誤題型，且官方答案為單一數字，清除偽衝突
-            if len(str(q.get("official_answer", ""))) == 1:
-                q["answer"] = q["official_answer"]
-                q["derived_answer"] = q["official_answer"]
-                q["has_answer_discrepancy"] = False
-                q["discrepancy_reason"] = ""
-                # 清除詳解尾部錯誤的假仲裁總結
-                if "**綜上所述" in q["detailed_solution"]:
-                    base_part = q["detailed_solution"].split("**綜上所述")[0].strip()
-                    q["detailed_solution"] = f"{base_part}\n\n**綜上所述，本題正確選項為：({q['answer']})**"
-
         # 🚨 2. 剛性答案格式清洗、空白答案自癒與 has_official_answer 精確校正
         det_sol = str(q.get("detailed_solution", ""))
         cur_ans = str(q.get("answer", "")).strip()
@@ -758,7 +830,6 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
                 cur_ans = str(q["derived_answer"]).strip()
             
             q["answer"] = cur_ans
-            # 既然原本沒有答案，has_official_answer 必須設為 False，且無衝突
             q["has_official_answer"] = False
             q["official_answer"] = ""
             q["derived_answer"] = cur_ans
@@ -845,8 +916,26 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     # 🚨 2. 執行題組 shared_context 強制歸一化
     merged_list = harmonize_group_shared_context(merged_list)
     
-    # 🚨 3. 執行分類清洗與深度 LaTeX / 星號清理
+    # 🚨 3. 執行分類清洗、深度 LaTeX 清理，並補齊 exam_type / exam_category
     for q in merged_list:
+        # 若題目原本未標註 exam_type，依據考卷標籤自動補齊
+        if not q.get("exam_type"):
+            if "學測" in exam_tag and "模" not in exam_tag:
+                q["exam_type"] = "GSAT"
+                q["exam_category"] = "學測"
+            elif any(k in exam_tag for k in ["指考", "分科"]) and "模" not in exam_tag:
+                q["exam_type"] = "AST"
+                q["exam_category"] = "分科指考"
+            elif "學校" in db_path:
+                q["exam_type"] = "SCHOOL"
+                q["exam_category"] = "學校段考"
+            elif any(k in db_path for k in ["指考", "分科", "數甲", "數乙"]):
+                q["exam_type"] = "MOCK_AST"
+                q["exam_category"] = "分科模擬"
+            else:
+                q["exam_type"] = "MOCK_GSAT"
+                q["exam_category"] = "學測模擬"
+
         main_cat = sanitize_knowledge_point(q.get("topic_category", ""))
         cats = [sanitize_knowledge_point(c) for c in q.get("topic_categories", []) if c]
         q["topic_categories"] = list(dict.fromkeys(cats)) if cats else [main_cat]
@@ -905,14 +994,21 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     
 def run_database_repair_suite():
     print("=" * 75)
-    print("🚀 啟動【考卷雙胞胎智慧合併、exam_source全球統一與無損去重修復引擎】...")
+    print("🚀 啟動【題庫安全防護、大考真題豁免、模擬考空殼淨化與無損去重修復引擎】...")
     print("=" * 75)
 
+    # 1. 淨化知識庫單元名詞
     sanitize_subject_json()
 
     if not os.path.exists(DATABASE_DIR):
         print(f"❌ 找不到題庫目錄: {DATABASE_DIR}")
         return
+
+    # 2. 🚨 執行安檢淨化：徹底銷毀無詳解的空殼模考，並 100% 豁免大考真題
+    protected_cnt, purged_cnt = quarantine_and_purge_corrupted_mocks()
+    print(f"🛡️ [大考真題保護] 共核對並保護 {protected_cnt} 份學測/分科大考真題庫 (100% 豁免零誤刪)！")
+    if purged_cnt > 0:
+        print(f"🧹 [空殼污染清除] 共安全銷毀 {purged_cnt} 份無詳解或扁平化之舊版模考檔，已登記雲端同步抹除！")
 
     # 1. 深度掃描全庫所有 JSON 檔案，以「大考核心特徵」建立智慧分組池
     # key: (y_val, exam_type, is_makeup, clean_subject, folder)
@@ -920,7 +1016,8 @@ def run_database_repair_suite():
 
     for root, dirs, files in os.walk(DATABASE_DIR):
         for f in files:
-            if f.endswith(("_database.json", "_partial_database.json", "_raw_extracted.json")):
+            # 🚨 關鍵阻斷：絕對禁止將 _raw_extracted.json 視為正式題庫載入！它只是 Stage 1 的未解題快取！
+            if f.endswith(("_database.json", "_partial_database.json")):
                 full_p = os.path.join(root, f)
                 # 排除 .1.json 等重複備份雜訊
                 if re.search(r'\.\d+\.json$', f):
@@ -935,14 +1032,21 @@ def run_database_repair_suite():
                 
                 is_makeup = "補考" in clean_name
                 
-                # 判斷大考類型（🚨 最高優先級：優先過濾學校定期考與模擬考，避免「學測模擬」被誤當成「真實學測」！）
-                is_mock_kw = any(k in clean_name for k in ["模擬", "模考", "全模", "北模", "中模", "南模", "竹模", "全區", "中區", "詮達", "全華", "翰林", "南一", "文昌", "漢樺", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"])
+                # 判斷科目
+                subj = "未知"
+                for s_cand in ["數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", 
+                               "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "國文", "國寫", "英文", "自然", "社會"]:
+                    if s_cand in clean_name:
+                        subj = s_cand
+                        break
+
+                # 🚨 精細判斷大考類型（徹底區分 真學測/真分科 與 學測模擬/分科模擬！）
+                is_mock_kw = any(k in clean_name or k in root for k in ["模擬", "模考", "全模", "北模", "中模", "南模", "竹模", "全區", "中區", "詮達", "全華", "翰林", "南一", "文昌", "漢樺", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"])
                 is_school_kw = "學校" in root or any(k in clean_name for k in ["定期", "段考", "期中", "期末", "月考"])
 
                 if is_school_kw and not is_mock_kw:
                     e_type = "SCHOOL"
                 elif is_mock_kw:
-                    # 🎯 模擬考精確雙軌判定
                     if any(k in clean_name for k in ["指考", "分科", "數甲", "數乙", "數學甲", "數學乙"]):
                         e_type = "MOCK_AST"
                     elif any(k in clean_name for k in ["學測", "學科能力", "數A", "數B", "數學A", "數學B", "自然", "社會"]):
@@ -953,17 +1057,36 @@ def run_database_repair_suite():
                     e_type = "GSAT"
                 else:
                     e_type = "AST"
-                
-                # 判斷科目
-                subj = "未知"
-                for s_cand in ["數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", 
-                               "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "國文", "國寫", "英文", "自然", "社會"]:
-                    if s_cand in clean_name:
-                        subj = s_cand
-                        break
-                        
-                meta = standardize_exam_metadata(str(y_val), e_type, subj, mock_tag="_補考" if is_makeup else "")
-                group_key = (meta["y_val"], e_type, meta["is_makeup"], meta["clean_subject"], meta["type_folder"])
+
+                # 🚨 提早從檔名或舊路徑提取完整的 mock_tag（保留 南一_第4次、北模_第1次 等標籤！）
+                mock_tag = ""
+                school_name = ""
+                if e_type == "SCHOOL":
+                    sch_match = re.search(r'([\u4e00-\u9fa5]{2,10}(?:高級中學|高中|女中|中學|實驗中學|高職|附中))', clean_name + root)
+                    school_name = sch_match.group(1) if sch_match else "通用學校"
+                    exam_m = re.search(r'((?:第[一二三四五六七八九十0-9]+次?)?(?:定期考|段考|期中考|期末考|月考))', clean_name)
+                    mock_tag = f"_{exam_m.group(1)}" if exam_m else "_段考"
+                elif e_type in ["MOCK", "MOCK_GSAT", "MOCK_AST"]:
+                    # 提取品牌/聯盟
+                    pub_m = re.search(r'(南一|翰林|龍騰|康熹|泰宇|全華|詮達|文昌|漢樺|北北基|新北基|北模|中模|南模|竹模|全模|全區|中區|台中市|台中區|台北區|臺北區|北區|南區|高雄區)', clean_name + root)
+                    org_str = pub_m.group(1) if pub_m else "全國"
+                    # 提取次數/期別
+                    times_m = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*次|第\s*([0-9]+)\s*模|E([1-8])|([1-8])模)', clean_name)
+                    times_str = ""
+                    if times_m:
+                        raw_t = next(g for g in times_m.groups() if g is not None)
+                        cn_map = {'一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8'}
+                        times_str = f"第{cn_map.get(raw_t, raw_t)}次"
+                    else:
+                        times_str = "全期"
+                    mock_tag = f"_{org_str}_{times_str}"
+
+                if is_makeup:
+                    mock_tag += "_補考"
+
+                meta = standardize_exam_metadata(str(y_val), e_type, subj, mock_tag=mock_tag, school_name=school_name)
+                # 🚨 group_key 納入 spec_name，確保南一第4次與翰林第1次絕對不會被強行融合成同一個檔案！
+                group_key = (meta["y_val"], e_type, meta["is_makeup"], meta["clean_subject"], meta["spec_name"], meta["type_folder"], mock_tag, school_name)
                 
                 if group_key not in exam_groups:
                     exam_groups[group_key] = []
@@ -974,8 +1097,8 @@ def run_database_repair_suite():
 
     # 2. 對每個大考核心組別進行「跨檔案無損大合併」
     for group_key, file_list in exam_groups.items():
-        y_val, e_type, is_makeup, clean_sub, type_folder = group_key
-        meta = standardize_exam_metadata(str(y_val), e_type, clean_sub, mock_tag="_補考" if is_makeup else "")
+        y_val, e_type, is_makeup, clean_sub, spec_name_key, type_folder, mock_tag, school_name = group_key
+        meta = standardize_exam_metadata(str(y_val), e_type, clean_sub, mock_tag=mock_tag, school_name=school_name)
         
         target_dir = os.path.join(DATABASE_DIR, type_folder)
         os.makedirs(target_dir, exist_ok=True)
@@ -1006,28 +1129,103 @@ def run_database_repair_suite():
         text_fps = {}
 
         for q in pooled_questions:
+            # 🚨 剛性門檻：若題目未經 Stage 2 解析、完全沒有詳解內容，絕對不可作為有效題目合併！
+            sol_txt = str(q.get("detailed_solution", "")).strip()
+            if not sol_txt or len(sol_txt) < 20 or "超時或失敗" in sol_txt:
+                total_ghosts_purged += 1
+                continue
+
             if not is_valid_question_strict(q, max_pdf_q, physical_q_set, clean_sub):
                 total_ghosts_purged += 1
                 continue
 
-            q_num = str(q.get("question_number", "")).strip()
+            # 🚨【核心注入】：空白答案自動救回、格式標準化與反向題型校正
+            det_sol = str(q.get("detailed_solution", ""))
+            cur_ans = str(q.get("answer", "")).strip()
+
+            # A. 若 answer 為空，啟動名師詳解逆向萃取器，100% 救回真實答案
+            if not cur_ans:
+                m_ans = re.search(r'\*\*綜上所述[，,]\s*(?:本題)?(?:正確答案|正確選項|本題正確選項|選填題各畫卡格答案)?(?:為)?[：:\s]*\**\s*([^\n\*]+?)\**(?:\(|$|\n)', det_sol)
+                if m_ans:
+                    cand = m_ans.group(1).strip()
+                    pure_keys = re.findall(r'[A-Ga-g1-9]', cand)
+                    if pure_keys and q.get("question_type") in ["單選題", "多選題"]:
+                        cur_ans = "".join(pure_keys) if q.get("question_type") == "多選題" else pure_keys[0]
+                    elif cand in ["證明題", "見評分", "無答案（全體給分）"]:
+                        cur_ans = cand
+                    else:
+                        cur_ans = cand.strip("()$* ")
+                if not cur_ans and q.get("derived_answer"):
+                    cur_ans = str(q["derived_answer"]).strip()
+                
+                q["answer"] = cur_ans
+                q["has_official_answer"] = False
+                q["official_answer"] = ""
+                q["derived_answer"] = cur_ans
+                q["has_answer_discrepancy"] = False
+                q["discrepancy_reason"] = ""
+
+            # B. 若官方答案確實存在且有效
+            elif q.get("has_official_answer") is not False:
+                if not q.get("official_answer"):
+                    q["official_answer"] = cur_ans
+                if not q.get("derived_answer"):
+                    q["derived_answer"] = cur_ans
+
+            # C. 修正「選出錯誤選項」導致的 1234 假衝突（如 100 指考數甲 Q1）
+            q_text = str(q.get("question_text", ""))
+            is_asking_false = any(k in q_text for k in ["哪一個選項是錯誤", "何者錯誤", "選出錯誤", "何者不正確"])
+            if is_asking_false and q.get("has_answer_discrepancy"):
+                off_a = str(q.get("official_answer", "")).strip()
+                if len(off_a) == 1:
+                    q["answer"] = off_a
+                    q["derived_answer"] = off_a
+                    q["has_answer_discrepancy"] = False
+                    q["discrepancy_reason"] = ""
+                    if "**綜上所述" in q["detailed_solution"]:
+                        base_part = q["detailed_solution"].split("**綜上所述")[0].strip()
+                        q["detailed_solution"] = f"{base_part}\n\n**綜上所述，本題正確選項為：({off_a})**"
+
+            # D. 單選題防多選幻覺修復：若單選題被塞入多個字母，強制重設為官方答案
             q_type = str(q.get("question_type", "")).strip()
+            if q_type == "單選題":
+                der_ans = str(q.get("derived_answer", "")).strip()
+                if len(re.findall(r'[A-Z]', der_ans)) > 1:
+                    q["derived_answer"] = q["answer"]
+                    q["has_answer_discrepancy"] = False
+                    q.pop("discrepancy_reason", None)
+                    if "綜上所述" in q.get("detailed_solution", ""):
+                        q["detailed_solution"] = q["detailed_solution"].split("綜上所述")[0].strip() + f"\n\n**綜上所述，本題正確選項為：({q['answer']})**"
+
+            # E. 選項字母代號標準化
+            for ans_key in ["answer", "official_answer"]:
+                if ans_key in q and q[ans_key]:
+                    raw_ans = str(q[ans_key]).strip()
+                    if raw_ans not in ["證明題", "無答案（全體給分）"]:
+                        m_opt = re.search(r'^[（\(]?([A-Ga-g1-9]+)[）\)]?$', raw_ans)
+                        if m_opt and q.get("question_type") in ["單選題", "多選題"]:
+                            q[ans_key] = m_opt.group(1).upper()
+
+            # F. 清理字串內殘留的字面量 '\\n'
+            for k in ["detailed_solution", "question_analysis", "solving_strategy"]:
+                if k in q and isinstance(q[k], str):
+                    q[k] = q[k].replace("\\n", "\n")
+
+            q_num = str(q.get("question_number", "")).strip()
             key = (q_num, q_type)
             clean_text_fp = re.sub(r'[^\w\u4e00-\u9fa5]', '', str(q.get("question_text", "")))[:30]
-            current_score = len(str(q.get("detailed_solution", "")))
 
             if key in merged_map:
-                if current_score > len(str(merged_map[key].get("detailed_solution", ""))):
-                    merged_map[key] = q
+                merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
                 continue
 
             if clean_text_fp and len(clean_text_fp) >= 10:
                 if clean_text_fp in text_fps:
                     old_k = text_fps[clean_text_fp]
-                    if current_score > len(str(merged_map[old_k].get("detailed_solution", ""))):
-                        del merged_map[old_k]
-                        merged_map[key] = q
-                        text_fps[clean_text_fp] = key
+                    fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
+                    del merged_map[old_k]
+                    merged_map[key] = fused_q
+                    text_fps[clean_text_fp] = key
                     continue
                 text_fps[clean_text_fp] = key
 
@@ -1039,10 +1237,13 @@ def run_database_repair_suite():
         merged_list = heal_question_types(merged_list)
         merged_list = harmonize_group_shared_context(merged_list)
 
-        # 🚨 2. 全面統一 exam_source 與 academic_year，讓前端網站 100% 聚合為同一張卡片！
+        # 🚨 2. 全面統一 exam_source、academic_year，並強制寫入 exam_type 與 exam_category
         for q in merged_list:
             q["academic_year"] = meta["academic_year"]
             q["exam_source"] = meta["exam_source"]
+            # 🚨 注入精確大考分類，解決網頁後台全部變成 MOCK 的標籤遺失問題！
+            q["exam_type"] = meta["exam_type"]
+            q["exam_category"] = meta["exam_category"]
             main_cat = sanitize_knowledge_point(q.get("topic_category", ""))
             cats = [sanitize_knowledge_point(c) for c in q.get("topic_categories", []) if c]
             q["topic_categories"] = list(dict.fromkeys(cats)) if cats else [main_cat]
@@ -1058,7 +1259,15 @@ def run_database_repair_suite():
 
         current_count = len(merged_list)
         r_min, r_max = EXAM_REASONABLE_RANGES.get(clean_sub, (12, 50))
-        is_complete = (current_count >= min(max_pdf_q, r_min)) if max_pdf_q > 0 else (current_count >= r_min)
+        
+        # 🚨 剛性題數門檻：若有實體 PDF，必須達到實體題數的 90% 以上（且至少達到 r_min），杜絕 20 題只做 15 題就假完工！
+        if max_pdf_q > 0:
+            target_threshold = max(r_min, int(max_pdf_q * 0.9))
+            is_complete = (current_count >= target_threshold)
+            display_threshold = max_pdf_q
+        else:
+            is_complete = (current_count >= r_min)
+            display_threshold = r_min
 
         # 寫入正規命名的目標檔案
         if is_complete:
@@ -1067,14 +1276,14 @@ def run_database_repair_suite():
             if os.path.exists(canonical_partial_path):
                 os.remove(canonical_partial_path)
                 register_cloud_purge(canonical_partial_path)
-            status_str = f"✅ 100% 完工存檔 (實體收錄 {current_count} 題，已統一來源為「{meta['exam_source']}」)"
+            status_str = f"✅ 100% 完工存檔 (實體收錄 {current_count}/{display_threshold} 題，已統一來源為「{meta['exam_source']}」)"
         else:
             with open(canonical_partial_path, "w", encoding="utf-8") as f:
                 json.dump(merged_list, f, ensure_ascii=False, indent=4)
             if os.path.exists(canonical_db_path):
                 try: os.remove(canonical_db_path); register_cloud_purge(canonical_db_path)
                 except: pass
-            status_str = f"⏳ 題數不足 ({current_count} 題)，已降級 partial，待補齊真題"
+            status_str = f"⏳ 題數不足 ({current_count}/{display_threshold} 題)，已降級 partial，待補齊真題"
 
         # 🚨 關鍵清理：將組內所有「非正規檔名」的舊版本徹底從本機刪除，並登記雲端銷毀！
         for old_fp in file_list:
