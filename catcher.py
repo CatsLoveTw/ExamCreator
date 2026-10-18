@@ -3418,7 +3418,142 @@ def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
 def safe_filename(name: str) -> str:
     """過濾掉 Windows 檔案系統不允許的特殊字元，確保存檔安全"""
     return re.sub(r'[\\/*?:"<>|]', "_", name)
-    
+
+def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: List[str], base_year: str, base_mock_tag: str, base_subject: str) -> List[dict]:
+        """
+        🚨 [百頁合訂本循環狀態機] 專門處理 100+ 頁巨型 PDF：
+        自動辨識 [試卷1題目 ➔ 試卷1詳解 ➔ 試卷2題目 ➔ 試卷2詳解 ➔ ...] 的交替波浪！
+        回傳結構化考卷清單，每份考卷擁有獨立的題目頁碼與詳解頁碼。
+        """
+        total_pages = len(all_page_images)
+        if total_pages == 0:
+            return []
+
+        logging.info(f"📚 [合訂本循環掃描啟動] 正在對 {os.path.basename(pdf_path)} (共 {total_pages} 頁) 進行全局架構探測...")
+        GLOBAL_METRICS.set_stage(f"📚 正在探測 {total_pages} 頁大合輯之試卷與詳解循環邊界...")
+
+        class VisualPageMarker(BaseModel):
+            page_index: int = Field(description="頁面索引 (0-based)")
+            role: Literal["QUESTION", "SOLUTION", "COVER", "OTHER"] = Field(
+                description="'QUESTION' (試題問答頁), 'SOLUTION' (答案/詳解本頁面，含雙欄解析或答案表), 'COVER' (新試卷封面/標題), 'OTHER' (空白/注意事項)"
+            )
+            detected_exam_title: str = Field(default="", description="若為封面或有大標題，辨識其年份與次數（如 '107學年度第六次模擬考'）")
+            first_q_num: str = Field(default="", description="該頁出現的第一個題號（如 '1', '15', '非選一'）")
+
+        class BatchScanResult(BaseModel):
+            markers: List[VisualPageMarker] = Field(description="頁面視覺標籤列表")
+
+        # 1. 以每批 6~8 頁進行視覺低損耗快速分類
+        all_markers = [None] * total_pages
+        batch_size = 6
+
+        # 優先快篩數位文字層；若為純掃描檔文字為空，則送入視覺 AI
+        doc = fitz.open(pdf_path)
+        pages_needing_vision = []
+        for i in range(total_pages):
+            txt = doc[i].get_text("text").replace(" ", "") if i < len(doc) else ""
+            if len(txt) > 30:
+                is_sol = any(k in txt for k in ["[參考詳解]", "參考答案暨詳解", "考科詳解", "試題詳解", "答案與解析", "【解析】", "出處："])
+                is_cov = any(k in txt for k in ["作答注意事項", "模擬考試題", "學科能力測驗", "指定科目考試"]) and "第1題" not in txt
+                m_q = re.search(r'(?:第\s*(\d+|[一二三四五])\s*題|(\d+)\s*[.．、\s)])', txt)
+                fq = m_q.group(1) or m_q.group(2) if m_q else ""
+                all_markers[i] = {
+                    "page_index": i,
+                    "role": "SOLUTION" if is_sol else ("COVER" if is_cov else "QUESTION"),
+                    "detected_exam_title": "",
+                    "first_q_num": fq
+                }
+            else:
+                pages_needing_vision.append(i)
+        doc.close()
+
+        # 針對純圖片掃描頁面，啟動視覺多模態分類
+        if pages_needing_vision:
+            logging.info(f"🔍 檢測到 {len(pages_needing_vision)} 頁為純掃描圖，啟動 Gemini 3.5 Lite 批次視覺版面探針...")
+            for b_start in range(0, len(pages_needing_vision), batch_size):
+                sub_indices = pages_needing_vision[b_start : b_start + batch_size]
+                prompt = """請仔細觀察這組試卷掃描頁面，判斷每一頁的屬性：
+1. 'QUESTION'：正式考題（題幹、單選多選選項、字體較大、排版寬鬆）。
+2. 'SOLUTION'：官方答案或詳解本（特徵：印有答案表格、雙欄排版、題號加粗、帶有『【解析】』、『【出處】』或 (A) 錯誤 (B) 正確 等文字。注意：即使標頭沒印詳解二字，只要是逐題解析就屬於 SOLUTION！）。
+3. 'COVER'：試卷封面、大標題頁或新年度考卷開頭。
+"""
+                contents = [prompt]
+                opened_imgs = []
+                try:
+                    for p_i in sub_indices:
+                        contents.append(f"=== 第 {p_i+1} 頁影像 ===")
+                        im = Image.open(all_page_images[p_i])
+                        opened_imgs.append(im)
+                        contents.append(im)
+
+                    res_b, _ = self.ai_manager.generate_with_retry(
+                        contents=contents,
+                        response_schema=BatchScanResult,
+                        temperature=0.0,
+                        preferred_model="gemini-3.5-flash-lite",
+                        enable_thinking=False,
+                        task_desc=f"[合訂本視覺探針 p{sub_indices[0]+1}~{sub_indices[-1]+1}]"
+                    )
+                    if res_b and 'markers' in res_b:
+                        for m in res_b['markers']:
+                            idx = m.get('page_index', 0)
+                            if 0 <= idx < total_pages:
+                                all_markers[idx] = m
+                finally:
+                    for im in opened_imgs:
+                        try: im.close()
+                        except: pass
+
+        # -------------------------------------------------------------
+        # 2. 狀態機引擎：識別 [試題 ➔ 詳解 ➔ 試題 ➔ 詳解] 循環邊界
+        # -------------------------------------------------------------
+        cycles = []
+        current_cycle = None
+        current_state = "IDLE"  # "IN_Q", "IN_SOL"
+
+        for p_i in range(total_pages):
+            info = all_markers[p_i] or {"role": "QUESTION", "first_q_num": "", "detected_exam_title": ""}
+            role = info.get("role", "QUESTION")
+            fq = str(info.get("first_q_num", "")).strip()
+
+            # 判定是否開啟新試卷：遇到 COVER，或在詳解中突然出現第一題 (Q1)
+            is_new_exam_trigger = (
+                role == "COVER" or 
+                (current_state == "IN_SOL" and (role == "QUESTION" or fq in ["1", "一"]))
+            )
+
+            if is_new_exam_trigger:
+                if current_cycle and current_cycle["q_pages"]:
+                    cycles.append(current_cycle)
+                current_cycle = {
+                    "cycle_index": len(cycles) + 1,
+                    "title": info.get("detected_exam_title", ""),
+                    "q_pages": [],
+                    "sol_pages": []
+                }
+                current_state = "IN_Q"
+                if role != "COVER":
+                    current_cycle["q_pages"].append(p_i)
+            elif role == "SOLUTION":
+                if not current_cycle:
+                    current_cycle = {"cycle_index": 1, "title": "", "q_pages": [], "sol_pages": []}
+                current_cycle["sol_pages"].append(p_i)
+                current_state = "IN_SOL"
+            else:
+                if not current_cycle:
+                    current_cycle = {"cycle_index": 1, "title": "", "q_pages": [], "sol_pages": []}
+                current_cycle["q_pages"].append(p_i)
+                current_state = "IN_Q"
+
+        if current_cycle and current_cycle["q_pages"]:
+            cycles.append(current_cycle)
+
+        logging.info(f"🎉 [合訂本邊界解碼成功] 共成功分離出 {len(cycles)} 套獨立試卷循環！")
+        for idx, c in enumerate(cycles, 1):
+            logging.info(f"  -> 📦 循環 {idx}: 題目卷共 {len(c['q_pages'])} 頁 (p{c['q_pages'][0]+1}~p{c['q_pages'][-1]+1}) | 詳解本共 {len(c['sol_pages'])} 頁 ({f'p{c["sol_pages"][0]+1}~p{c["sol_pages"][-1]+1}' if c['sol_pages'] else '無詳解'})")
+
+        return cycles
+        
 class ExamParser:
     # 🚨 將提示詞作為類別屬性（縮排 4 格），確保 self.ANSWERS_OCR_PROMPT 的呼叫完全合規
     ANSWERS_OCR_PROMPT = """這是一份台灣考試的答案相關頁面影像。
@@ -4725,36 +4860,49 @@ class ExamParser:
         mock_sol_page_indices = []
         mock_sol_pdf_path = None
 
-        # 🚨 [頂層模考詳解檔定位] 全面掃描：即使未特別標註二合一，只要單一 PDF 內含有詳解標題，自動啟動二合一快車道！
-        if is_mock_paper:
-            # 優先檢查 q_pdf 是否本身為二合一試卷（包含第 11~24 頁之詳解頁面）
-            check_combined_candidate = q_pdf if (is_combined_pdf or not a_pdf or q_pdf == a_pdf) else None
-            if check_combined_candidate and os.path.exists(check_combined_candidate):
+        # 🚨 [合訂本循環狀態機對接]：徹底征服 100+ 頁大合輯，精確切分多套 [試題 ➔ 詳解] 循環！
+        if q_pdf and os.path.exists(q_pdf):
+            all_rendered_pages = self.pdf_to_images(q_pdf, "page", img_dir, dpi=300)
+            
+            # 若為獨立詳解檔
+            if a_pdf and os.path.exists(a_pdf) and os.path.abspath(q_pdf) != os.path.abspath(a_pdf):
                 try:
-                    temp_doc = fitz.open(check_combined_candidate)
-                    # 只有總頁數大於 6 頁才可能為題解合卷
-                    if len(temp_doc) >= 6:
-                        for p_i in range(1, len(temp_doc)): # 排除第 1 頁封面
-                            p_t = temp_doc[p_i].get_text("text")
-                            if any(k in p_t for k in ["[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", "試題詳解", "詳解本", "答案與解析", "答案與詳解", "選擇題答案確定稿"]) or ("出處：" in p_t and "解析：" in p_t) or ("【出處】" in p_t and "【解析】" in p_t):
-                                mock_sol_page_indices = list(range(p_i, len(temp_doc)))
-                                mock_sol_pdf_path = check_combined_candidate
-                                is_combined_pdf = True
-                                a_pdf = check_combined_candidate # 強制回填
-                                logging.info(f"📑 [模考題解合卷自動識別] 成功鎖定！第 {p_i+1}~{len(temp_doc)} 頁為官方真實詳解本！")
-                                break
-                    temp_doc.close()
-                except Exception as e:
-                    logging.warning(f"掃描二合一詳解頁失敗: {e}")
-            elif a_pdf and os.path.exists(a_pdf):
-                try:
-                    mock_sol_pdf_path = a_pdf
                     with fitz.open(a_pdf) as temp_a_doc:
                         mock_sol_page_indices = list(range(len(temp_a_doc)))
-                    logging.info(f"📑 [模考詳解鎖定] 獨立詳解卷：共 {len(mock_sol_page_indices)} 頁。")
+                    mock_sol_pdf_path = a_pdf
+                    q_image_paths = all_rendered_pages
+                    a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300)
+                    logging.info(f"📑 [模考獨立詳解本鎖定] 題目卷 {len(q_image_paths)} 頁，詳解卷 {len(mock_sol_page_indices)} 頁。")
                 except Exception as e:
                     logging.warning(f"讀取獨立詳解卷失敗: {e}")
+            else:
+                # 啟動循環狀態機，切分當前大合輯中的所有試卷區塊
+                cycles = self.segment_compilation_cycles_multimodal(q_pdf, all_rendered_pages, year, mock_tag, clean_subj_name)
+                
+                # 預設取用第一組循環（若為單卷合輯剛好為整卷；若為多卷合輯精確鎖定第一卷）
+                target_cycle = cycles[0] if cycles else {"q_pages": list(range(len(all_rendered_pages))), "sol_pages": []}
+                
+                # 若從版面中辨識出了更精準的期別/標題，動態補強標籤
+                if target_cycle.get("title") and any(k in target_cycle["title"] for k in ["第", "模", "次"]):
+                    t_match = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*[次回]|第\s*([0-9]+)\s*模)', target_cycle["title"])
+                    if t_match:
+                        raw_t = next(g for g in t_match.groups() if g is not None)
+                        cn_map = {'一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8'}
+                        mock_tag = f"_{mock_tag.split('_')[1]}_第{cn_map.get(raw_t, raw_t)}次"
 
+                q_page_idxs = target_cycle["q_pages"]
+                sol_page_idxs = target_cycle["sol_pages"]
+                
+                q_image_paths = [all_rendered_pages[i] for i in q_page_idxs]
+                a_image_paths = [all_rendered_pages[i] for i in sol_page_idxs] if sol_page_idxs else []
+                
+                if sol_page_idxs:
+                    mock_sol_page_indices = sol_page_idxs
+                    mock_sol_pdf_path = q_pdf
+                    is_combined_pdf = True
+                    a_pdf = q_pdf
+                    logging.info(f"📑 [合卷區塊鎖定] 成功切出目標試卷：題目卷第 {q_page_idxs[0]+1}~{q_page_idxs[-1]+1} 頁 (共 {len(q_image_paths)} 頁)，官方詳解本第 {sol_page_idxs[0]+1}~{sol_page_idxs[-1]+1} 頁 (共 {len(mock_sol_page_indices)} 頁)！")
+        
         # 🆕 1. 優先檢查是否有第一階段題目快取檔
         if os.path.exists(raw_extracted_json_path):
             logging.info(f"⚡ [Stage 1 快取命中] 找到已擷取的題目快取：{raw_extracted_json_path}")
@@ -4779,27 +4927,26 @@ class ExamParser:
             logging.info("📸 正在將原卷與解答 PDF 轉換成黃金 300 DPI 整頁圖片...")
             GLOBAL_METRICS.set_stage(f"📸 正在將試卷與解答 PDF 轉換為 300 DPI 整頁影像 ({year} {subject})")
 
-            if is_combined_pdf:
+            # 🚨 確定題目卷圖片路徑與解答卷圖片路徑
+            if is_combined_pdf and mock_sol_page_indices:
+                sol_start_p = mock_sol_page_indices[0]
+                q_image_paths = all_rendered_pages[:sol_start_p]
+                a_image_paths = [all_rendered_pages[i] for i in mock_sol_page_indices]
+                ans_text, ans_page_indices = "詳解本已在模考快車道就緒。", mock_sol_page_indices
+            elif is_combined_pdf:
                 all_rendered_pages = self.pdf_to_images(q_pdf, "page", img_dir, dpi=300)
-                sol_start_p = mock_sol_page_indices[0] if mock_sol_page_indices else -1
-                if sol_start_p != -1:
-                    q_image_paths = all_rendered_pages[:sol_start_p]
-                    a_image_paths = [all_rendered_pages[i] for i in mock_sol_page_indices]
+                ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
+                if ans_page_indices:
+                    a_image_paths = [all_rendered_pages[i] for i in ans_page_indices]
+                    q_image_paths = [all_rendered_pages[i] for i in range(len(all_rendered_pages)) if i not in ans_page_indices]
                 else:
-                    ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
-                    if ans_page_indices:
-                        a_image_paths = [all_rendered_pages[i] for i in ans_page_indices]
-                        q_image_paths = [all_rendered_pages[i] for i in range(len(all_rendered_pages)) if i not in ans_page_indices]
-                    else:
-                        q_image_paths = all_rendered_pages
-                        a_image_paths = []
-                if not ans_text:
-                    ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
+                    q_image_paths = all_rendered_pages
+                    a_image_paths = []
             else:
                 q_image_paths = self.pdf_to_images(q_pdf, "q_full", img_dir, dpi=300) 
                 a_image_paths = self.pdf_to_images(a_pdf, "a_full", img_dir, dpi=300)
                 ans_text, ans_page_indices = self.extract_clean_answers(a_pdf, target_subject=subject, target_year=year)
-
+                
             rubric_image_paths = self.pdf_to_images(rubric_pdf, "rubric_full", img_dir, dpi=300)
             rubric_text = self.extract_text_from_pdf(rubric_pdf)
 
@@ -4834,10 +4981,12 @@ class ExamParser:
                     logging.warning(f"讀取 Stage 1 快取失敗: {e}")
 
             pages = []
+            # 🚨 剛性範圍約束：題目擷取【嚴格鎖定】在當前試卷的 q_page_idxs 範圍內，絕不跨入詳解或下一份試卷！
+            allowed_q_set = set(q_page_idxs) if 'q_page_idxs' in locals() else set(range(min(len(doc), mock_sol_page_indices[0] if (is_combined_pdf and mock_sol_page_indices) else len(doc))))
             for page_num in range(len(doc)):
-                # 1. 排除已標定的解答頁
+                if page_num not in allowed_q_set:
+                    continue
                 if is_combined_pdf and page_num in ans_page_indices:
-                    logging.info(f"  -> ⏭️ [解答頁排除] 第 {page_num + 1} 頁為解答/評分表格頁，跳過試題擷取。")
                     continue
 
                 page = doc[page_num]
@@ -7333,31 +7482,67 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         }
 
     def extract_errata_from_pdf(errata_pdf_path: str):
-        """從解答更正通知 PDF 中提早萃取官方勘誤表格"""
+        """從解答更正通知 PDF 中萃取官方勘誤表格（支援純文字與掃描圖雙軌解析）"""
         global GLOBAL_ERRATA_MAP
         try:
             doc = fitz.open(errata_pdf_path)
             full_txt = ""
             for p in doc: full_txt += p.get_text("text") + "\n"
-            doc.close()
             
-            # 尋找「科目 題號 原答案 更正答案」表格行
-            lines = full_txt.splitlines()
-            for line in lines:
-                m = re.search(r'([\u4e00-\u9fa5]{2,5})\s+(\d+|[A-Ga-g])\s+([A-Ga-g0-9、\s]+?)\s+([A-Ga-g0-9、\s]+|送分|全體給分)', line)
-                if m:
-                    subj, qn, orig, corr = m.group(1).strip(), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
-                    if subj in ["國綜", "國語文"]: subj = "國文"
-                    elif subj in ["數A", "高中數學A"]: subj = "數學A"
-                    elif subj in ["數B", "高中數學B"]: subj = "數學B"
-                    elif subj in ["數甲", "高中數學甲"]: subj = "數學甲"
-                    elif subj in ["數乙", "高中數學乙"]: subj = "數學乙"
-                    elif subj in ["公民", "公社"]: subj = "公民與社會"
-                    elif subj in ["地科"]: subj = "地球科學"
-                    
-                    corr_clean = "無答案（全體給分）" if "送分" in corr or "給分" in corr else corr.replace(" ", "").replace("或", ",")
-                    GLOBAL_ERRATA_MAP[(subj, qn)] = corr_clean
-                    logging.info(f"📢 [載入官方更正通知] 科目: {subj} | 題號: {qn} | 原答案: {orig} ➔ 更正為: {corr_clean}")
+            # 🚨 雙軌解析：若為純圖片掃描檔，啟動視覺 OCR 提取更正表格
+            if len(full_txt.strip()) < 15 and len(doc) > 0:
+                logging.info(f"🔍 [更正通知掃描檔辨識] {os.path.basename(errata_pdf_path)} 為純圖片，啟動視覺 OCR...")
+                class VisualErrataItem(BaseModel):
+                    subject: str = Field(description="更正科目，如 國文, 物理, 數學A")
+                    question_number: str = Field(description="題號，如 10, 25")
+                    corrected_answer: str = Field(description="更正後的正確答案，如 B, ACD, 送分")
+
+                class VisualErrataPage(BaseModel):
+                    items: List[VisualErrataItem] = Field(description="更正條目列表")
+
+                for p_idx in range(len(doc)):
+                    pix = doc[p_idx].get_pixmap(dpi=200)
+                    tmp_p = f"temp_errata_{p_idx}.png"
+                    pix.save(tmp_p)
+                    try:
+                        with Image.open(tmp_p) as p_img:
+                            res_err, _ = parser.ai_manager.generate_with_retry(
+                                contents=["這是一份考試答案更正/勘誤通知，請提取更正的科目、題號與更正後答案：", p_img],
+                                response_schema=VisualErrataPage,
+                                temperature=0.0,
+                                preferred_model="gemini-3.5-flash-lite",
+                                enable_thinking=False
+                            )
+                            if res_err and 'items' in res_err:
+                                for it in res_err['items']:
+                                    s = re.sub(r'(?:考科|科)$', '', it.get('subject', '').strip())
+                                    qn = str(it.get('question_number', '')).strip()
+                                    ca = clean_ocr_answer_format(it.get('corrected_answer', ''))
+                                    if s and qn and ca:
+                                        GLOBAL_ERRATA_MAP[(s, qn)] = ca
+                                        logging.info(f"📢 [視覺載入官方更正] 科目: {s} | 題號: {qn} ➔ 更正為: {ca}")
+                    finally:
+                        if os.path.exists(tmp_p): os.remove(tmp_p)
+            else:
+                # 純文字層正則提取
+                lines = full_txt.splitlines()
+                for line in lines:
+                    m = re.search(r'([\u4e00-\u9fa5]{2,5})\s+(\d+|[A-Ga-g])\s+([A-Ga-g0-9、\s]+?)\s+([A-Ga-g0-9、\s]+|送分|全體給分)', line)
+                    if m:
+                        subj, qn, orig, corr = m.group(1).strip(), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+                        clean_s = re.sub(r'(?:考科|科)$', '', subj)
+                        if clean_s in ["國綜", "國語文"]: clean_s = "國文"
+                        elif clean_s in ["數A", "高中數學A"]: clean_s = "數學A"
+                        elif clean_s in ["數B", "高中數學B"]: clean_s = "數學B"
+                        elif clean_s in ["數甲", "高中數學甲"]: clean_s = "數學甲"
+                        elif clean_s in ["數乙", "高中數學乙"]: clean_s = "數學乙"
+                        elif clean_s in ["公民", "公社"]: clean_s = "公民與社會"
+                        elif clean_s in ["地科"]: clean_s = "地球科學"
+                        
+                        corr_clean = "無答案（全體給分）" if any(k in corr for k in ["送分", "給分"]) else clean_ocr_answer_format(corr)
+                        GLOBAL_ERRATA_MAP[(clean_s, qn)] = corr_clean
+                        logging.info(f"📢 [載入官方更正通知] 科目: {clean_s} | 題號: {qn} | 原答案: {orig} ➔ 更正為: {corr_clean}")
+            doc.close()
         except Exception as e:
             logging.warning(f"讀取更正通知 {errata_pdf_path} 失敗: {e}")
 
@@ -7374,9 +7559,9 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             
             # 優先掃描並載入更正通知 PDF
             for f in pdf_files:
-                if any(k in f for k in ["更正通知", "解答更正", "更正表"]):
+                if any(k in f for k in ["更正通知", "解答更正", "更正表", "答案更正", "詳解更正", "詳解修正", "答案修正", "勘誤表", "勘誤", "疑義"]):
                     extract_errata_from_pdf(os.path.join(root, f))
-
+                    
             task_groups = {}
             global_answer_files = []
 
