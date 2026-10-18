@@ -71,7 +71,11 @@ jobs:
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
+          GDRIVE_CLIENT_ID_ENV: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET_ENV: ${{ secrets.GDRIVE_CLIENT_SECRET }}
           GDRIVE_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_OAUTH_TOKEN }}
+          GDRIVE_MOCK_CLIENT_ID_ENV: ${{ secrets.GDRIVE_MOCK_CLIENT_ID }}
+          GDRIVE_MOCK_CLIENT_SECRET_ENV: ${{ secrets.GDRIVE_MOCK_CLIENT_SECRET }}
           GDRIVE_MOCK_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_MOCK_OAUTH_TOKEN }}
           GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
         run: |
@@ -82,6 +86,8 @@ jobs:
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
+          client_id = $GDRIVE_CLIENT_ID_ENV
+          client_secret = $GDRIVE_CLIENT_SECRET_ENV
           scope = drive
           token = $GDRIVE_OAUTH_TOKEN_ENV
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
@@ -93,6 +99,8 @@ jobs:
             cat << EOF >> rclone.conf
           [gdrive_mock]
           type = drive
+          client_id = $GDRIVE_MOCK_CLIENT_ID_ENV
+          client_secret = $GDRIVE_MOCK_CLIENT_SECRET_ENV
           scope = drive
           token = $GDRIVE_MOCK_OAUTH_TOKEN_ENV
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
