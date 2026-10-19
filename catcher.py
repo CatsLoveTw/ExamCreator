@@ -163,17 +163,31 @@ def clean_ocr_answer_format(ans_str: str) -> str:
         cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
         return cleaned.strip(" ,;")
 
-    # 7. 🚨 剛性純選項提取：若答案包含中文或多餘說明（例如 "(D) 丙生、丁生" 或 "D 丙生"）
-    # 優先提取最前面的純選項代號 (A-G 或 1-9)
-    opt_prefix_match = re.search(r'^[（\(]?([A-Ga-g1-9]+)[）\)]?', ans_str)
+    # 7. 🚨 多選答案完整提取：優先捕捉如 (B)(D)、(B)、(E)、(A)(C)(E)、B,D 等複合多選格式，絕不閹割！
+    # A. 提取所有成對括號中的選項（如 (B)(D) 或 (B)、(E)）
+    bracket_opts = re.findall(r'[（\(]([A-Ga-g1-9])[）\)]', ans_str)
+    if len(bracket_opts) >= 2:
+        return "".join(sorted(list(dict.fromkeys(c.upper() for c in bracket_opts))))
+
+    # B. 提取由頓號、逗號或空格分隔的多選字母（如 B、D 或 B, E 或 B D）
+    sep_opts = re.findall(r'(?<![a-zA-Z0-9])([A-Ga-g])(?![a-zA-Z0-9])', ans_str)
+    if len(sep_opts) >= 2 and not any(k in ans_str for k in ["題", "分", "第", "選項"]):
+        return "".join(sorted(list(dict.fromkeys(c.upper() for c in sep_opts))))
+
+    # C. 若為純連續大寫字母（如 BD, BCE, ADE）
+    pure_multi = re.findall(r'^[A-Ga-g]{2,5}$', ans_str.strip())
+    if pure_multi:
+        return "".join(sorted(list(dict.fromkeys(pure_multi[0].upper()))))
+
+    # D. 單一選項帶中文說明（如 "(D) 丙生、丁生" 或 "D 丙生"）
+    opt_prefix_match = re.search(r'^[（\(]?([A-Ga-g1-9])[）\)]?', ans_str)
     if opt_prefix_match and any(c.isalpha() for c in opt_prefix_match.group(1)):
-        # 若是選擇題標準字母，只取該純字母（大寫）
         return opt_prefix_match.group(1).upper()
 
     # 一般答案：清除中文字元，但完整保留英數、逗號、負號、分數線 / 與小數點 .
     cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
     cleaned = re.sub(r'[^\w,\-±/.]', '', cleaned)
-    return cleaned.strip(",()")
+    return cleaned.strip(",()")。
 
 def evaluate_solution_quality(q_obj: dict) -> int:
     """
@@ -3995,16 +4009,28 @@ class ExamParser:
                 if len(cand_v) <= 25 and not any(k in cand_v for k in ["選", "式", "法", "題"]):
                     conclusive_ans = cand_v.strip("$* ")
 
-        # 2. 答案標準化覆寫（若簡答缺漏或格式不全，以詳解結論覆寫）
+        # 2. 答案標準化覆寫（🚨 多選題剛性保護：若結論有 2 個以上選項，絕不被簡答的單字母覆蓋！）
         clean_sol_ans = clean_ocr_answer_format(sol_ans)
         clean_concl = clean_ocr_answer_format(conclusive_ans) if conclusive_ans else ""
-        
-        final_ans = clean_sol_ans or clean_concl or raw_ans
+
+        is_multi_choice = q_data.get("question_type") == "多選題" or len(clean_concl) >= 2 or len(clean_sol_ans) >= 2
+        if is_multi_choice:
+            q_data["question_type"] = "多選題"
+            # 優先採用長度更長、更完整的多選選項（例如 BD 優於 B）
+            if len(clean_concl) >= 2 and len(clean_concl) > len(clean_sol_ans):
+                final_ans = clean_concl
+            elif len(clean_sol_ans) >= 2:
+                final_ans = clean_sol_ans
+            else:
+                final_ans = clean_concl or clean_sol_ans or raw_ans
+        else:
+            final_ans = clean_sol_ans or clean_concl or raw_ans
+
         if final_ans:
             q_data["answer"] = final_ans
             q_data["official_answer"] = final_ans
             q_data["has_official_answer"] = True
-
+            
         # 3. 檢查題幹長度與是否有破損特徵
         has_broken_clue = (
             len(q_text) < 15 or 
