@@ -3550,7 +3550,16 @@ def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: 
 
         logging.info(f"🎉 [合訂本邊界解碼成功] 共成功分離出 {len(cycles)} 套獨立試卷循環！")
         for idx, c in enumerate(cycles, 1):
-            logging.info(f"  -> 📦 循環 {idx}: 題目卷共 {len(c['q_pages'])} 頁 (p{c['q_pages'][0]+1}~p{c['q_pages'][-1]+1}) | 詳解本共 {len(c['sol_pages'])} 頁 ({f'p{c["sol_pages"][0]+1}~p{c["sol_pages"][-1]+1}' if c['sol_pages'] else '無詳解'})")
+            q_count = len(c['q_pages'])
+            q_range = f"p{c['q_pages'][0]+1}~p{c['q_pages'][-1]+1}" if c['q_pages'] else "無題目"
+    
+            sol_count = len(c['sol_pages'])
+            sol_range = f"p{c['sol_pages'][0]+1}~p{c['sol_pages'][-1]+1}" if c['sol_pages'] else "無詳解"
+    
+            logging.info(
+                f"  -> 📦 循環 {idx}: 題目卷共 {q_count} 頁 ({q_range}) | ",
+                f"詳解本共 {sol_count} 頁 ({sol_range})"
+            )
 
         return cycles
         
