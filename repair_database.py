@@ -1243,6 +1243,26 @@ def run_database_repair_suite():
                     if "綜上所述" in q.get("detailed_solution", ""):
                         q["detailed_solution"] = q["detailed_solution"].split("綜上所述")[0].strip() + f"\n\n**綜上所述，本題正確選項為：({q['answer']})**"
 
+            # 🚨 E. 【多選題答案逆向自癒】：若為多選題且答案被閹割為單字母，直接從詳解文字中救回完整答案（如 B ➔ BD）！
+            if q_type == "多選題":
+                cur_a = str(q.get("answer", "")).strip()
+                det_s = str(q.get("detailed_solution", ""))
+                # 尋找詳解中的「故選(B)(D)」、「故選(A)(E)」等結論
+                m_concl = re.search(r'(?:故(?:本題)?選|正確選項(?:為)?)[：:\s]*[（\(【]?([A-Ga-g1-9,\(\)（）\s、]+)[）\)】]?', det_s)
+                if m_concl:
+                    found_keys = re.findall(r'[A-Ga-g]', m_concl.group(1))
+                    if len(found_keys) >= 2 and len(found_keys) > len(re.findall(r'[A-Za-z]', cur_a)):
+                        healed_ans = "".join(sorted(list(dict.fromkeys(k.upper() for k in found_keys))))
+                        q["answer"] = healed_ans
+                        q["official_answer"] = healed_ans
+                        q["derived_answer"] = healed_ans
+                        q["has_answer_discrepancy"] = False
+                        # 重新修正結尾總結句
+                        if "綜上所述" in det_s:
+                            base_part = det_s.split("綜上所述")[0].strip()
+                            fmt_opts = "".join([f"({k})" for k in healed_ans])
+                            q["detailed_solution"] = f"{base_part}\n\n**綜上所述，本題正確選項為：{fmt_opts}**"
+                            
             # E. 選項字母代號標準化
             for ans_key in ["answer", "official_answer"]:
                 if ans_key in q and q[ans_key]:
