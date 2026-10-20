@@ -2628,11 +2628,11 @@ class GeminiFreeTierManager:
                 key.mark_model_rate_limited(model, cooldown_seconds=40.0)
                 logging.info(f"⏳ [獨立模型降溫] 金鑰 {key.api_key[:8]}... 僅對模型 {model} 冷卻 40 秒，其他模型額度完全保留！")
 
-    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=30, preferred_model: Optional[str] = None, enable_thinking: bool = True, task_desc: str = "", provider: str = "google"):
+    def generate_with_retry(self, contents, response_schema, temperature=0.2, max_attempts=30, preferred_model: Optional[str] = None, enable_thinking: bool = True, thinking_level: str = "HIGH", task_desc: str = "", provider: str = "google"):
         # === 架構：若指定為 Groq，則將任務路由給 DeepSeek-R1 / Qwen ===
         if provider == "groq":
             return self._generate_with_groq(contents, response_schema, temperature, max_attempts, preferred_model, task_desc)
-
+            
         # === 🚀 全動態模型調度與負載均衡梯隊 ===
         candidate_models = []
         with self.lock:
@@ -2680,9 +2680,10 @@ class GeminiFreeTierManager:
             
             thinking_config = None
             if any(m in model for m in ["gemini-3.8", "gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
-                # 只有在非 OCR 掃描任務且明確認可思考時才啟用 HIGH，防止代理端點逾時 (524)
+                # 🚨 [動態思考強度適配]：正式大考真題與段考啟用 HIGH 深度推導，模考與非必要任務啟用 LOW 加速！
                 if enable_thinking and not any(kw in task_desc for kw in ["OCR", "掃描", "解答仲裁"]):
-                    thinking_config = types.ThinkingConfig(thinking_level='HIGH')
+                    lvl = "HIGH" if thinking_level.upper() == "HIGH" else "LOW"
+                    thinking_config = types.ThinkingConfig(thinking_level=lvl)
                 else:
                     thinking_config = None
             try:
@@ -4031,11 +4032,22 @@ class ExamParser:
             q_data["official_answer"] = final_ans
             q_data["has_official_answer"] = True
             
-        # 3. 檢查題幹長度與是否有破損特徵
+        # 🚨 [全方位破損、OCR 斷頭與字串黏連檢測]：
+        # A. 詳解極度空洞或僅有一行課綱標題（如第 47、52 題）
+        sol_is_trivial = len(sol_text) < 35 or (sol_text.startswith("內容：") and len(sol_text.splitlines()) <= 2)
+        
+        # B. 非選答案字串擠壓黏連（如 3aaBBaaBbaabb 或 AABBAaBBAABbAaBb2020）
+        ans_is_squished = bool(re.search(r'[a-zA-Z]{5,}', raw_ans)) and not raw_ans.isalpha()
+        
+        # C. 結論答案衝突
+        has_concl_mismatch = bool(clean_concl and clean_sol_ans and clean_concl != clean_sol_ans)
+
         has_broken_clue = (
             len(q_text) < 15 or 
-            any(bad in q_text for bad in ["\x0c", "__DBL", "", "???"]) or
-            (clean_concl and clean_sol_ans and clean_concl != clean_sol_ans)
+            sol_is_trivial or
+            ans_is_squished or
+            has_concl_mismatch or
+            any(bad in q_text for bad in ["\x0c", "__DBL", "???"])
         )
 
         # 若無實質矛盾且排版正常，本地自癒直接完工返回，不消耗額外 API！
@@ -4049,8 +4061,8 @@ class ExamParser:
         
         opts_str = "\n".join([f"- ({opt.get('key')}) {opt.get('value')}" for opt in q_data.get("options", [])])
         inspector_prompt = f"""
-        你是一位極其嚴謹的高中試題排版與 OCR 校對專家。
-        我們正在核對以下模擬考題目的「題幹文字」與「官方詳解」：
+        你是一位極其嚴謹的高中試題排版與 OCR 影像校對專家。
+        我們正在核對以下模擬考題目的「題幹文字」、「選項」與「官方詳解本文字」：
 
         【題幹文字】：
         {q_text}
@@ -4058,16 +4070,21 @@ class ExamParser:
         【題目選項】：
         {opts_str or '無'}
 
-        【官方詳解文字】：
+        【官方詳解本文字】：
         {sol_text}
 
         【當前標註答案】：{final_ans}
 
-        請快速執行校對任務：
-        1. 比對題幹中的數字、公式、變數（如 x, y, a, b, 角度, 向量）是否與詳解推導完全吻合？
-           若題幹文字在 OCR 時漏掉了負號、小數點、平方上標或有錯別字，請在 `corrected_question_text` 中予以修正！
-        2. 依據詳解最後的推導結論，確認最終標準答案（如選項代號或最終數值），填入 `corrected_answer`。
-        3. 輸出 100% 格式規範的 JSON。
+        請執行最高規格的 OCR 抓字校正與邏輯修復：
+        1. **【答案格式解壓縮與還原】**：
+           - 若當前答案為擠壓黏連字串（例如 `3aaBBaaBbaabb` 或 `AABBAaBBAABbAaBb2020`），請依據題意將其解壓縮還原為標準格式！
+           - 例如將 `3aaBBaaBbaabb` 還原為：`3 種（aaBB、aaBb、aabb）`。
+           - 例如將 `AABBAaBBAABbAaBb2020` 還原為：`AABB、AaBB、AABb、AaBb，環境溫度高於 20℃`。
+        2. **【推導公式與抓字修正】**：
+           - 比對題幹與詳解中的數值、正負號、分數、下標是否有一致？
+           - 若詳解文字只有一行空泛標題（如「內容：...」），請在 `corrected_solution_snippet` 中依據題意與答案，擴寫出完整的推導步驟！
+           - 若詳解有明顯漏字、負號遺失或公式斷裂，請在 `corrected_solution_snippet` 中輸出修復後的完整詳解！
+        3. 標記 `has_ocr_error: true`，並在 `repair_summary` 中記錄修復內容。
         """
 
         try:
@@ -4082,14 +4099,21 @@ class ExamParser:
 
             if res_heal and res_heal.get("has_ocr_error"):
                 fixed_txt = res_heal.get("corrected_question_text", "").strip()
-                fixed_a = clean_ocr_answer_format(str(res_heal.get("corrected_answer", "")).strip())
+                fixed_a = str(res_heal.get("corrected_answer", "")).strip()
+                fixed_sol = str(res_heal.get("corrected_solution_snippet", "")).strip()
                 summary = res_heal.get("repair_summary", "")
 
                 if fixed_txt and len(fixed_txt) >= len(q_text) * 0.8:
                     q_data["question_text"] = fixed_txt
+
+                # 🚨 答案解壓縮與格式標準化
                 if fixed_a:
-                    q_data["answer"] = fixed_a
-                    q_data["official_answer"] = fixed_a
+                    q_data["answer"] = clean_ocr_answer_format(fixed_a) if q_data.get("question_type") in ["單選題", "多選題"] else fixed_a
+                    q_data["official_answer"] = q_data["answer"]
+
+                # 🚨 關鍵補漏：將修復後的詳解推導覆寫回 detailed_solution，徹底消除斷頭與錯字！
+                if fixed_sol and len(fixed_sol) > len(sol_text):
+                    q_data["detailed_solution"] = fixed_sol
                     
                 logging.info(f"  -> ✅ [自癒成功] 題號 {q_data.get('question_number')} 已自動修復：{summary}")
         except Exception as e:
@@ -4606,18 +4630,34 @@ class ExamParser:
         stage_1_models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
         stage_1_model = stage_1_models[0]
 
-        # 1. 理科高難推理池 (嚴禁任何 Lite 模型混入，保證微積分、幾何座標化、力學推導之學術水準)
-        stem_reasoning_pool = [
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
-            "gemini-3.6-flash"
-        ]
-        # 2. 文科與通識均衡池 (注重語意剖析與篇章脈絡，兼顧高 QPS 與低消耗)
-        humanities_pool = [
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite"
-        ]
+        # 🚨 [依試卷重要度動態綁定模型梯隊]：
+        # 大考真題（學測、分科指考）與段考的理科考題，100% 由 3.8-flash 與 3.7-flash 掛帥領銜！
+        is_official_or_school = exam_type in ["GSAT", "AST", "SCHOOL"]
+
+        if is_hard_stem and is_official_or_school:
+            # 大考理科真題：最高規格旗艦智商池
+            tier1_pool = [
+                "gemini-3.8-flash",
+                "gemini-3.7-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash"
+            ]
+        elif is_hard_stem:
+            # 模考理科：兼顧官方詳解對位與吞吐效率
+            tier1_pool = [
+                "gemini-3.8-flash",
+                "gemini-3.7-flash",
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-lite"
+            ]
+        else:
+            # 文科與通識均衡池
+            tier1_pool = [
+                "gemini-3.5-flash-lite"
+                "gemini-3.6-flash",
+                "gemini-3.5-flash",
+            ]
         
         # 依科目自動綁定
         is_hard_stem = any(s in clean_subj_name for s in ["數", "物理", "化學", "自然"])
@@ -6233,7 +6273,15 @@ class ExamParser:
                             matched_exp = v_exp
                             break
                             
-                if matched_exp:
+                # 🚨 詳解空洞檢測：若官方詳解本該題僅有一行標題或字數少於 35 字（如第 47、52 題），退回 Stage 2 大模型補齊名師推導！
+                raw_exp_body = matched_exp.get("explanation_text", "").strip() if matched_exp else ""
+                is_exp_too_trivial = len(raw_exp_body) < 35 or (raw_exp_body.startswith("內容：") and len(raw_exp_body.splitlines()) <= 2)
+
+                # 🚨 詳解空洞檢測：若官方詳解本該題僅有一行標題或字數少於 35 字（如第 47、52 題），退回 Stage 2 大模型補齊名師推導！
+                raw_exp_body = matched_exp.get("explanation_text", "").strip() if matched_exp else ""
+                is_exp_too_trivial = len(raw_exp_body) < 35 or (raw_exp_body.startswith("內容：") and len(raw_exp_body.splitlines()) <= 2)
+
+                if matched_exp and not is_exp_too_trivial:
                     # 1. 題意分析：依原卷真實內容動態判定，絕不硬湊虛構標籤
                     src_curriculum = matched_exp.get("source_curriculum", "").strip()
                     ex_target = matched_exp.get("exam_target", "").strip()
@@ -6326,8 +6374,9 @@ class ExamParser:
                     GLOBAL_METRICS.record_new_solved_question()
                     logging.info(f"🎉 [模考收錄成功] 題號 {qn} 已完成圖文自癒校驗並收錄！")
                 else:
-                    # 若詳解本漏抓該題，退回常規 task_queue 進行單題生成補件
-                    task_queue.append({"q_data": q, "critique": "", "retry_count": 0, "recheck_count": 0})
+                    # 🚨 若詳解本漏抓該題，或官方解析僅有一行標題，退回常規 task_queue 由大模型生成完整名師解析！
+                    critique_note = "官方詳解僅有一行標題，請生成完整詳細步驟與推導" if is_exp_too_trivial else ""
+                    task_queue.append({"q_data": q, "critique": critique_note, "retry_count": 0, "recheck_count": 0})
                     
             save_partial_progress_immediately(partial_json_path, all_final_questions)
             logging.info(f"⚡ [模考快車道結算] 成功直裝 {len(all_final_questions)} 題，剩餘 {len(task_queue)} 題進入備援隊列。")
@@ -6471,7 +6520,21 @@ class ExamParser:
                         q_num_int = int(re.sub(r'\D', '', str(task_q_num)) or 1)
                     except Exception:
                         q_num_int = 1
-                    dynamic_stage2_model = tier1_pool[q_num_int % len(tier1_pool)]
+                    # 🚨 [大考真題 vs 模考自適應調度]：
+                    # 1. 大考真題 (GSAT, AST) 與學校段考 (SCHOOL) 無官方詳解本，首選 HIGH 高強度思考進行旗艦深度推導！
+                    # 2. 模擬考已有官方解析本文字，採用 LOW 思考加速對位，防範代理端點逾時。
+                    # 3. 若該題已失敗 2 次以上，自動切換至 LOW 思考降級救火。
+                    is_official_or_school = exam_type in ["GSAT", "AST", "SCHOOL"]
+                    item_retry = current_batch[0].get("retry_count", 0)
+
+                    if is_official_or_school and item_retry < 2:
+                        target_thinking_level = "HIGH"
+                    else:
+                        target_thinking_level = "LOW"
+
+                    override_model = current_batch[0].get("preferred_fallback_model")
+                    dynamic_stage2_model = override_model if override_model else tier1_pool[q_num_int % len(tier1_pool)]
+                    use_thinking = False if (override_model and "lite" in override_model) else True
 
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
                         contents=batch_contents, 
@@ -6479,8 +6542,9 @@ class ExamParser:
                         temperature=0.3,
                         preferred_model=dynamic_stage2_model,  
                         provider="google",
-                        enable_thinking=True,
-                        task_desc=f"{paper_tag} [Gemini 深度解題 ({dynamic_stage2_model})]"
+                        enable_thinking=use_thinking,
+                        thinking_level=target_thinking_level,
+                        task_desc=f"{paper_tag} [解題 ({dynamic_stage2_model}|思考:{target_thinking_level})]"
                     )
                     
                     # 🚨 核心優化：將 Stage 2 生成的所有詳解結果遞迴且全面地轉為繁體中文，阻斷簡體字存入資料庫
@@ -6511,11 +6575,15 @@ class ExamParser:
                         valid_batch = current_batch
                         salvaged_solutions = solutions_dict['solutions']
                     
-                    # 處理失敗需重試的題目
+                    # 🚨 [卡題快速降級與放行]：單題若失敗超過 2 次，強制降級由 3.5-Lite 接管；超過上限則安全保留 partial，不卡死全卷！
                     for item in failed_batch:
                         item["retry_count"] += 1
+                        if item["retry_count"] >= 2:
+                            # 失敗兩次以上，強制指派 3.5-flash-lite 與關閉思考，追求秒級成功率
+                            item["preferred_fallback_model"] = "gemini-3.5-flash-lite"
+
                         if item["retry_count"] >= max_single_attempts:
-                            logging.warning(f"⚠️ 題號 {item['q_data'].get('question_number')} 已達最大重試次數，本次不寫入資料庫，保留至下次自動重跑。")
+                            logging.warning(f"⚠️ 題號 {item['q_data'].get('question_number')} 屢次請求失敗，先保留於 partial 暫存，不阻塞後續題目與試卷！")
                         else:
                             retry_items.append(item)
 
