@@ -4632,9 +4632,11 @@ class ExamParser:
 
         # 🚨 [依試卷重要度動態綁定模型梯隊]：
         # 大考真題（學測、分科指考）與段考的理科考題，100% 由 3.8-flash 與 3.7-flash 掛帥領銜！
+        is_hard_stem = any(s in clean_subj_name for s in ["數", "物理", "化學", "自然"])
         is_official_or_school = exam_type in ["GSAT", "AST", "SCHOOL"]
 
         if is_hard_stem and is_official_or_school:
+            # 大考理科真題：最高規格旗艦智商池
             # 大考理科真題：最高規格旗艦智商池
             tier1_pool = [
                 "gemini-3.8-flash",
