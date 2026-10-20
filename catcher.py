@@ -187,7 +187,7 @@ def clean_ocr_answer_format(ans_str: str) -> str:
     # 一般答案：清除中文字元，但完整保留英數、逗號、負號、分數線 / 與小數點 .
     cleaned = re.sub(r'[\u4e00-\u9fa5]+', '', ans_str)
     cleaned = re.sub(r'[^\w,\-±/.]', '', cleaned)
-    return cleaned.strip(",()")。
+    return cleaned.strip(",()")
 
 def evaluate_solution_quality(q_obj: dict) -> int:
     """
