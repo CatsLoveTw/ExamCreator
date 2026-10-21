@@ -4626,44 +4626,45 @@ class ExamParser:
         subjects_stem = ["數學", "數A", "數B", "數學乙", "數學甲", "數甲", "數乙", "物理", "化學", "生物", "地球科學", "自然"]
         is_stem = any(t in subject for t in subjects_stem)
 
-        # 🚨 [情境分流模型架構]：依據考科智商需求分流，理科保證頂級推導，文科兼顧高速吞吐
+        # Stage 1 用 Flash-Lite 極速掃描
         stage_1_models = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
         stage_1_model = stage_1_models[0]
 
         # 🚨 [依試卷重要度動態綁定模型梯隊]：
-        # 大考真題（學測、分科指考）與段考的理科考題，100% 由 3.8-flash 與 3.7-flash 掛帥領銜！
+        # 1. 預先定義各分類專屬池，徹底消除 NameError 未定義崩潰
         is_hard_stem = any(s in clean_subj_name for s in ["數", "物理", "化學", "自然"])
         is_official_or_school = exam_type in ["GSAT", "AST", "SCHOOL"]
 
+        stem_official_pool = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash"
+        ]
+        stem_mock_pool = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite"
+        ]
+        humanities_pool = [
+            "gemini-3.5-flash-lite"
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+        ]
+        stem_reasoning_pool = stem_official_pool if is_official_or_school else stem_mock_pool
+
+        # 2. 精確指派當前試卷的 tier1_pool，杜絕任何舊變數覆寫
         if is_hard_stem and is_official_or_school:
-            # 大考理科真題：最高規格旗艦智商池
-            # 大考理科真題：最高規格旗艦智商池
-            tier1_pool = [
-                "gemini-3.8-flash",
-                "gemini-3.7-flash",
-                "gemini-3.6-flash",
-                "gemini-3.5-flash"
-            ]
+            tier1_pool = stem_official_pool
         elif is_hard_stem:
-            # 模考理科：兼顧官方詳解對位與吞吐效率
-            tier1_pool = [
-                "gemini-3.8-flash",
-                "gemini-3.7-flash",
-                "gemini-3.6-flash",
-                "gemini-3.5-flash",
-                "gemini-3.5-flash-lite"
-            ]
+            tier1_pool = stem_mock_pool
         else:
-            # 文科與通識均衡池
-            tier1_pool = [
-                "gemini-3.5-flash-lite"
-                "gemini-3.6-flash",
-                "gemini-3.5-flash",
-            ]
-        
-        # 依科目自動綁定
-        is_hard_stem = any(s in clean_subj_name for s in ["數", "物理", "化學", "自然"])
-        tier1_pool = stem_reasoning_pool if is_hard_stem else humanities_pool
+            tier1_pool = humanities_pool
+
         stage_2_model = tier1_pool[0]
         validator_model = tier1_pool[1 % len(tier1_pool)]
         # stage_2_model = "gemini-3.5-flash" if is_stem else "gemini-3.1-flash-lite"
