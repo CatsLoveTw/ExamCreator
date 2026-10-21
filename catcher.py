@@ -3348,40 +3348,70 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 except Exception: pass
                 
     return os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0
+def canonicalize_taxonomy_tag(tag: str, subject: str) -> str:
+    """
+    🚨 標籤剛性正規化中樞：
+    徹底消除「必修_國文_...」、「必修_國語文_...」與「必修_文言文...」的三重分裂混亂！
+    統一輸出格式：必修/選修_大單元_次單元_具體考點
+    """
+    if not tag or not isinstance(tag, str):
+        return "必修_綜合主題_核心概念"
+    t = str(tag).strip()
+    t = re.sub(r'^[\[\"\'\s]+|[\]\"\'\s]+$', '', t)
+    
+    prefix = "選修" if "選修" in t else "必修"
+    t = re.sub(r'^(?:必修|選修)[_/\\]+', '', t)
+
+    # 🚨 剛性拔除標籤內部多餘的科目字首（如 國文_、國語文_、物理_、化學_）
+    redundant_subjs = ["國語文", "國綜", "國文", "數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "英文", "自然", "社會"]
+    for sub in redundant_subjs:
+        if t.startswith(sub + "_"):
+            t = t[len(sub)+1:]
+            break
+
+    parts = [p.strip() for p in t.split("_") if p.strip()]
+    if not parts:
+        return f"{prefix}_綜合主題_核心概念應用"
+    if len(parts) == 1:
+        return f"{prefix}_{parts[0]}_核心概念"
+    return f"{prefix}_" + "_".join(parts[:4])
+
 def is_strictly_valid_topic(topic_str: str) -> bool:
     """知識點鋼鐵檢驗閘門：必須完全合規才准許寫入 subject.json"""
     if not isinstance(topic_str, str): return False
     t = re.sub(r'^[\[\"\'\s]+|[\]\"\'\s]+$', '', str(topic_str)).strip()
     
-    # 1. 長度限制（排除單字碎屑與整段說明文字）
     if len(t) < 4 or len(t) > 50: return False
+    if any(c in t for c in ["\n", "\r", "###", "```", "**", ">", "[", "]", "國語文"]): return False # 🚨 嚴禁國語文別名入庫
     
-    # 2. 排除換行符號、Markdown 標籤
-    if any(c in t for c in ["\n", "\r", "###", "```", "**", ">", "[", "]"]): return False
-    
-    # 3. 排除幽靈與無效詞彙
     ghost_tokens = ["題目闕如", "無法判定", "placeholder", "內容缺失", "未包含", "無實質", "綜合主題", "待補充", "因題目"]
     if any(gt in t for gt in ghost_tokens): return False
     
-    # 4. 🚨 第一段必須且只能為「必修」或「選修」
     parts = t.split("_")
-    if len(parts) < 3: return False # 至少要有 必修/選修_大單元_次單元
+    if len(parts) < 3: return False
     if parts[0] not in ["必修", "選修"]: return False
     
     return True
 
 def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
-    """具備鋼鐵防禦閘門的動態知識庫更新器：杜絕一切單字碎屑、列表字串與非法前綴"""
+    """具備鋼鐵防禦閘門的動態知識庫更新器：強制學科主鍵歸一、標籤標準化，杜絕別名與贅詞！"""
     global SUBJECT_TAXONOMY
     with SUBJECT_FILE_LOCK:
         updated = False
-        normalized_subject = s2t(normalized_subject)
         
-        if normalized_subject not in SUBJECT_TAXONOMY:
-            SUBJECT_TAXONOMY[normalized_subject] = {"topics": [], "techniques": []}
+        # 🚨 1. 學科主鍵強制標準化（國語文/國綜 ➔ 國文，數A/數B/數甲 ➔ 數學）
+        clean_sub_key = re.sub(r'(?:考科|科)$', '', str(normalized_subject).strip())
+        if clean_sub_key in ["國綜", "國語文"]: clean_sub_key = "國文"
+        elif any(k in clean_sub_key for k in ["數A", "數B", "數甲", "數乙", "數學A", "數學B", "數學甲", "數學乙"]): clean_sub_key = "數學"
+        elif clean_sub_key in ["地科"]: clean_sub_key = "地球科學"
+        elif clean_sub_key in ["公民"]: clean_sub_key = "公民與社會"
+        clean_sub_key = s2t(clean_sub_key)
+
+        if clean_sub_key not in SUBJECT_TAXONOMY:
+            SUBJECT_TAXONOMY[clean_sub_key] = {"topics": [], "techniques": []}
             updated = True
             
-        # 收集候選主題
+        # 2. 收集並透過 canonicalize_taxonomy_tag 剛性清洗考點
         candidate_topics = []
         if isinstance(solution_data.get("topic_categories"), list):
             candidate_topics.extend(solution_data["topic_categories"])
@@ -3390,34 +3420,25 @@ def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
             
         for t in candidate_topics:
             if not t: continue
-            clean_t = s2t(str(t).strip())
-            
-            # 生物前綴自動矯正
-            if clean_t.startswith("生物_"):
-                clean_t = "選修_" + clean_t[3:]
-                
-            # 🚨 必須通過鋼鐵防禦檢驗
+            clean_t = canonicalize_taxonomy_tag(s2t(str(t).strip()), clean_sub_key)
             if is_strictly_valid_topic(clean_t):
-                if clean_t not in SUBJECT_TAXONOMY[normalized_subject]["topics"]:
-                    SUBJECT_TAXONOMY[normalized_subject]["topics"].append(clean_t)
-                    logging.info(f"🆕 [合規考點入庫] 已新增黃金考點至 subject.json: {clean_t}")
+                if clean_t not in SUBJECT_TAXONOMY[clean_sub_key]["topics"]:
+                    SUBJECT_TAXONOMY[clean_sub_key]["topics"].append(clean_t)
+                    logging.info(f"🆕 [標準考點入庫 ({clean_sub_key})] {clean_t}")
                     updated = True
 
-        # 收集解題技巧 (嚴格型別檢查，杜絕字串迭代單字碎屑 Bug！)
+        # 3. 收集並清洗解題技巧
         raw_techs = solution_data.get("techniques_used", [])
-        if isinstance(raw_techs, str):
-            # 若 AI 誤傳單一字串，包裝成列表，絕對不可直接 for char 迭代！
-            raw_techs = [raw_techs]
+        if isinstance(raw_techs, str): raw_techs = [raw_techs]
             
         if isinstance(raw_techs, list):
             for tech in raw_techs:
                 if not tech or not isinstance(tech, str): continue
-                clean_tech = s2t(str(tech).strip())
-                # 技巧同樣必須合規（長度 > 3，無換行，無幽靈詞）
+                clean_tech = canonicalize_taxonomy_tag(s2t(str(tech).strip()), clean_sub_key)
                 if len(clean_tech) >= 4 and len(clean_tech) <= 60 and not any(c in clean_tech for c in ["\n", "\r", "闕如", "無法判定"]):
-                    if clean_tech not in SUBJECT_TAXONOMY[normalized_subject]["techniques"]:
-                        SUBJECT_TAXONOMY[normalized_subject]["techniques"].append(clean_tech)
-                        logging.info(f"🆕 [合規技巧入庫] 已新增解題技巧至 subject.json: {clean_tech}")
+                    if clean_tech not in SUBJECT_TAXONOMY[clean_sub_key]["techniques"]:
+                        SUBJECT_TAXONOMY[clean_sub_key]["techniques"].append(clean_tech)
+                        logging.info(f"🆕 [標準技巧入庫 ({clean_sub_key})] {clean_tech}")
                         updated = True
 
         if updated:
@@ -3909,8 +3930,10 @@ class ExamParser:
                - 若有附圖，將 `has_solution_image` 設為 true，並框出覆蓋該圖的 Bounding Box `[ymin, xmin, ymax, xmax]` (0~1000)！
             6. **options_analysis (選項深入剖析)**：
                - 若解析中有對 (A)(B)(C)(D)(E) 選項逐一分析對錯，請拆解為列表；無則填 `[]`。
-            7. **topic_category 與 techniques_used**：
-               - 根據解析內容填入以 `必修_` 或 `選修_` 開頭之合規知識點與解題技巧。
+            7. **topic_category 與 techniques_used（🚨 剛性命名結構）**：
+               - 格式必須嚴格為：`必修/選修_大單元_次單元_具體考點`（例如：'必修_閱讀理解_文本細節比對'、'必修_文言文閱讀_延伸反思'）。
+               - 🚫【絕對禁止】在單元前重複加上科目名稱（例如絕對不可寫 '必修_國文_...' 或 '必修_國語文_...'）！
+               - 🚫【絕對禁止】使用未標準化的別名（嚴禁出現 '國語文' 字眼）！
             """
 
             try:
