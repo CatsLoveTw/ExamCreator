@@ -3971,6 +3971,10 @@ class ExamParser:
                             extracted_explanations[qn] = item
                             logging.info(f"  -> 🎯 [成功抓取模考詳解] 題號 {qn} (出處: {item.get('source_curriculum', '無')[:15]}... | 附圖: {len(sol_img_paths)} 張)")
 
+                        # 🚨 [網頁即時推播] 每完成一頁詳解萃取，立即刷新網頁橫幅與日誌！
+                        GLOBAL_METRICS.set_stage(f"📑 正在視覺萃取詳解第 {p_idx+1} 頁 (已累計獲得 {len(extracted_explanations)} 題官方解析)")
+                        GLOBAL_METRICS.add_log(f"📑 詳解本第 {p_idx+1} 頁解析完成，目前已累積鎖定 {len(extracted_explanations)} 題官方詳解！")
+                        
             except Exception as e:
                 logging.error(f"提取詳解卷第 {p_idx+1} 頁失敗: {e}")
             finally:
@@ -6397,7 +6401,16 @@ class ExamParser:
 
                     update_subject_taxonomy(q.get("sub_subject", subject), q)
                     all_final_questions.append(q)
+                    
+                    # 🚨 [網頁進度條即時連動]：每裝配好一題，立即驅動網頁進度條上升，並推送動態日誌！
                     GLOBAL_METRICS.record_new_solved_question()
+                    GLOBAL_METRICS.update_exam_progress(
+                        GLOBAL_METRICS.current_paper, 
+                        len(all_final_questions), 
+                        len(all_extracted_questions), 
+                        f"模考快車道裝配中 ({len(all_final_questions)}/{len(all_extracted_questions)})"
+                    )
+                    GLOBAL_METRICS.add_log(f"⚡ [模考快車道] 題號 {qn} 已成功裝配官方出處、解析與圖表！")
                     logging.info(f"🎉 [模考收錄成功] 題號 {qn} 已完成圖文自癒校驗並收錄！")
                 else:
                     # 🚨 若詳解本漏抓該題，或官方解析僅有一行標題，退回常規 task_queue 由大模型生成完整名師解析！
