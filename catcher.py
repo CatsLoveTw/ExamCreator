@@ -1176,13 +1176,17 @@ class MockQuestionExplanation(BaseModel):
 class MockExplanationPageExtraction(BaseModel):
     items: List[MockQuestionExplanation] = Field(description="本頁詳解卷中包含的所有題目詳細解析條目列表。")
 
-# === 🎯 模擬考專屬輕量自癒與一致性校驗結構 ===
+# === 🎯 模考專屬：全能數理公式、計算過程與文字校準審查結構 ===
 class MockLightweightCheckResult(BaseModel):
-    has_ocr_error: bool = Field(description="題幹、選項、簡答與詳解之間是否存在文字辨識錯誤（如掉字、符號遺漏、負號丟失、數字看錯）或結論不吻合？")
-    corrected_question_text: str = Field(description="修正後的題目題幹文字。若無 OCR 辨識瑕疵請完全照抄原始題目。")
-    corrected_answer: str = Field(description="經核對詳解推導結論後，確認無誤的最終標準答案。必須為純選項代號（如 '3'、'AC'）或純數值（如 '7'、'-16'）。")
-    corrected_solution_snippet: str = Field(default="", description="若詳解推導有明顯文字打錯或 OCR 殘缺，提供修正後的文字段落；若解析完整無誤則留空。")
-    repair_summary: str = Field(default="", description="若有修正，簡要記錄修復項目（例如：'補齊題幹負號'、'標準化答案選項'），無則填 '無誤'。")
+    has_flaw: bool = Field(description="題幹、選項或詳解推導中是否存在：文字抓錯、語病、公式殘缺、負號遺失、指數/下標損毀、計算過程前後矛盾或與答案不一致等瑕疵？")
+    flaw_category: Literal["CLEAN", "FORMULA_DEFECT", "CALCULATION_STEP_ERROR", "TEXT_TYPO", "ANSWER_MISMATCH"] = Field(
+        default="CLEAN",
+        description="'CLEAN' (完全無誤), 'FORMULA_DEFECT' (公式/符號/負號/分數線遺漏), 'CALCULATION_STEP_ERROR' (計算推導過程有跳步或前後矛盾), 'TEXT_TYPO' (文字抓錯/語病), 'ANSWER_MISMATCH' (答案與推導衝突)"
+    )
+    corrected_question_text: str = Field(description="修正後的完整題幹文字。若原題幹無文字或符號瑕疵請完全照抄。")
+    corrected_solution_snippet: str = Field(default="", description="若詳解存在公式抓錯、負號漏看、計算步驟矛盾或語病，請提供修復後語意通順、公式嚴謹、計算完全自洽的完整詳細解答。若原解析已完美無瑕則填 'CLEAN'。")
+    corrected_answer: str = Field(description="經嚴謹核對推導後，確認無誤的標準答案字串。")
+    repair_summary: str = Field(default="", description="若有修復，簡明記錄具體修正點（如：'補齊波耳半徑公式負號與上標'、'修正計算步驟代數運算矛盾'），無則填 '無誤'。")
     
 class QuestionSolutionBatch(BaseModel):
     solutions: List[QuestionSolution] = Field(description="批次產出的多題詳細解答列表，順序必須與輸入題目嚴格對齊。")
@@ -4058,26 +4062,30 @@ class ExamParser:
             q_data["official_answer"] = final_ans
             q_data["has_official_answer"] = True
             
-        # 🚨 [全方位破損、OCR 斷頭與字串黏連檢測]：
-        # A. 詳解極度空洞或僅有一行課綱標題（如第 47、52 題）
+        # 🚨 [全方位數理與文字破損特徵檢測（涵蓋純文字與無圖題目）]：
+        # 1. 詳解極度空洞或僅有一行課綱標題（如第 47、52 題）
         sol_is_trivial = len(sol_text) < 35 or (sol_text.startswith("內容：") and len(sol_text.splitlines()) <= 2)
-        
-        # B. 非選答案字串擠壓黏連（如 3aaBBaaBbaabb 或 AABBAaBBAABbAaBb2020）
+
+        # 2. 答案字串擠壓黏連（如 3aaBBaaBbaabb）
         ans_is_squished = bool(re.search(r'[a-zA-Z]{5,}', raw_ans)) and not raw_ans.isalpha()
-        
-        # C. 結論答案衝突
+
+        # 3. 詳解結論與答案矛盾
         has_concl_mismatch = bool(clean_concl and clean_sol_ans and clean_concl != clean_sol_ans)
 
-        has_broken_clue = (
-            len(q_text) < 15 or 
-            sol_is_trivial or
-            ans_is_squished or
-            has_concl_mismatch or
-            any(bad in q_text for bad in ["\x0c", "__DBL", "???"])
+        # 4. 🚨【新增：數理公式與抓字硬傷檢測】（無圖題專項防禦）
+        # 檢測常見的 OCR 公式損毀：未閉合大括號、連續數字無運算符號、漏掉的 LaTeX 指令殘缺
+        math_syntax_broken = (
+            sol_text.count("{") != sol_text.count("}") or
+            sol_text.count("$") % 2 != 0 or
+            any(corrupt in sol_text for corrupt in [r"\frac{", "12gt^2", "12mv^2", "+-", "??", "__DBL"])
         )
 
-        # 若無實質矛盾且排版正常，本地自癒直接完工返回，不消耗額外 API！
-        if not has_broken_clue:
+        # 理科考題強制進行數理推導完整性核驗
+        is_stem_subj = any(k in str(q_data.get("sub_subject", "")) for k in ["數", "物", "化", "生", "自", "地"])
+        needs_deep_audit = sol_is_trivial or ans_is_squished or has_concl_mismatch or math_syntax_broken
+
+        # 若是理科題或命中破損特徵，強制啟動數理與文字校準器！
+        if not needs_deep_audit and not is_stem_subj:
             return q_data
 
         # -------------------------------------------------------------
@@ -4087,13 +4095,13 @@ class ExamParser:
         
         opts_str = "\n".join([f"- ({opt.get('key')}) {opt.get('value')}" for opt in q_data.get("options", [])])
         inspector_prompt = f"""
-        你是一位極其嚴謹的高中試題排版與 OCR 影像校對專家。
-        我們正在核對以下模擬考題目的「題幹文字」、「選項」與「官方詳解本文字」：
+        你是一位在台灣大考閱卷界享有崇高聲望的【高中試題數理邏輯與 OCR 抓字精校教授】。
+        我們正在審查以下這道模擬考題目的「題幹」、「選項」與「官方詳解本 OCR 掃描文字」：
 
-        【題幹文字】：
+        【題幹】：
         {q_text}
 
-        【題目選項】：
+        【選項】：
         {opts_str or '無'}
 
         【官方詳解本文字】：
@@ -4101,16 +4109,19 @@ class ExamParser:
 
         【當前標註答案】：{final_ans}
 
-        請執行最高規格的 OCR 抓字校正與邏輯修復：
-        1. **【答案格式解壓縮與還原】**：
-           - 若當前答案為擠壓黏連字串（例如 `3aaBBaaBbaabb` 或 `AABBAaBBAABbAaBb2020`），請依據題意將其解壓縮還原為標準格式！
-           - 例如將 `3aaBBaaBbaabb` 還原為：`3 種（aaBB、aaBb、aabb）`。
-           - 例如將 `AABBAaBBAABbAaBb2020` 還原為：`AABB、AaBB、AABb、AaBb，環境溫度高於 20℃`。
-        2. **【推導公式與抓字修正】**：
-           - 比對題幹與詳解中的數值、正負號、分數、下標是否有一致？
-           - 若詳解文字只有一行空泛標題（如「內容：...」），請在 `corrected_solution_snippet` 中依據題意與答案，擴寫出完整的推導步驟！
-           - 若詳解有明顯漏字、負號遺失或公式斷裂，請在 `corrected_solution_snippet` 中輸出修復後的完整詳解！
-        3. 標記 `has_ocr_error: true`，並在 `repair_summary` 中記錄修復內容。
+        🚨【全方位審查與糾錯任務（涵蓋純文字與無圖題）】🚨：
+        1. **【數理公式與計算過程審查（極重要）】**：
+           - 仔細驗算詳解中的每一道代數計算、化學計量、物理定律列式。
+           - 抓出 OCR 掃描最常犯的硬傷：**負號漏抓**（如將負值誤讀為正值）、**分數線遺失**（如 `1/2` 誤讀為 `12`）、**指數/下標變形**（如 $10^{-3}$ 誤讀為 $10-3$）。
+           - 檢查「中間計算步驟是否能自然推導出最終答案」？若算式斷裂或前後矛盾，請在 `corrected_solution_snippet` 中予以平滑補正！
+        2. **【文字語病與形似錯字排查】**：
+           - 檢查是否有形近字錯讀（如「質子」讀成「質手」、「氧化」讀成「氧北」）或語句斷頭不通順。
+        3. **【非選答案解壓縮還原】**：
+           - 若答案為擠壓黏連字串（如 `3aaBBaaBbaabb`），還原為標準格式：`3 種（aaBB、aaBb、aabb）`。
+        4. **【空洞詳解充實】**：
+           - 若詳解僅有一行大綱標題（如「內容：...」），請依據正確答案補齊完整的名師推導演繹！
+
+        若發現任何上述瑕疵，將 `has_flaw` 設為 true，並在 `corrected_solution_snippet` 輸出 100% 嚴謹、無語病、無計算漏洞的完整解答！若原解析已極度完美自洽，則填 'CLEAN'。
         """
 
         try:
@@ -4123,25 +4134,25 @@ class ExamParser:
                 task_desc=f"[模考自癒 Q{q_data.get('question_number')}]"
             )
 
-            if res_heal and res_heal.get("has_ocr_error"):
+            if res_heal and res_heal.get("has_flaw"):
                 fixed_txt = res_heal.get("corrected_question_text", "").strip()
                 fixed_a = str(res_heal.get("corrected_answer", "")).strip()
                 fixed_sol = str(res_heal.get("corrected_solution_snippet", "")).strip()
                 summary = res_heal.get("repair_summary", "")
+                flaw_type = res_heal.get("flaw_category", "CORRECTION")
 
                 if fixed_txt and len(fixed_txt) >= len(q_text) * 0.8:
                     q_data["question_text"] = fixed_txt
 
-                # 🚨 答案解壓縮與格式標準化
                 if fixed_a:
                     q_data["answer"] = clean_ocr_answer_format(fixed_a) if q_data.get("question_type") in ["單選題", "多選題"] else fixed_a
                     q_data["official_answer"] = q_data["answer"]
 
-                # 🚨 關鍵補漏：將修復後的詳解推導覆寫回 detailed_solution，徹底消除斷頭與錯字！
-                if fixed_sol and len(fixed_sol) > len(sol_text):
+                # 🚨 只要提供了實質修正且非 'CLEAN'，直接覆寫 detailed_solution，消滅算式硬傷與語病！
+                if fixed_sol and fixed_sol != "CLEAN" and len(fixed_sol) >= 20:
                     q_data["detailed_solution"] = fixed_sol
                     
-                logging.info(f"  -> ✅ [自癒成功] 題號 {q_data.get('question_number')} 已自動修復：{summary}")
+                logging.info(f"  -> ✅ [數理與文字校準成功] 題號 {q_data.get('question_number')} ({flaw_type})：{summary}")
         except Exception as e:
             logging.warning(f"輕量自癒執行跳過: {e}")
 
