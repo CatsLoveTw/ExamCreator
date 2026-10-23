@@ -4980,12 +4980,38 @@ class ExamParser:
                 except Exception as e:
                     logging.warning(f"讀取獨立詳解卷失敗: {e}")
             else:
-                # 啟動循環狀態機，切分當前大合輯中的所有試卷區塊
-                cycles = self.segment_compilation_cycles_multimodal(q_pdf, all_rendered_pages, year, mock_tag, clean_subj_name)
-                
-                # 預設取用第一組循環（若為單卷合輯剛好為整卷；若為多卷合輯精確鎖定第一卷）
-                target_cycle = cycles[0] if cycles else {"q_pages": list(range(len(all_rendered_pages))), "sol_pages": []}
-                
+                # 🚨 [單卷防切碎保護]：一般 30 頁以內的單卷 PDF，詳解必定在後半段，嚴禁將題幹大標題誤判為合輯切斷！
+                total_p_cnt = len(all_rendered_pages)
+                if total_p_cnt <= 30:
+                    # 在後半段尋找詳解起始頁
+                    sol_start_p = -1
+                    doc_peek = fitz.open(q_pdf)
+                    for p_i in range(int(total_p_cnt * 0.35), total_p_cnt):
+                        txt = doc_peek[p_i].get_text("text").replace(" ", "")
+                        if any(k in txt for k in ["[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", "試題詳解", "答案與解析", "【解析】", "出處："]):
+                            sol_start_p = p_i
+                            break
+                    doc_peek.close()
+
+                    if sol_start_p != -1:
+                        q_page_idxs = list(range(sol_start_p))
+                        sol_page_idxs = list(range(sol_start_p, total_p_cnt))
+                    else:
+                        # 呼叫多模態探針探測後半段詳解起始點
+                        s_idx, e_idx = self.detect_solution_boundary_multimodal(q_pdf, all_rendered_pages)
+                        if s_idx > int(total_p_cnt * 0.3):
+                            q_page_idxs = list(range(s_idx))
+                            sol_page_idxs = list(range(s_idx, total_p_cnt))
+                        else:
+                            q_page_idxs = list(range(total_p_cnt))
+                            sol_page_idxs = []
+
+                    target_cycle = {"q_pages": q_page_idxs, "sol_pages": sol_page_idxs}
+                else:
+                    # 100+ 頁超大合訂本才啟動循環切分狀態機
+                    cycles = self.segment_compilation_cycles_multimodal(q_pdf, all_rendered_pages, year, mock_tag, clean_subj_name)
+                    target_cycle = cycles[0] if cycles else {"q_pages": list(range(total_p_cnt)), "sol_pages": []}
+                    
                 # 若從版面中辨識出了更精準的期別/標題，動態補強標籤
                 if target_cycle.get("title") and any(k in target_cycle["title"] for k in ["第", "模", "次"]):
                     t_match = re.search(r'(?:第\s*([一二三四五六七八九十0-9]+)\s*[次回]|第\s*([0-9]+)\s*模)', target_cycle["title"])
@@ -6278,8 +6304,11 @@ class ExamParser:
         partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
         # 📊 正式進入 Stage 2 解題階段：更新該卷已鎖定的總題數與續傳題數
-        GLOBAL_METRICS.set_current_paper(paper_label, len(all_extracted_questions), len(loaded_partial_questions))
-        GLOBAL_METRICS.update_exam_progress(paper_label, len(loaded_partial_questions), len(all_extracted_questions), "🧠 名師詳解生成中...")
+        expected_min_benchmark = 12 if any(k in clean_subj_name for k in ["數", "math"]) else (2 if "國寫" in clean_subj_name else 30)
+        display_total_q = max(len(all_extracted_questions), len(loaded_partial_questions), expected_min_benchmark)
+        
+        GLOBAL_METRICS.set_current_paper(paper_label, len(all_extracted_questions) if len(all_extracted_questions) >= expected_min_benchmark else display_total_q, len(loaded_partial_questions))
+        GLOBAL_METRICS.update_exam_progress(paper_label, len(loaded_partial_questions), display_total_q, "🧠 名師詳解生成中...")
         GLOBAL_METRICS.add_log(f"🧠 {paper_label} 第一階段掃描完畢，進入詳解生成 (總題數: {len(all_extracted_questions)})")
         
         # =========================================================================
@@ -6295,25 +6324,53 @@ class ExamParser:
                 spec_name
             )
             
-            for q in all_extracted_questions:
-                qn = str(q.get("question_number", "")).strip()
-                q_key = get_unique_q_key(q)
+            # 🚨 [真理主鍵逆向反查] 詳解本涵蓋了全卷所有題目（如 1~42 題）。以詳解本為基底，建立全域題目字典！
+            master_q_dict = {str(q.get("question_number", "")).strip(): q for q in all_extracted_questions if q.get("question_number")}
+
+            # 刷新全域儀表板總題數為「詳解本真實題數」，告別 0/3 假象！
+            actual_total_q = max(len(all_extracted_questions), len(official_mock_exps))
+            GLOBAL_METRICS.set_current_paper(paper_label, actual_total_q, len(loaded_partial_questions))
+            GLOBAL_METRICS.update_exam_progress(paper_label, len(loaded_partial_questions), actual_total_q, "模考快車道裝配中...")
+
+            # 遍歷詳解本中辨識出的所有題號，確保一題不漏！
+            all_target_q_nums = sorted(list(set(list(master_q_dict.keys()) + list(official_mock_exps.keys()))), key=natural_sort_key)
+
+            for qn in all_target_q_nums:
+                q = master_q_dict.get(qn)
+                matched_exp = official_mock_exps.get(qn)
                 
-                # 優先使用暫存檔（若有的話）
+                # 若題號包含括號或非選，進行模糊精準匹配
+                if not matched_exp:
+                    for k_exp, v_exp in official_mock_exps.items():
+                        if is_precise_match({"question_number": qn}, k_exp):
+                            matched_exp = v_exp
+                            break
+
+                # 💡 若題目卷 OCR 漏抓該題，但詳解本有該題，自動補建題目骨架！
+                if not q and matched_exp:
+                    q = {
+                        "academic_year": standard_academic_year,
+                        "exam_source": standard_exam_source,
+                        "sub_subject": clean_subj_name,
+                        "question_number": qn,
+                        "page_number": 1,
+                        "shared_context": "",
+                        "question_text": f"第 {qn} 題（詳見題目卷）",
+                        "options": matched_exp.get("options_analysis", []),
+                        "answer": clean_ocr_answer_format(matched_exp.get("answer", "")),
+                        "question_type": "單選題" if len(matched_exp.get("answer", "")) == 1 else "多選題",
+                        "has_image": False,
+                        "image_bboxes": [],
+                        "image_paths": []
+                    }
+
+                if not q: continue
+                q_key = get_unique_q_key(q)
+
                 if q_key in partial_map:
                     q.update(partial_map[q_key])
                     all_final_questions.append(q)
                     continue
-                    
-                # 比對官方詳解本
-                matched_exp = None
-                if qn in official_mock_exps:
-                    matched_exp = official_mock_exps[qn]
-                else:
-                    for k_exp, v_exp in official_mock_exps.items():
-                        if is_precise_match(q, k_exp):
-                            matched_exp = v_exp
-                            break
                             
                 # 🚨 詳解空洞檢測：若官方詳解本該題僅有一行標題或字數少於 35 字（如第 47、52 題），退回 Stage 2 大模型補齊名師推導！
                 raw_exp_body = matched_exp.get("explanation_text", "").strip() if matched_exp else ""
