@@ -3541,25 +3541,27 @@ def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: 
                         except: pass
 
         # -------------------------------------------------------------
-        # 2. 狀態機引擎：識別 [試題 ➔ 詳解 ➔ 試題 ➔ 詳解] 循環邊界
+        # 2. 狀態機引擎：嚴格依循 [試題 ➔ 詳解 ➔ 試題 ➔ 詳解] 剛性循環
         # -------------------------------------------------------------
         cycles = []
-        current_cycle = None
-        current_state = "IDLE"  # "IN_Q", "IN_SOL"
+        current_cycle = {"cycle_index": 1, "title": "", "q_pages": [], "sol_pages": []}
+        current_state = "IN_Q"  # 初始一律為收集題目狀態
 
         for p_i in range(total_pages):
             info = all_markers[p_i] or {"role": "QUESTION", "first_q_num": "", "detected_exam_title": ""}
             role = info.get("role", "QUESTION")
             fq = str(info.get("first_q_num", "")).strip()
 
-            # 判定是否開啟新試卷：遇到 COVER，或在詳解中突然出現第一題 (Q1)
+            # 🚨 剛性鐵律：只有在已經進入詳解階段 (IN_SOL) 後，看到「新年度大封面」或「新第一題 (Q1)」，才允許切分新試卷！
+            # 在題目收集階段 (IN_Q)，任何「第貳部分、混合題、非選題」大標題一律視為當前試卷題目，絕對禁止腰斬！
             is_new_exam_trigger = (
-                role == "COVER" or 
-                (current_state == "IN_SOL" and (role == "QUESTION" or fq in ["1", "一"]))
+                current_state == "IN_SOL" and 
+                (role == "COVER" or fq in ["1", "一"] or (role == "QUESTION" and p_i > current_cycle["sol_pages"][-1]))
             )
 
             if is_new_exam_trigger:
-                if current_cycle and current_cycle["q_pages"]:
+                # 封裝上一份完整試卷
+                if current_cycle["q_pages"]:
                     cycles.append(current_cycle)
                 current_cycle = {
                     "cycle_index": len(cycles) + 1,
@@ -3571,15 +3573,12 @@ def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: 
                 if role != "COVER":
                     current_cycle["q_pages"].append(p_i)
             elif role == "SOLUTION":
-                if not current_cycle:
-                    current_cycle = {"cycle_index": 1, "title": "", "q_pages": [], "sol_pages": []}
                 current_cycle["sol_pages"].append(p_i)
                 current_state = "IN_SOL"
             else:
-                if not current_cycle:
-                    current_cycle = {"cycle_index": 1, "title": "", "q_pages": [], "sol_pages": []}
                 current_cycle["q_pages"].append(p_i)
-                current_state = "IN_Q"
+                # 若尚未遇到詳解，保持在 IN_Q 狀態持續收集題目
+
 
         if current_cycle and current_cycle["q_pages"]:
             cycles.append(current_cycle)
@@ -5000,6 +4999,9 @@ class ExamParser:
                 
                 q_image_paths = [all_rendered_pages[i] for i in q_page_idxs]
                 a_image_paths = [all_rendered_pages[i] for i in sol_page_idxs] if sol_page_idxs else []
+
+                # 🚨 重置當前考卷的即時進度基數，確保儀表板能精準顯示本卷題目規模
+                GLOBAL_METRICS.set_current_paper(paper_label, total_q=len(q_page_idxs) * 2, existing_partial_q=0)
                 
                 if sol_page_idxs:
                     mock_sol_page_indices = sol_page_idxs
@@ -5527,6 +5529,16 @@ class ExamParser:
 
                             q_data['_cropped_pil_images'] = cropped_imgs
                             all_extracted_questions.append(q_data)
+
+                            # 🚨 [網頁總題數即時聯動]：每掃描出一批題目，即刻推播更新網頁已知總題數！
+                            with GLOBAL_METRICS.lock:
+                                GLOBAL_METRICS.paper_total_questions = len(all_extracted_questions)
+                            GLOBAL_METRICS.update_exam_progress(
+                                GLOBAL_METRICS.current_paper, 
+                                GLOBAL_METRICS.paper_completed_questions, 
+                                len(all_extracted_questions), 
+                                f"題目卷掃描中 (已辨識 {len(all_extracted_questions)} 題)..."
+                            )
 
                         except Exception as e:
                             logging.error(f"準備多模態資訊失敗: {e}")
