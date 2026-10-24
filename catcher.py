@@ -3471,8 +3471,6 @@ def detect_solution_boundary_multimodal(self, pdf_path: str, all_page_images: Li
         return -1, -1
 
     def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: List[str], base_year: str, base_mock_tag: str, base_subject: str) -> List[dict]:
-        
-def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: List[str], base_year: str, base_mock_tag: str, base_subject: str) -> List[dict]:
         """
         🚨 [百頁合訂本循環狀態機] 專門處理 100+ 頁巨型 PDF：
         自動辨識 [試卷1題目 ➔ 試卷1詳解 ➔ 試卷2題目 ➔ 試卷2詳解 ➔ ...] 的交替波浪！
