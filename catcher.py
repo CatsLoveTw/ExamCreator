@@ -3459,6 +3459,19 @@ def safe_filename(name: str) -> str:
     """過濾掉 Windows 檔案系統不允許的特殊字元，確保存檔安全"""
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
+def detect_solution_boundary_multimodal(self, pdf_path: str, all_page_images: List[str]) -> Tuple[int, int]:
+        """
+        🚨 相容性版面邊界探測轉發器：
+        直接調用循環切分引擎，提取首份試卷之詳解起始與結束頁 (0-based)
+        """
+        cycles = self.segment_compilation_cycles_multimodal(pdf_path, all_page_images, "", "", "")
+        if cycles and cycles[0].get("sol_pages"):
+            s_pages = cycles[0]["sol_pages"]
+            return s_pages[0], s_pages[-1]
+        return -1, -1
+
+    def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: List[str], base_year: str, base_mock_tag: str, base_subject: str) -> List[dict]:
+        
 def segment_compilation_cycles_multimodal(self, pdf_path: str, all_page_images: List[str], base_year: str, base_mock_tag: str, base_subject: str) -> List[dict]:
         """
         🚨 [百頁合訂本循環狀態機] 專門處理 100+ 頁巨型 PDF：
@@ -4600,6 +4613,7 @@ class ExamParser:
         doc = None
         validation_records = []
         val_log_lock = threading.Lock()
+        rpd_hit = False  # 🚨 [全域頂層初始化] 確保在快車道直接完工時，rpd_hit 必定已宣告，徹底消除 UnboundLocalError！
 
         # 🚨 [全域最頂層宣告] 在函式第一行完成考科名稱標準化，徹底根除 free variable referenced before assignment 致命崩潰！
         clean_subj_name = re.sub(r'(?:考科|科)$', '', str(subject).strip())
