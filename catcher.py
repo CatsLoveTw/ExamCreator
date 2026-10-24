@@ -3564,7 +3564,7 @@ class ExamParser:
         else:
             return 2  # 社會文科，批次 2 題
     
-    def detect_solution_boundary_multimodal(self, pdf_path: str, all_page_images: List[str]) -> Tuple[int, int]:
+    def detect_solution_boundary_multimodal(self, pdf_path: str, all_page_images: List[str]) -> tuple[int, int]:
         """
         🚨 相容性版面邊界探測轉發器：
         直接調用循環切分引擎，提取首份試卷之詳解起始與結束頁 (0-based)
