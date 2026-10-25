@@ -1332,65 +1332,65 @@ def run_database_repair_suite():
                 if k in q and isinstance(q[k], str):
                     q[k] = q[k].replace("\\n", "\n")
 
-            # 🚨 1. 選填題列號題號正規化（將 '9', '11' 對應回 'A'；將 '15', '16' 對應回 'C'）
-            q_num = str(q.get("question_number", "")).strip()
-            q_text_raw = str(q.get("question_text", ""))
-            
-            # 若題幹明確標註為 A. 或 C.，強制將數字題號扶正為正規選填代號
-            m_letter_prefix = re.match(r'^\s*([A-Ga-g])\s*[.．、]', q_text_raw)
-            if m_letter_prefix:
-                q_num = m_letter_prefix.group(1).upper()
-                q["question_number"] = q_num
-            elif q_num in ["8", "9", "10", "11", "12"] and "矩形" in q_text_raw:
-                q_num = "A"
-                q["question_number"] = "A"
-            elif q_num in ["15", "16", "17", "18"] and ("增廣矩陣" in q_text_raw or "恰有一組解" in q_text_raw):
-                q_num = "C"
-                q["question_number"] = "C"
+            # =========================================================================
+        # 🌐【100% 通用全科題目規範化與無損去重核心（零 Hardcoding 特例字）】
+        # =========================================================================
+        q_num = str(q.get("question_number", "")).strip()
+        q_text_raw = str(q.get("question_text", ""))
+        opts = q.get("options", []) or []
+        
+        # 1. 通用選填題大題字母判定：若題幹開頭為「A.」、「B.」、「C、」，自動以該字母為正規題號
+        m_letter_prefix = re.match(r'^\s*([A-Ia-i])\s*[.．、\s]', q_text_raw)
+        if m_letter_prefix:
+            q_num = m_letter_prefix.group(1).upper()
+            q["question_number"] = q_num
 
-            # 🚨 2. 單選題被誤標為多選題時自動降級扶正
-            if q_type == "多選題" and any(k in q_text_raw for k in ["最小值為何", "何者正確", "試求在此條件下"]):
-                if len(q.get("options", [])) == 5 and len(str(q.get("answer", "")).strip()) <= 2:
-                    q["question_type"] = "單選題"
-                    q_type = "單選題"
+        # 2. 通用題型扶正：若原卷有 4~5 個選項，且題幹問「最小值/最大值/為何/何者」，本質為單選者自動扶正
+        if q_type == "多選題" and len(opts) in [4, 5]:
+            is_single_choice_query = any(k in q_text_raw for k in ["最小值為", "最大值為", "的值為", "求其值", "何者正確？", "何者為真？"])
+            if is_single_choice_query and len(str(q.get("answer", "")).strip()) <= 2:
+                q["question_type"] = "單選題"
+                q_type = "單選題"
 
-            # 🚨 3. 選擇題 options_analysis 佔位符強制清洗
-            if q_type in ["單選題", "多選題"]:
-                opt_ana = str(q.get("options_analysis", ""))
-                if "本題為非選擇題" in opt_ana:
-                    # 重新根據 options 生成基礎剖析架構，消除無效佔位符
-                    new_ana = []
-                    for o in q.get("options", []):
-                        new_ana.append(f"- **({o.get('key')})** 依詳解推導分析此選項。")
-                    q["options_analysis"] = "\n".join(new_ana)
+        # 3. 通用選項剖析自癒：凡是有實體選項之題目，絕對禁止出現「本題為非選擇題」字樣
+        if q_type in ["單選題", "多選題"] or len(opts) >= 2:
+            opt_ana = str(q.get("options_analysis", ""))
+            if "本題為非選擇題" in opt_ana or not opt_ana.strip():
+                # 自癒生成標準選項對位結構
+                repaired_ana = [f"- **({o.get('key')})** 依詳解推導分析此選項。" for o in opts if o.get('key')]
+                q["options_analysis"] = "\n".join(repaired_ana) if repaired_ana else "選項分析完整收錄於詳細解法中。"
 
-            key = (q_num, q_type)
-            # 提取核心數學特徵指紋（跳過開頭大題字母干擾）
-            clean_text_fp = re.sub(r'^[A-Ga-g一二三四五\d\s.．、]+', '', re.sub(r'[^\w\u4e00-\u9fa5]', '', q_text_raw))[:25]
+        # 4. 通用核心特徵指紋（提取純文字前 28 字，跳過所有開頭題號、空白與符號）
+        core_fingerprint = re.sub(r'^[A-Za-z0-9一二三四五六七八九十\s.．、()（）\-_:：]+', '', q_text_raw)
+        clean_text_fp = re.sub(r'[^\w\u4e00-\u9fa5]', '', core_fingerprint)[:26]
 
-            if key in merged_map:
-                merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
+        key = (q_num, q_type)
+
+        # 情況 A：題號完全相同
+        if key in merged_map:
+            merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
+            continue
+
+        # 情況 B：題號不同，但題幹核心指紋高度重合（通用消滅選填題 9, 11 與 A；15, 16 與 C 重複裂解）
+        if clean_text_fp and len(clean_text_fp) >= 10:
+            if clean_text_fp in text_fps:
+                old_k = text_fps[clean_text_fp]
+                fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
+
+                # 通用題號裁決仲裁：英文字母（選填大題 A~H）優先於純數字列號（8~25）
+                cand_nums = [str(old_k[0]), str(q_num)]
+                letter_cand = next((n for n in cand_nums if len(n) == 1 and n.isalpha()), None)
+                best_q_num = letter_cand if letter_cand else cand_nums[0]
+                fused_q["question_number"] = best_q_num
+
+                del merged_map[old_k]
+                new_final_key = (best_q_num, fused_q.get("question_type", q_type))
+                merged_map[new_final_key] = fused_q
+                text_fps[clean_text_fp] = new_final_key
                 continue
+            text_fps[clean_text_fp] = key
 
-            # 跨題號文字指紋熔斷融合（例如 9 與 A 內容相同，自動融合並保留最佳版本）
-            if clean_text_fp and len(clean_text_fp) >= 8:
-                if clean_text_fp in text_fps:
-                    old_k = text_fps[clean_text_fp]
-                    fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
-                    # 題號擇優：字母代號 (A, B, C) 優於數字列號 (9, 11, 15)
-                    best_q_num = fused_q.get("question_number", "")
-                    if old_k[0].isalpha(): best_q_num = old_k[0]
-                    elif q_num.isalpha(): best_q_num = q_num
-                    fused_q["question_number"] = best_q_num
-                    
-                    del merged_map[old_k]
-                    new_final_key = (best_q_num, fused_q.get("question_type", q_type))
-                    merged_map[new_final_key] = fused_q
-                    text_fps[clean_text_fp] = new_final_key
-                    continue
-                text_fps[clean_text_fp] = key
-
-            merged_map[key] = q
+        merged_map[key] = q
 
         merged_list = list(merged_map.values())
 
