@@ -5994,22 +5994,22 @@ class ExamParser:
                     if cached_errata_ans:
                         matched_ans = cached_errata_ans
                         logging.info(f"⚡ [更正通知生效] {clean_subj_name} 題號 {qn} 已覆寫為官方更正答案：{matched_ans}")
-                        elif qn in ans_map:
-                            matched_ans = ans_map[qn]
-                        else:
-                            for k_ans, v_ans in ans_map.items():
-                                if is_precise_match(q_item, k_ans):
-                                    matched_ans = v_ans
-                                    break
-                        
-                        if matched_ans and str(matched_ans).strip() not in ["", "None", "null", "／", "/", "無", "無答案"]:
-                            cleaned_match = clean_ocr_answer_format(str(matched_ans))
-                            q_item['answer'] = cleaned_match
-                            q_item['official_answer'] = cleaned_match
-                            q_item['has_official_answer'] = True
-                        else:
-                            q_item['official_answer'] = ""
-                            q_item['has_official_answer'] = False
+                    elif qn in ans_map:
+                        matched_ans = ans_map[qn]
+                    else:
+                        for k_ans, v_ans in ans_map.items():
+                            if is_precise_match(q_item, k_ans):
+                                matched_ans = v_ans
+                                break
+                    
+                    if matched_ans and str(matched_ans).strip() not in ["", "None", "null", "／", "/", "無", "無答案"]:
+                        cleaned_match = clean_ocr_answer_format(str(matched_ans))
+                        q_item['answer'] = cleaned_match
+                        q_item['official_answer'] = cleaned_match
+                        q_item['has_official_answer'] = True
+                    else:
+                        q_item['official_answer'] = ""
+                        q_item['has_official_answer'] = False
                     
                 def get_base_q_num(q_num_str: str) -> str:
                     q_num_str = str(q_num_str).strip()
