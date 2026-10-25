@@ -71,35 +71,35 @@ PURGE_TOPIC_KEYWORDS = [
     "以下為", "注意**", "待確認", "重新判定", "考試作答規範", "讀卡格式"
 ]
 
-# 各大考學科的實體題數合理上限 (容許 2~4 題緩衝，但絕不可能跑到 40~50 題)
+# 各大考學科實體題數合理上限 (精確對齊 108 課綱與全模/北模真實考卷結構，容許子題適度拆分)
 SUBJECT_HARD_LIMITS = {
-    "指考_物理": 26, "指考_化學": 26, "指考_生物": 26,
-    "分科_物理": 28, "分科_化學": 28, "分科_生物": 28,
+    "指考_物理": 28, "指考_化學": 28, "指考_生物": 48,
+    "分科_物理": 30, "分科_化學": 30, "分科_生物": 50,
     "指考_數甲": 18, "指考_數乙": 18, "分科_數甲": 20,
     "學測_數學": 22, "學測_數A": 22, "學測_數B": 22,
-    "指考_國文": 26, "指考_英文": 56, "指考_歷史": 44, "指考_地理": 42, "指考_公民": 42,
+    "指考_國文": 26, "指考_英文": 56, "指考_歷史": 46, "指考_地理": 46, "指考_公民": 46,
+    "分科_歷史": 46, "分科_地理": 46, "分科_公民": 46,
     "學測_國文": 44, "學測_英文": 56, "學測_自然": 68, "學測_社會": 72
 }
 
 # =========================================================================
 # 台灣高中各科常規題數合理範圍 (最小值, 最大值) - 保護真題不被誤殺
 # =========================================================================
-# 🚨 完整納入大考學測/指考「自然科 (68題)」與「社會科 (72題)」完整題數標準
 EXAM_REASONABLE_RANGES = {
     "國寫": (2, 4),
-    "數學甲": (12, 18), "數學乙": (11, 17), "數學A": (15, 22), "數學B": (15, 22), "數學": (12, 22),
-    "物理": (22, 32), "化學": (22, 34), "生物": (40, 62), "地球科學": (35, 50),
-    "國文": (38, 46), "英文": (50, 60), "歷史": (36, 46), "地理": (36, 46), "公民與社會": (36, 46),
-    "社會": (65, 75),  # 🚨 大考學測社會科標準題數通常為 72 題
-    "自然": (60, 70)   # 🚨 大考學測自然科標準題數通常為 68 題
+    "數學甲": (12, 20), "數學乙": (11, 18), "數學A": (15, 22), "數學B": (15, 22), "數學": (12, 22),
+    "物理": (22, 32), "化學": (22, 34), "生物": (38, 52), "地球科學": (35, 52),
+    "國文": (38, 46), "英文": (50, 60), "歷史": (36, 48), "地理": (36, 48), "公民與社會": (36, 48),
+    "社會": (65, 75),  # 學測社會標準 72 題
+    "自然": (60, 70)   # 學測自然標準 68 題
 }
 
-# 保底單科天花板
+# 保底單科天花板（防止模考與段考子題拆分後被意外斬斷）
 STANDARD_MAX_QUESTIONS = {
-    "國寫": 4, "數學甲": 20, "數學乙": 18, "數學A": 22, "數學B": 22, "數學": 22,
-    "物理": 34, "化學": 36, "生物": 65, "地球科學": 52,
-    "國文": 48, "英文": 62, "歷史": 50, "地理": 50, "公民與社會": 50,
-    "社會": 75,
+    "國寫": 4, "數學甲": 22, "數學乙": 20, "數學A": 24, "數學B": 24, "數學": 24,
+    "物理": 36, "化學": 36, "生物": 54, "地球科學": 54,
+    "國文": 48, "英文": 62, "歷史": 52, "地理": 52, "公民與社會": 52,
+    "社會": 76,
     "自然": 72
 }
 
@@ -395,10 +395,22 @@ def clean_latex_corruptions(text: str) -> str:
 
 def harmonize_group_shared_context(questions: List[dict]) -> List[dict]:
     """
-    題組 shared_context 歸一化引擎：
-    識別同一大題的子小題（如 二(1), 二(2), 二(3) 或 15(a), 15(b)），
-    挑選字數最齊全、排版最完整的 shared_context，統一覆蓋至同題組的所有子題。
+    題組 shared_context 全卷穿透歸一化引擎 (與 catcher.py 跨頁共享池 100% 同步)：
+    1. 支援『第28至32題為題組』區間範圍精確穿透
+    2. 支援『二(1)』、『15(a)』大題標籤穿透
+    3. 挑選字數最齊全、排版最完整的引言，全面同步至區間內的所有子題。
     """
+    def extract_group_explicit_range(text: str):
+        if not text: return None
+        m = re.search(r'(?:第\s*)?(\d+)\s*(?:至|到|~|～|-)\s*(\d+)\s*題', text)
+        if m:
+            try:
+                s_n, e_n = int(m.group(1)), int(m.group(2))
+                if 1 <= s_n < e_n <= 90 and (e_n - s_n) <= 12:
+                    return (s_n, e_n)
+            except Exception: pass
+        return None
+
     def extract_group_base_tag(q_num_str: str) -> str:
         s = str(q_num_str).strip()
         m_cn = re.match(r'^([一二三四五六七八九十]+)', s)
@@ -407,27 +419,41 @@ def harmonize_group_shared_context(questions: List[dict]) -> List[dict]:
         if m_sub: return m_sub.group(1)
         return ""
 
-    groups: Dict[str, List[dict]] = {}
+    anchor_pools = []
     for q in questions:
-        q_num = str(q.get("question_number", "")).strip()
-        base_tag = extract_group_base_tag(q_num)
-        if base_tag:
-            if base_tag not in groups:
-                groups[base_tag] = []
-            groups[base_tag].append(q)
+        sc = clean_latex_corruptions(str(q.get("shared_context", "")).strip())
+        qt = clean_latex_corruptions(str(q.get("question_text", "")).strip())
+        rng = extract_group_explicit_range(sc + " " + qt[:120])
+        base_tag = extract_group_base_tag(str(q.get("question_number", "")))
 
-    for base_tag, q_list in groups.items():
-        if len(q_list) > 1:
-            # 挑選出該題組中最完整（長度最長、無亂碼且無連鎖星號）的 shared_context
-            best_sc = ""
-            for q in q_list:
-                sc = clean_latex_corruptions(str(q.get("shared_context", "")).strip())
-                if len(sc) > len(best_sc):
-                    best_sc = sc
-            
-            if best_sc:
-                for q in q_list:
-                    q["shared_context"] = best_sc
+        if sc or rng or base_tag:
+            matched = None
+            for p in anchor_pools:
+                if rng and p.get("range") == rng: matched = p; break
+                if base_tag and p.get("base_tag") == base_tag: matched = p; break
+
+            if matched:
+                if len(sc) > len(matched["best_sc"]): matched["best_sc"] = sc
+            else:
+                anchor_pools.append({"range": rng, "base_tag": base_tag, "best_sc": sc})
+
+    # 全卷穿透回填
+    for q in questions:
+        qn_str = str(q.get("question_number", "")).strip()
+        target = None
+        for p in anchor_pools:
+            rng = p.get("range")
+            base_tag = p.get("base_tag")
+            if rng:
+                digits = re.findall(r'^\d+$', qn_str)
+                if digits and rng[0] <= int(digits[0]) <= rng[1]:
+                    target = p; break
+            if base_tag and extract_group_base_tag(qn_str) == base_tag:
+                target = p; break
+
+        if target and target["best_sc"]:
+            q["shared_context"] = target["best_sc"]
+
     return questions
 
 def heal_question_types(questions: List[dict]) -> List[dict]:
