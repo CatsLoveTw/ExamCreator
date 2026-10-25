@@ -7138,25 +7138,26 @@ class ExamParser:
                             q_data["derived_answer"] = clean_ocr_answer_format(derived) if derived else ""
 
                             # 🚨 2. 若本題無官方答案，has_official_answer 強制設為 false，並將 answer 欄位填入推導答案！
+                            has_conflict = item.get("_discrepancy_detected", False)
                             has_off = q_data.get('has_official_answer', False) and bool(str(q_data.get('answer', '')).strip())
                             if not has_off:
+                                has_conflict = False
                                 q_data['has_official_answer'] = False
                                 q_data['official_answer'] = ""
-                                q_data['answer'] = q_data['derived_answer'] or "證明題" if "證" in q_data.get("question_text", "") else q_data.get("answer", "")
+                                q_data['answer'] = q_data['derived_answer'] or (q_data.get("answer", "") or ("證明題" if "證" in q_data.get("question_text", "") else ""))
                                 q_data['has_answer_discrepancy'] = False
                                 q_data['discrepancy_reason'] = ""
                             else:
                                 if not q_data.get("official_answer"):
                                     q_data["official_answer"] = str(q_data.get('answer', '')).strip()
-                                has_conflict = item.get("_discrepancy_detected", False)
                                 q_data["has_answer_discrepancy"] = has_conflict
                                 if has_conflict:
                                     q_data["discrepancy_reason"] = f"學術嚴謹推導答案為【{q_data['derived_answer']}】，但官方原始紀錄為【{q_data['official_answer']}】（疑為答案卷錯位、印刷瑕疵或版本混淆）。"
                                 else:
                                     q_data["discrepancy_reason"] = ""
 
-                            # 成功通過，加上客觀結論句（絕不精神分裂硬凹！）
-                            effective_ans = q_data['derived_answer'] if has_conflict else q_data['official_answer']
+                            # 成功通過，加上客觀結論句（絕不精神分裂硬凹！無官方答案或有衝突時優先取推導答案）
+                            effective_ans = q_data['derived_answer'] if (has_conflict or not has_off) else (q_data.get('official_answer') or q_data.get('answer', ''))
                             
                             # 🚨 防呆：若答案完全為空，不追加空的「綜上所述」句子
                             if effective_ans and effective_ans.strip():
