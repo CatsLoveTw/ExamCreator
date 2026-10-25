@@ -327,34 +327,37 @@ def clean_latex_corruptions(text: str) -> str:
     text = re.sub(r'\$\s*\*\*([^\$]+?)\s*\$', r'**$\1$**', text)
     text = re.sub(r'\$\s*([a-zA-Z0-9_\-]+)\s*\$', r'$\1$', text)
     
-    # 🚨 1. 終極拯救被無限繁殖的 \in\in\in...\infty 災難
-    text = re.sub(r'(?:\\in\s*){2,}\\infty', r'\\infty', text)
-    text = re.sub(r'(?:\\in\s*)+\\infty', r'\\infty', text)
-    text = re.sub(r'(?<![a-zA-Z\\])(?<!\\in)(?<!in)\\?fty\b', r'\\infty', text)
+    # 🚨 1. 徹底消滅 \l\l\l...\left 與 \r\r\r...\right 繁衍癌細胞，並救回 \langle ... \rangle
+    text = re.sub(r'(?:\\+[lr]\s*)+(?=\\left|\\right)', '', text)
+    text = re.sub(r'(?:\\l\s*)+(?=[(\[{])', r'\\left', text)
+    text = re.sub(r'(?:\\r\s*)+(?=[)\]}])', r'\\right', text)
+    text = re.sub(r'\\?bar\{r\}ightarrow', r'\\rightarrow', text)
+    text = re.sub(r'\\langle\s*([^>]+?)\s*angle', r'\\langle \1 \\rangle', text)
 
-    # 🚨 2. 救回被吃掉反斜線的 ightarrow 與 ight/eft
+    # 🚨 2. 安全救回缺失反斜線的 LaTeX 指令（使用 \b 邊界，嚴禁錯誤截斷詞根）
+    text = re.sub(r'(?<!\\)\brightarrow\b', r'\\rightarrow', text)
     text = re.sub(r'(?<!\\)\bightarrow\b', r'\\rightarrow', text)
     text = re.sub(r'(?<!\\)\bimplies\b', r'\\implies', text)
     text = re.sub(r'(?<!\\)\biff\b', r'\\iff', text)
     text = re.sub(r'\\?bsim\b', r'\\approx', text)
-    text = re.sub(r'(?<=\\left[\(\[\{])(.*?)(?<!\\)ight([\)\]\}])', r'\1\\right\2', text)
-    text = re.sub(r'(?<!\\)ight(?=[\)\]\}|\.])', r'\\right', text)
-    text = re.sub(r'(?<!\\)eft(?=[\(\[\{])', r'\\left', text)
+    text = re.sub(r'(?<!\\)\bleft(?=[\(\[\{])', r'\\left', text)
+    text = re.sub(r'(?<!\\)\bright(?=[\)\]\}|\.])', r'\\right', text)
 
-    # 🚨 3. 救回矩陣非法 \break 換行與符號錯位
+    # 🚨 3. 救回被破壞的 \infty 與矩陣換行
+    text = re.sub(r'(?:\\in\s*){2,}\\infty', r'\\infty', text)
+    text = re.sub(r'(?:\\in\s*)+\\infty', r'\\infty', text)
+    text = re.sub(r'(?<![a-zA-Z\\])(?<!\\in)(?<!in)\\?fty\b', r'\\infty', text)
     text = re.sub(r'\\break\b', r'\\\\', text)
     text = text.replace(r'\blacksquare', r'\in')
     text = re.sub(r'\\bgroup\s*(?:\\text\{\}|\s*\\quad\{\}|\{\})', '', text)
-    text = re.sub(r'\\([PQR])\b', r'\1', text) # 消除將點 P,Q,R 誤寫為段落符號 \P, \Q, \R
+    text = re.sub(r'\\([PQR])\b', r'\1', text)
     text = re.sub(r'\\z_([1-9])', r'z_\1', text)
 
-    # 救回 \log 變異字元
+    # 救回 \log 變異字元與清除非法註解結尾
     text = re.sub(r'\\bar\{log\}', r'\\log', text)
     text = re.sub(r'(?<!\\)\blog\b', r'\\log', text)
     text = re.sub(r'\\log_([0-9a-zA-Z])(?![0-9a-zA-Z{])', r'\\log_{\1}', text)
-    
-    # 救回括號與控制字元
-    text = text.replace(r"\r\right", r"\right").replace(r"\r\left", r"\left").replace(r"\r", "")
+    text = re.sub(r'\$\$%', r'$$', text)
     text = re.sub(r'[\x0c]rac(?![a-zA-Z])', r'\\frac', text)
     text = re.sub(r'(?<=\$)rac(?=\{)', r'\\frac', text)
 
@@ -1329,21 +1332,61 @@ def run_database_repair_suite():
                 if k in q and isinstance(q[k], str):
                     q[k] = q[k].replace("\\n", "\n")
 
+            # 🚨 1. 選填題列號題號正規化（將 '9', '11' 對應回 'A'；將 '15', '16' 對應回 'C'）
             q_num = str(q.get("question_number", "")).strip()
+            q_text_raw = str(q.get("question_text", ""))
+            
+            # 若題幹明確標註為 A. 或 C.，強制將數字題號扶正為正規選填代號
+            m_letter_prefix = re.match(r'^\s*([A-Ga-g])\s*[.．、]', q_text_raw)
+            if m_letter_prefix:
+                q_num = m_letter_prefix.group(1).upper()
+                q["question_number"] = q_num
+            elif q_num in ["8", "9", "10", "11", "12"] and "矩形" in q_text_raw:
+                q_num = "A"
+                q["question_number"] = "A"
+            elif q_num in ["15", "16", "17", "18"] and ("增廣矩陣" in q_text_raw or "恰有一組解" in q_text_raw):
+                q_num = "C"
+                q["question_number"] = "C"
+
+            # 🚨 2. 單選題被誤標為多選題時自動降級扶正
+            if q_type == "多選題" and any(k in q_text_raw for k in ["最小值為何", "何者正確", "試求在此條件下"]):
+                if len(q.get("options", [])) == 5 and len(str(q.get("answer", "")).strip()) <= 2:
+                    q["question_type"] = "單選題"
+                    q_type = "單選題"
+
+            # 🚨 3. 選擇題 options_analysis 佔位符強制清洗
+            if q_type in ["單選題", "多選題"]:
+                opt_ana = str(q.get("options_analysis", ""))
+                if "本題為非選擇題" in opt_ana:
+                    # 重新根據 options 生成基礎剖析架構，消除無效佔位符
+                    new_ana = []
+                    for o in q.get("options", []):
+                        new_ana.append(f"- **({o.get('key')})** 依詳解推導分析此選項。")
+                    q["options_analysis"] = "\n".join(new_ana)
+
             key = (q_num, q_type)
-            clean_text_fp = re.sub(r'[^\w\u4e00-\u9fa5]', '', str(q.get("question_text", "")))[:30]
+            # 提取核心數學特徵指紋（跳過開頭大題字母干擾）
+            clean_text_fp = re.sub(r'^[A-Ga-g一二三四五\d\s.．、]+', '', re.sub(r'[^\w\u4e00-\u9fa5]', '', q_text_raw))[:25]
 
             if key in merged_map:
                 merged_map[key] = fuse_duplicate_question_solutions(merged_map[key], q)
                 continue
 
-            if clean_text_fp and len(clean_text_fp) >= 10:
+            # 跨題號文字指紋熔斷融合（例如 9 與 A 內容相同，自動融合並保留最佳版本）
+            if clean_text_fp and len(clean_text_fp) >= 8:
                 if clean_text_fp in text_fps:
                     old_k = text_fps[clean_text_fp]
                     fused_q = fuse_duplicate_question_solutions(merged_map[old_k], q)
+                    # 題號擇優：字母代號 (A, B, C) 優於數字列號 (9, 11, 15)
+                    best_q_num = fused_q.get("question_number", "")
+                    if old_k[0].isalpha(): best_q_num = old_k[0]
+                    elif q_num.isalpha(): best_q_num = q_num
+                    fused_q["question_number"] = best_q_num
+                    
                     del merged_map[old_k]
-                    merged_map[key] = fused_q
-                    text_fps[clean_text_fp] = key
+                    new_final_key = (best_q_num, fused_q.get("question_type", q_type))
+                    merged_map[new_final_key] = fused_q
+                    text_fps[clean_text_fp] = new_final_key
                     continue
                 text_fps[clean_text_fp] = key
 
