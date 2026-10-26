@@ -476,20 +476,35 @@ def heal_question_types(questions: List[dict]) -> List[dict]:
 # 2. 知識點鋼鐵淨化器
 # -------------------------------------------------------------------------
 def sanitize_knowledge_point(cat_str: str, subject_hint: str = "") -> str:
-    """剛性洗淨考點與技巧：確保格式為『必修/選修_大單元_次單元_具體考點』，徹底剔除國語文、國文等冗餘科名！"""
+    """
+    剛性洗淨考點與技巧：
+    1. 第一層嚴格且唯一只能是「必修」或「選修」
+    2. 徹底消滅「必修化學」、「選修物理」、「必修生物」等重複科目層級
+    3. 徹底剔除「自然」、「社會」等大科名
+    """
     if not isinstance(cat_str, str): return "必修_綜合主題_核心概念"
     t = str(cat_str).strip()
     t = re.sub(r'^[\[\]\'\"\s\\]+|[\[\]\'\"\s\\]+$', '', t)
-    
-    prefix = "選修" if "選修" in t else "必修"
-    t = re.sub(r'^(?:必修|選修)[_/\\]+', '', t)
 
-    # 🚨 徹底剝除標籤內部夾帶的科目名稱（如 國語文_、國文_、數學_、物理_）
-    redundant_subs = ["國語文", "國綜", "國文", "數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "英文", "自然", "社會"]
-    for sub in redundant_subs:
-        if t.startswith(sub + "_"):
-            t = t[len(sub)+1:]
-            break
+    # 1. 判定唯一合法前綴 (必修 or 選修)
+    prefix = "選修" if "選修" in t else "必修"
+
+    # 2. 徹底剝除開頭的「必修」、「選修」（無論後面有無底線）
+    t = re.sub(r'^(?:必修|選修)[_/\\]*', '', t)
+
+    # 3. 徹底剝除重複夾帶的科目名稱與冊次標籤（如 "化學_", "化學(全)_", "選修化學_", "物理_" 等）
+    redundant_subs = [
+        "國語文", "國綜", "國文", "數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學",
+        "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "英文", "英語", "自然", "社會"
+    ]
+    # 連續剝除兩次，防止出現「必修_必修化學」雙重嵌套
+    for _ in range(2):
+        t = re.sub(r'^(?:必修|選修)[_/\\]*', '', t)
+        for sub in redundant_subs:
+            t = re.sub(rf'^(?:必修|選修)?{sub}(?:\([一二三四五六全上下1-4]+\))?[_/\\]*', '', t)
+
+    # 剝除純冊次標籤如 (全), (一), [全]
+    t = re.sub(r'^[\(\[][一二三四五六全上下1-4]+[\)\]][_/\\]*', '', t)
 
     parts = [p.strip() for p in t.split("_") if p.strip()]
     if not parts or any(gk in t for gk in PURGE_TOPIC_KEYWORDS):
@@ -498,8 +513,26 @@ def sanitize_knowledge_point(cat_str: str, subject_hint: str = "") -> str:
         return f"{prefix}_{parts[0]}_核心概念"
     return f"{prefix}_" + "_".join(parts[:4])
 
+def deduce_sub_subject_from_content(text: str) -> str:
+    """從題目文本或考點中，將『自然』精確分流為 物理、化學、生物、地球科學"""
+    t = str(text).lower()
+    # 依特徵權重計分
+    chem_kw = ["化學", "溶液", "反應", "莫耳", "平衡", "沉澱", "酸鹼", "氧化", "還原", "分子", "原子量", "週期表", "濃度", "鍵能"]
+    phys_kw = ["物理", "速度", "加速度", "力學", "牛頓", "動能", "位能", "電場", "磁場", "電流", "電阻", "波動", "光學", "歐姆", "力矩", "拋體"]
+    bio_kw  = ["生物", "細胞", "基因", "染色體", "遺傳", "葉綠", "酵素", "呼吸作用", "光合作用", "演化", "生態", "器官", "植物", "動物"]
+    geo_kw  = ["地科", "地球科學", "地震", "板塊", "地層", "岩石", "大氣", "鋒面", "氣候", "星等", "天球", "恆星", "湧升流", "颱風", "地質"]
+
+    scores = {
+        "化學": sum(t.count(k) for k in chem_kw),
+        "物理": sum(t.count(k) for k in phys_kw),
+        "生物": sum(t.count(k) for k in bio_kw),
+        "地球科學": sum(t.count(k) for k in geo_kw)
+    }
+    best_sub = max(scores, key=scores.get)
+    return best_sub if scores[best_sub] > 0 else "物理"
+
 def sanitize_subject_json():
-    """自動清理並規範化 subject.json，自動合併『國語文』至『國文』，並剝除贅餘科名標籤"""
+    """自動清理並規範化 subject.json，徹底消除『自然』科目與『必修化學』冗贅層級"""
     if not os.path.exists(SUBJECT_FILE): return
     try:
         with open(SUBJECT_FILE, "r", encoding="utf-8") as f:
@@ -507,36 +540,38 @@ def sanitize_subject_json():
         cleaned = {}
         purged_cnt = 0
 
-        def clean_tag(raw_t, s_name):
-            t = str(raw_t).strip()
-            prefix = "選修" if "選修" in t else "必修"
-            t = re.sub(r'^(?:必修|選修)[_/\\]+', '', t)
-            # 剝除贅餘科名
-            for sub in ["國語文", "國綜", "國文", "數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數學", "物理", "化學", "生物", "地科", "地球科學", "歷史", "地理", "公民"]:
-                if t.startswith(sub + "_"):
-                    t = t[len(sub)+1:]
-                    break
-            parts = [p.strip() for p in t.split("_") if p.strip()]
-            if not parts: return f"{prefix}_綜合主題_核心概念"
-            return f"{prefix}_" + "_".join(parts[:4])
-
         for subj, content in data.items():
-            # 🚨 合併別名鍵（國語文 ➔ 國文）
+            # 🚨 1. 遇到別名或「自然」科目，進行精準分流
             target_subj = "國文" if subj in ["國語文", "國綜"] else subj
-            if target_subj not in cleaned:
-                cleaned[target_subj] = {"topics": [], "techniques": []}
 
             for t in content.get("topics", []):
                 t_str = str(t).strip()
                 if len(t_str) >= 4 and len(t_str) <= 50 and not any(k in t_str for k in PURGE_TOPIC_KEYWORDS) and "\n" not in t_str:
-                    cleaned[target_subj]["topics"].append(clean_tag(t_str, target_subj))
+                    clean_t = sanitize_knowledge_point(t_str)
+                    # 若來源是「自然」，自動分流進四大科
+                    actual_subj = target_subj
+                    if target_subj in ["自然", "理綜"]:
+                        actual_subj = deduce_sub_subject_from_content(t_str + " " + clean_t)
+                    
+                    if actual_subj not in cleaned: cleaned[actual_subj] = {"topics": [], "techniques": []}
+                    cleaned[actual_subj]["topics"].append(clean_t)
                 else: purged_cnt += 1
 
             for tech in content.get("techniques", []):
                 tech_str = str(tech).strip()
                 if len(tech_str) >= 4 and len(tech_str) <= 60 and not any(k in tech_str for k in PURGE_TOPIC_KEYWORDS) and "\n" not in tech_str:
-                    cleaned[target_subj]["techniques"].append(clean_tag(tech_str, target_subj))
+                    clean_tech = sanitize_knowledge_point(tech_str)
+                    actual_subj = target_subj
+                    if target_subj in ["自然", "理綜"]:
+                        actual_subj = deduce_sub_subject_from_content(tech_str + " " + clean_tech)
+
+                    if actual_subj not in cleaned: cleaned[actual_subj] = {"topics": [], "techniques": []}
+                    cleaned[actual_subj]["techniques"].append(clean_tech)
                 else: purged_cnt += 1
+
+        # 🚨 2. 徹底防禦：確保 cleaned 字典中絕對沒有「自然」這個主鍵
+        if "自然" in cleaned:
+            del cleaned["自然"]
 
         for s in cleaned:
             cleaned[s]["topics"] = sorted(list(dict.fromkeys(cleaned[s]["topics"])))
@@ -544,7 +579,7 @@ def sanitize_subject_json():
 
         with open(SUBJECT_FILE, "w", encoding="utf-8") as f:
             json.dump(cleaned, f, ensure_ascii=False, indent=4)
-        logging.info(f"🧹 [知識庫洗淨] 已成功完成 {SUBJECT_FILE} 規範化，合併別名鍵並拔除 {purged_cnt} 筆不合規標籤！")
+        logging.info(f"🧹 [知識庫洗淨] 已成功完成 {SUBJECT_FILE} 規範化，徹底消除『自然科』與重複前綴，移除 {purged_cnt} 筆雜訊！")
     except Exception as e:
         logging.error(f"淨化 {SUBJECT_FILE} 失敗: {e}")
 
@@ -1405,14 +1440,19 @@ def run_database_repair_suite():
             q["exam_type"] = meta["exam_type"]
             q["exam_category"] = meta["exam_category"]
 
-            # 🚨 A. 學科別名強制歸一（消除「國語文」）
-            cur_sub = str(q.get("sub_subject", meta["clean_subject"])).strip()
+            # 🚨 A. 學科別名強制歸一與「自然科」強制分流（徹底消滅 sub_subject: 自然）
+            cur_sub = str(q.get("sub_subject", "")).strip()
+            if not cur_sub or cur_sub in ["自然", "理綜", "未知"]:
+                # 依題幹、詳解與考點進行自然科四大領域精準判定
+                q_probe_text = str(q.get("question_text", "")) + " " + str(q.get("detailed_solution", "")) + " " + str(q.get("topic_category", ""))
+                cur_sub = deduce_sub_subject_from_content(q_probe_text)
+
             if cur_sub in ["國綜", "國語文"]: cur_sub = "國文"
             elif any(k in cur_sub for k in ["數A", "數B", "數甲", "數乙", "數學A", "數學B", "數學甲", "數學乙"]): cur_sub = "數學"
             elif cur_sub in ["地科"]: cur_sub = "地球科學"
             elif cur_sub in ["公民"]: cur_sub = "公民與社會"
             q["sub_subject"] = cur_sub
-
+            
             # 🚨 B. 考點剛性去冗餘科名洗淨
             main_cat = sanitize_knowledge_point(q.get("topic_category", ""), cur_sub)
             cats = [sanitize_knowledge_point(c, cur_sub) for c in q.get("topic_categories", []) if c]
