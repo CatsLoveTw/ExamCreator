@@ -930,8 +930,14 @@ PROMPT_STAGE_2_MAIN = """
 1. **跨單元多維知識點 (topic_categories) 命名規範（極重要）**：
     - **跨領域複合考點捕捉**：台灣大考鑑別題多為跨單元整合題（如：指數函數結合矩陣、空間向量結合三角比、物理力學結合電磁學、化學平衡結合氧化還原、英文分詞結構結合動詞片語）。
     - **多考點陣列輸出**：你【必須】在 `topic_categories` 列表中，列出本題所涉及的 **1 到 3 個** 核心學科知識點（按重要性由主至次排列，第一項為主考點，後續為跨章節次要考點）。
-    - **首字強制約束**：列表中的**每一個字串項目**，都【必須且只能】以 `必修_` 或 `選修_` 作為開頭。
-    - **階層化結構**：每一項皆必須嚴格遵循 `必修/選修_大單元_次單元_具體觀念` 的底線（`_`）格式（例如：`["必修_指數與對數_應用模型_按比例成長或衰退模型", "必修_數列與級數_常規_無窮等比級數收斂求和"]`）。
+    - **首字強制約束與【嚴禁重複科目名稱】（最高紅線）**：
+      * 列表中的**每一個字串項目**，都【必須且只能】以 `必修_` 或 `選修_` 作為開頭！
+      * 🚨🚨【絕對嚴格禁止在必修/選修後面重複科目名稱】🚨🚨：
+        - 🚫 絕對禁止寫出：`必修化學_...`、`選修物理_...`、`必修生物_...`、`選修化學_...`、`必修_化學_...`！
+        - 🚫 第一節必須且只能是 `必修` 或 `選修`，第二節直接接「大單元名稱」！
+        - ✅ 正確示範：`必修_物質的組成_原子結構與週期表`（不可寫 `必修_必修化學_...`，也不可寫 `必修化學_...`）。
+        - ✅ 正確示範：`選修_力學與運動_牛頓運動定律`（不可寫 `選修物理_...`）。
+    - **階層化結構**：每一項皆必須嚴格遵循 `必修/選修_大單元_次單元_具體觀念` 的底線（`_`）格式。
     - 🚨 **【底線 (_) 使用限制】**：底線 `_` **僅限於**作為大單元、次單元與觀念之間的階層分隔！同階層並列詞請使用斜線 `/`、空格或 `&`（例如：`否定字首 un/dis/in`，不可寫 `否定字首_un_dis`）。
     - 系統會自動將第一項指派給主索引欄位 `topic_category`，確保多維度檢索與相容性。
       - 並列詞彙請使用斜線 `/`、符號 `&`、半形空格或加號 `+`（例如：`否定字首 un/dis/in/im/il/ir/non`，絕不可寫 `否定字首_un_dis...`）。
@@ -3576,8 +3582,9 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
 def canonicalize_taxonomy_tag(tag: str, subject: str) -> str:
     """
     🚨 標籤剛性正規化中樞：
-    徹底消除「必修_國文_...」、「必修_國語文_...」與「必修_文言文...」的三重分裂混亂！
-    統一輸出格式：必修/選修_大單元_次單元_具體考點
+    1. 第一層嚴格且唯一只能是「必修」或「選修」
+    2. 徹底消除「必修化學」、「選修物理」等重複科目層級
+    3. 統一輸出格式：必修/選修_大單元_次單元_具體考點
     """
     if not tag or not isinstance(tag, str):
         return "必修_綜合主題_核心概念"
@@ -3585,14 +3592,18 @@ def canonicalize_taxonomy_tag(tag: str, subject: str) -> str:
     t = re.sub(r'^[\[\"\'\s]+|[\]\"\'\s]+$', '', t)
     
     prefix = "選修" if "選修" in t else "必修"
-    t = re.sub(r'^(?:必修|選修)[_/\\]+', '', t)
+    t = re.sub(r'^(?:必修|選修)[_/\\]*', '', t)
 
-    # 🚨 剛性拔除標籤內部多餘的科目字首（如 國文_、國語文_、物理_、化學_）
-    redundant_subjs = ["國語文", "國綜", "國文", "數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "英文", "自然", "社會"]
-    for sub in redundant_subjs:
-        if t.startswith(sub + "_"):
-            t = t[len(sub)+1:]
-            break
+    redundant_subjs = [
+        "國語文", "國綜", "國文", "數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學",
+        "物理", "化學", "生物", "地球科學", "地科", "歷史", "地理", "公民與社會", "公民", "英文", "英語", "自然", "社會"
+    ]
+    for _ in range(2):
+        t = re.sub(r'^(?:必修|選修)[_/\\]*', '', t)
+        for sub in redundant_subjs:
+            t = re.sub(rf'^(?:必修|選修)?{sub}(?:\([一二三四五六全上下1-4]+\))?[_/\\]*', '', t)
+
+    t = re.sub(r'^[\(\[][一二三四五六全上下1-4]+[\)\]][_/\\]*', '', t)
 
     parts = [p.strip() for p in t.split("_") if p.strip()]
     if not parts:
@@ -3600,6 +3611,7 @@ def canonicalize_taxonomy_tag(tag: str, subject: str) -> str:
     if len(parts) == 1:
         return f"{prefix}_{parts[0]}_核心概念"
     return f"{prefix}_" + "_".join(parts[:4])
+    
 
 def is_strictly_valid_topic(topic_str: str) -> bool:
     """知識點鋼鐵檢驗閘門：必須完全合規才准許寫入 subject.json"""
@@ -3624,13 +3636,33 @@ def update_subject_taxonomy(normalized_subject: str, solution_data: dict):
     with SUBJECT_FILE_LOCK:
         updated = False
         
-        # 🚨 1. 學科主鍵強制標準化（國語文/國綜 ➔ 國文，數A/數B/數甲 ➔ 數學）
+        # 🚨 1. 學科主鍵強制標準化，絕對禁止將「自然」作為獨立主鍵寫入
         clean_sub_key = re.sub(r'(?:考科|科)$', '', str(normalized_subject).strip())
+        
+        # 若傳入為「自然」或包含多科，從題目的 sub_subject 或內容中取得真正學科（物理/化學/生物/地科）
+        if clean_sub_key in ["自然", "理綜"]:
+            real_sub = str(solution_data.get("sub_subject", "")).strip()
+            if real_sub and real_sub not in ["自然", "理綜"]:
+                clean_sub_key = real_sub
+            else:
+                probe_txt = str(solution_data.get("question_text", "")) + " " + str(solution_data.get("detailed_solution", ""))
+                chem_c = sum(probe_txt.count(k) for k in ["化學", "溶液", "反應", "莫耳", "酸鹼", "原子"])
+                phys_c = sum(probe_txt.count(k) for k in ["物理", "速度", "加速度", "力學", "電場", "磁場"])
+                bio_c  = sum(probe_txt.count(k) for k in ["生物", "細胞", "基因", "遺傳", "葉綠"])
+                geo_c  = sum(probe_txt.count(k) for k in ["地科", "地震", "板塊", "地層", "星等", "大氣"])
+                best_c = max([("化學", chem_c), ("物理", phys_c), ("生物", bio_c), ("地球科學", geo_c)], key=lambda x: x[1])
+                clean_sub_key = best_c[0] if best_c[1] > 0 else "物理"
+
         if clean_sub_key in ["國綜", "國語文"]: clean_sub_key = "國文"
         elif any(k in clean_sub_key for k in ["數A", "數B", "數甲", "數乙", "數學A", "數學B", "數學甲", "數學乙"]): clean_sub_key = "數學"
         elif clean_sub_key in ["地科"]: clean_sub_key = "地球科學"
         elif clean_sub_key in ["公民"]: clean_sub_key = "公民與社會"
         clean_sub_key = s2t(clean_sub_key)
+
+        # 徹底刪除可能殘留在字典中的「自然」鍵
+        if "自然" in SUBJECT_TAXONOMY:
+            del SUBJECT_TAXONOMY["自然"]
+            updated = True
 
         if clean_sub_key not in SUBJECT_TAXONOMY:
             SUBJECT_TAXONOMY[clean_sub_key] = {"topics": [], "techniques": []}
@@ -5572,8 +5604,12 @@ class ExamParser:
                     15. **【清洗圖形文字佔位符】**：大考 PDF 的純文字中常含有如 `[圖3 結構圖]`、`[圖形]`、`[圖片]` 或 `[圖 3]` 等無意義的純文字佔位符。請你在擷取 `question_text` 與 `shared_context` 時，**務必將這些無意義的圖形文字佔位符完全剔除**！因為我們後續會有實體的 `image_bboxes` 裁剪圖，不需要保留這些純文字垃圾。
                     16. **【極度寬裕的 Bounding Box 標記】**：當你框選 `image_bboxes` 或選項附圖的 Bounding Box 時，**請務必畫得極度寬裕 (Very Generous)**！寧可多框 15% 的空白邊緣，也絕對不可以切到任何化學鍵、原子符號、反應箭頭、坐標軸文字、或選項字母 A, B, C 的邊角！
                     17. **【題組判定極度嚴格警告】**：只有當試卷上明確印有『X-Y題為題組』時，才可將 X 到 Y 題歸為題組，並將共同引言寫入 `shared_context`。**絕對禁止**只因為多道題目印在同一頁、或者因為它們都是選擇題，就擅自編造『題組』將其歸類！非題組的題目，其 `shared_context` 必須為空！
-                    18. **科目精細分類**：請將考卷的原有名稱填入 'exam_source'，而 'sub_subject' 必須且只能從以下清單中挑選一項填寫：'物理', '化學', '生物', '地球科學', '歷史', '地理', '公民與社會', '數學', '英文', '國文', '國寫'。對於跨科考題，請強制選擇佔比最重的一科，絕對不可自創類別。
-
+                    18. **科目精細分類與【自然考卷嚴格分流禁令】**：
+                       - 請將考卷的原有名稱填入 'exam_source'。
+                       - 🚨🚨【自然科考題絕對分流】：對於學測自然、分科自然或自然模考，每一道題目的 `sub_subject` **必須且只能**精確指派為 `'物理'`, `'化學'`, `'生物'`, `'地球科學'` 之一！
+                       - **【絕對嚴格禁止】** 將 `sub_subject` 填寫為 `'自然'`！知識庫中絕無「自然」這一科目！
+                       - 全科合法科目清單只有：'物理', '化學', '生物', '地球科學', '歷史', '地理', '公民與社會', '數學', '英文', '國文', '國寫'。
+                    
                     【圖片裁切極致規範 - 解決切錯/漏切問題】
                     1. **題號包含原則**：Bounding Box 必須包裹住題號數字。
                     2. **🚨選項附圖合併規則 (極重要)🚨**：
