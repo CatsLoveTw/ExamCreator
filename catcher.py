@@ -5215,18 +5215,12 @@ class ExamParser:
                         except Exception: pass
                     return
                 else:
-                    # 題數不足或存在無詳解空殼題！強制撤銷假完工 database，降級為 partial 觸發 Stage 2 重新解題！
-                    reason_msg = f"題數不足 (僅 {len(merged_checkpoint_list)}/{min_expected_q} 題)" if len(merged_checkpoint_list) < min_expected_q else "題目缺少詳解 (空殼題庫)"
-                    logging.warning(f"⚠️ [未完工校正] 發現 {json_path} {reason_msg}，強制撤銷正式庫並轉入 partial 重新深度解析！")
+                    # 💡 題數不足時僅儲存 partial 作為補充，絕不刪除雲端已存在的正式資料庫
+                    reason_msg = f"題數不足 (僅 {len(merged_checkpoint_list)}/{min_expected_q} 題)" if len(merged_checkpoint_list) < min_expected_q else "部分題目缺少詳解"
+                    logging.warning(f"⚠️ [進度補充] 發現 {json_path} {reason_msg}，保留現有檔案並同步至 partial 進行補充！")
                     with open(partial_json_path, "w", encoding="utf-8") as pf:
                         json.dump(merged_checkpoint_list, pf, ensure_ascii=False, indent=4)
-                    if db_exists:
-                        try: 
-                            os.remove(json_path)
-                            rel_p = os.path.relpath(json_path, output_dir).replace("\\", "/")
-                            with open("pending_cloud_purges.txt", "a", encoding="utf-8") as f_pg:
-                                f_pg.write(f"gdrive:exam_database_output/{rel_p}\n")
-                        except Exception: pass
+                    # 🚨 關閉刪除指令，防止正式資料庫與雲端檔案被清除
 
             except Exception as e:
                 logging.error(f"讀取現有資料庫 {json_path} 進行品質巡檢失敗: {e}")
@@ -7806,19 +7800,14 @@ class ExamParser:
         GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(valid_solved_questions), len(all_extracted_questions), final_status)
 
         if is_partial:
-            # 只要還有任何一題失敗/超時，絕對不產生最終 database，保留 raw 暫存等待下次重跑！
+            # 題數未齊全時寫入 partial，但絕對保留現有的 database.json，不加入雲端刪除清單
             with open(partial_json_path, "w", encoding="utf-8") as f:
                 json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
-            # 🚨 清理舊的同名正式庫，防止正式庫與 partial 同時存在造成狀態衝突
-            if os.path.exists(json_path):
-                try:
-                    os.remove(json_path)
-                    rel_p = os.path.relpath(json_path, output_dir).replace("\\", "/")
-                    with open("pending_cloud_purges.txt", "a", encoding="utf-8") as f_pg:
-                        f_pg.write(f"gdrive:exam_database_output/{rel_p}\n")
-                except Exception:
-                    pass
-            logging.warning(f"💾 [未全數完成 - 自動留存 Raw] [{year} {subject}] 全卷共 {len(all_extracted_questions)} 題，已成功完成 {len(valid_solved_questions)} 題高品質詳解。失敗/超時之題目已保留於 Raw 快取中，下次執行將自動補跑！")
+            # 🚨 若題目已解出大部分（大於等於 8 題），同步保留/更新為正式庫，避免雲端完全沒有可用資料庫
+            if len(valid_solved_questions) >= 8 and not os.path.exists(json_path):
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
+            logging.warning(f"💾 [部分完成存檔] [{year} {subject}] 已儲存 {len(valid_solved_questions)} 題進度至 partial，現存資料庫予以保留不刪除。")
 
             # 🚨 核心阻斷：若是因為每日額度耗盡 (RPD) 而中斷，保存進度後立刻向上拋出異常，終止後續考卷盲跑！
             if rpd_hit:

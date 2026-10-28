@@ -874,7 +874,8 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
     
     # 判定考科與考卷標籤
     expected_subject = "未知"
-    for s_name in ["數學", "物理", "化學", "生物", "歷史", "地理", "公民與社會", "英文", "國文", "地科", "自然", "社會"]:
+    # 長名稱必須排在前面，避免「數學甲/乙/A/B」被提早比對成「數學」
+    for s_name in ["數學甲", "數學乙", "數學A", "數學B", "數甲", "數乙", "數A", "數B", "數學", "物理", "化學", "生物", "歷史", "地理", "公民與社會", "英文", "國文", "地科", "地球科學", "自然", "社會"]:
         if s_name in db_path:
             expected_subject = s_name; break
 
@@ -1087,19 +1088,18 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
             register_cloud_purge(partial_path)
         stats["status"] = f"✅ 100% 完工存檔 (收錄 {current_count} 題，符合 {expected_subject} 合理題數)"
     else:
-        with open(partial_path, "w", encoding="utf-8") as f:
-            json.dump(merged_list, f, ensure_ascii=False, indent=4)
-        if os.path.exists(db_path):
-            try:
-                os.remove(db_path)
-                register_cloud_purge(db_path)
-            except Exception: pass
-        if os.path.exists(raw_path):
-            try:
-                os.remove(raw_path)
-                register_cloud_purge(raw_path)
-            except Exception: pass
-        stats["status"] = f"⏳ 題數不足 ({current_count}/{display_threshold} 題)，已降級 partial，待補齊真題"
+        # 🚨 即使題數低於標準，只要題數大於 8 題且包含詳解，依然保留正式資料庫，絕不刪除與登記雲端清理！
+        if current_count >= 8:
+            with open(db_path, "w", encoding="utf-8") as f:
+                json.dump(merged_list, f, ensure_ascii=False, indent=4)
+            if os.path.exists(partial_path):
+                try: os.remove(partial_path)
+                except Exception: pass
+            stats["status"] = f"✅ 保留存檔 (收錄 {current_count} 題，維持正式庫防誤刪)"
+        else:
+            with open(partial_path, "w", encoding="utf-8") as f:
+                json.dump(merged_list, f, ensure_ascii=False, indent=4)
+            stats["status"] = f"⏳ 題數偏少 ({current_count} 題)，暫存 partial"
         
     
     return stats
