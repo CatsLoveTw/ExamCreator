@@ -3780,9 +3780,17 @@ class ExamParser:
         """
         clean_t = page_text.strip()
         
-        # 1. 解答/詳解頁面判定
-        sol_markers = ["參考詳解", "試題詳解", "考科詳解", "參考答案暨詳解", "【詳解】", "【解析】", "答案與詳解", "選擇題答案確定稿", "答案公佈"]
+        # 1. 解答/詳解/簡答表格頁面判定（全面納入標準答案、簡答、選填題答案表）
+        sol_markers = [
+            "參考詳解", "試題詳解", "考科詳解", "參考答案暨詳解", "【詳解】", "【解析】", 
+            "答案與詳解", "選擇題答案確定稿", "答案公佈", "參考答案", "標準答案", 
+            "選擇題答案", "選填題答案", "非選擇題答案", "簡答", "解答", "答案表", "答案卡"
+        ]
         if any(sm in clean_t for sm in sol_markers):
+            return "SOLUTION"
+            
+        # 額外特徵：若頁面出現密集題號與答案對照（如大量出現 "1. A"、"2. B" 或選填題列號對照）
+        if re.search(r'(?:選擇題|選填題|單選題|多選題)\s*(?:參考)?答案', clean_t):
             return "SOLUTION"
             
         # 2. 目錄頁面判定
@@ -5297,11 +5305,21 @@ class ExamParser:
                     # 在後半段尋找詳解起始頁
                     sol_start_p = -1
                     doc_peek = fitz.open(q_pdf)
-                    for p_i in range(int(total_p_cnt * 0.35), total_p_cnt):
-                        txt = doc_peek[p_i].get_text("text").replace(" ", "")
-                        if any(k in txt for k in ["[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", "試題詳解", "答案與解析", "【解析】", "出處："]):
-                            sol_start_p = p_i
-                            break
+                    ans_headers = [
+                    "[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", 
+                    "試題詳解", "答案與解析", "【解析】", "出處：", "參考答案", "標準答案", 
+                    "選擇題答案", "選填題答案", "非選擇題答案", "簡答", "解答"
+                ]
+                for p_i in range(int(total_p_cnt * 0.35), total_p_cnt):
+                    txt = doc_peek[p_i].get_text("text").replace(" ", "")
+                    # 1. 命中詳解/答案標題關鍵字
+                    if any(k in txt for k in ans_headers):
+                        sol_start_p = p_i
+                        break
+                    # 2. 命中答案表格標題（如「一、單選題 1. (3) 2. (1)...」）
+                    if ("答案" in txt or "解答" in txt) and any(k in txt for k in ["單選", "多選", "選填", "題號"]):
+                        sol_start_p = p_i
+                        break
                     doc_peek.close()
 
                     if sol_start_p != -1:
