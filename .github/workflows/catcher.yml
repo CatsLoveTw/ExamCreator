@@ -56,8 +56,8 @@ jobs:
 
       - name: Install system dependencies & rclone
         run: |
-          # 一次性安裝中文字型、字型管理工具、curl、zip 與 unzip
-          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fontconfig curl zip unzip
+          # 一次性安裝中文字型、系統影像依賴(libgl1)、curl、zip 與 unzip
+          sudo apt-get update && sudo apt-get install -y fonts-noto-cjk fontconfig curl zip unzip libgl1 libglib2.0-0
           sudo fc-cache -fv
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
@@ -74,8 +74,8 @@ jobs:
           python -m pip install --upgrade pip
           # 1. 優先安裝 CPU 專用 PyTorch (節省數 GB 下載與磁碟空間)
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          # 2. 安裝 MinerU (magic-pdf) 與相依套件
-          pip install "magic-pdf[full]" google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
+          # 2. 強制安裝 MinerU CPU 專用最新完整包 (解決 pipe 模組遺失問題)
+          pip install -U "magic-pdf[full-cpu]>=0.14.0" google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
           # 3. 初始化 MinerU 設定檔 (直接寫入家目錄 ~/magic-pdf.json)
