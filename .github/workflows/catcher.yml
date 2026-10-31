@@ -78,9 +78,9 @@ jobs:
           pip install "magic-pdf[full]" google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-          # 3. 初始化 MinerU 設定檔 (強制指定 CPU 模式與模型路徑)
-          mkdir -p /home/runner/mineru_models
-          cat << 'EOF' > /home/runner/magic-pdf.json
+          # 3. 初始化 MinerU 設定檔 (直接寫入家目錄 ~/magic-pdf.json)
+          mkdir -p ~/mineru_models
+          cat << 'EOF' > ~/magic-pdf.json
           {
             "models-dir": "/home/runner/mineru_models",
             "device-mode": "cpu",
@@ -93,7 +93,6 @@ jobs:
             }
           }
           EOF
-          cp /home/runner/magic-pdf.json ~/magic-pdf.json
 
           # 4. 若快取未命中，下載輕量化模型權重 (約 2~3 GB)
           if [ "${{ steps.cache-mineru.outputs.cache-hit }}" != "true" ]; then
