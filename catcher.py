@@ -442,8 +442,50 @@ def sanitize_latex_syntax(text: str) -> str:
 
     text = "".join(parts)
     text = re.sub(r' +', ' ', text)
+    
+    # 🚀 3. 本地開源 AST 語法修補（補齊未閉合大括號、刪除孤立括號）
+    text = ast_repair_latex(text)
+    
     return text.strip()
 
+def ast_repair_latex(text: str) -> str:
+    """【開源庫優先】利用 pylatexenc 在本地端以語法樹 (AST) 檢驗與補齊 LaTeX 語法錯誤"""
+    if not isinstance(text, str) or ("$" not in text and "\\" not in text):
+        return text
+    try:
+        from pylatexenc.latexwalker import LatexWalker, LatexMacroNode, LatexGroupNode, LatexCharsNode
+        # 1. 自動修正數學區塊內的大括號對稱性
+        def balance_math_braces(s: str) -> str:
+            depth = 0
+            res = []
+            for ch in s:
+                if ch == '{':
+                    depth += 1
+                    res.append(ch)
+                elif ch == '}':
+                    if depth > 0:
+                        depth -= 1
+                        res.append(ch)
+                    # 丟棄無前置對應的孤立 '}'
+                else:
+                    res.append(ch)
+            if depth > 0:
+                res.append('}' * depth)
+            return "".join(res)
+
+        # 針對被 $ 包裹的片段修補
+        parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
+        for idx in range(len(parts)):
+            if idx % 2 == 1:
+                is_display = parts[idx].startswith("$$")
+                content = parts[idx][2:-2] if is_display else parts[idx][1:-1]
+                content = balance_math_braces(content)
+                parts[idx] = f"$${content}$$" if is_display else f"${content}$"
+        text = "".join(parts)
+    except Exception:
+        pass
+    return text
+    
 def fix_latex_text_macros(text: str) -> str:
     """
     偵測 text 中的 \\text{...} 結構（支援嵌套大括號 {}），
