@@ -3180,9 +3180,9 @@ class GeminiFreeTierManager:
                     # 立即換下一把可用金鑰，不扣減重試次數，也不誤關閉 Thinking 模式！
                     continue
 
-                # 🚨 401 代理攔截保護 (若非 Google 報錯，通常是 Vercel/Cloudflare 部署保護)
-                if e.code == 401 or "unauthorized" in err_str:
-                    logging.warning(f"⚠️ [401 代理攔截保護] 代理端點 {chosen_proxy} 回傳 401 驗證，金鑰 {key_obj.api_key[:8]}... 保持正常可用，切換下一個代理重試...")
+                # 🚨 401/402 代理攔截與帳單保護 (402 代表該 Vercel/Proxy 額度欠費或被擋)
+                if e.code in [401, 402] or any(k in err_str for k in ["unauthorized", "payment required", "402"]):
+                    logging.warning(f"⚠️ [{e.code} 代理配額失效] 代理端點 {chosen_proxy} 回傳 {e.code}，金鑰保持有效，立即切換下一個 Proxy...")
                     attempts += 1
                     smart_sleep(1.0)
                     continue
