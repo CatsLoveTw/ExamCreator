@@ -7,6 +7,7 @@ import json
 import logging
 from typing import List, Dict, Any, Tuple, Set
 import fitz  # PyMuPDF
+from catcher import sanitize_latex_syntax
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -1057,7 +1058,10 @@ def reconcile_and_merge_database_pair(db_path: str, partial_path: str, raw_path:
         q["topic_category"] = q["topic_categories"][0]
         
         for k in ["question_text", "detailed_solution", "question_analysis", "solving_strategy", "scoring_rubric", "concept_review", "traps_and_warnings", "shared_context"]:
-            if k in q: q[k] = clean_latex_corruptions(q[k])
+            if k in q: 
+                q[k] = clean_latex_corruptions(q[k])
+                # 🚀 雙重修復：套用括號自動閉合與 KaTeX 語法修復
+                q[k] = sanitize_latex_syntax(q[k])
 
     def safe_sort(x):
         try: p = int(x.get("page_number", 1))
