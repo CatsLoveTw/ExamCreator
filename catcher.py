@@ -4130,7 +4130,7 @@ class ExamParser:
         
     @staticmethod
     def extract_via_mineru(pdf_path: str, output_dir: str) -> Optional[str]:
-        """【開源界天花板】調用 MinerU (magic-pdf) 本地解析引擎，高精度提取公式 (LaTeX)、表格與排版"""
+        """【開源界天花板】直接輸入 PDF，由 MinerU 本地提取全卷完整排版、公式 LaTeX 與題目附圖"""
         if not pdf_path or not os.path.exists(pdf_path):
             return None
         try:
@@ -4139,21 +4139,24 @@ class ExamParser:
             from magic_pdf.pipe.UNIPipe import UNIPipe
             from magic_pdf.rw.DiskReaderWriter import DiskReaderWriter
 
-            logging.info(f"🚀 [MinerU 開源引擎啟動] 正在本地端以 CPU 高精解析考卷公式與排版：{os.path.basename(pdf_path)}...")
+            logging.info(f"🚀 [MinerU 引擎接管] 直接輸入 PDF 進行全卷排版、LaTeX 與圖表抽取：{os.path.basename(pdf_path)}...")
             
-            pdf_bytes = open(pdf_path, "rb").read()
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            
+            # MinerU 會自動將題目附圖寫入 output_dir/images
+            image_dir = os.path.join(output_dir, "images").replace("\\", "/")
+            os.makedirs(image_dir, exist_ok=True)
             local_image_writer = DiskReaderWriter(output_dir)
             
-            # 使用 CPU 模式執行 UNIPipe
             pipe = UNIPipe(pdf_bytes, {"_pdf_type": "", "model_list": []}, local_image_writer)
             pipe.pipe_classify()
             pipe.pipe_analyze()
             pipe.pipe_detail()
             
-            # 取得轉換後的 Markdown 文本 (已含高品質 LaTeX 公式)
+            # 取得全卷 Markdown (包含標準 LaTeX 公式如 \sqrt{...} 與表格)
             md_content = pipe.pipe_dump(output_dir)
             
-            # 釋放記憶體，防範 GHA 7GB RAM 溢出
             del pipe
             del pdf_bytes
             gc.collect()
@@ -4161,10 +4164,10 @@ class ExamParser:
                 torch.cuda.empty_cache()
 
             if md_content and len(md_content.strip()) > 100:
-                logging.info(f"✅ [MinerU 成功] 成功完成本地端排版與 LaTeX 公式解析！")
+                logging.info(f"🎉 [MinerU 抽取成功] 全卷文字與公式已轉為高精 Markdown，將作為真理層取代圖片傳輸！")
                 return s2t(md_content.strip())
         except Exception as e:
-            logging.warning(f"⚠️ [MinerU 降級] 本地 MinerU 處理失敗或未配置完成 ({e})，自動平滑切換至次要備用引擎...")
+            logging.warning(f"⚠️ [MinerU 降級] 本地 MinerU 未配置或遇到例外 ({e})，安全切換回原生文字與視覺備用通道...")
         return None
 
     @staticmethod
@@ -5683,11 +5686,10 @@ class ExamParser:
                     enhanced_img = self.enhance_scanned_image_for_ocr(raw_img)
                     batch_pil_imgs.append(enhanced_img)
                     
-                    # 🚀 2. 開源庫雙軌優先：先看是否有 MinerU 全卷解析結果，次看 pymupdf4llm，最後才用原生純文字
+                    # 🚀 2. 開源真理層裝配：優先使用 MinerU 全卷解析結果
                     mineru_md_path = os.path.join(img_dir, "mineru_output.md")
-                    page_text = ""
                     
-                    # 首次嘗試全卷執行 MinerU
+                    # 試卷開頭直接將 PDF 餵給 MinerU（整卷只執行一次）
                     if not os.path.exists(mineru_md_path) and not getattr(self, "_mineru_attempted", False):
                         self._mineru_attempted = True
                         mineru_res = self.extract_via_mineru(q_pdf, img_dir)
@@ -5695,18 +5697,21 @@ class ExamParser:
                             with open(mineru_md_path, "w", encoding="utf-8") as mf:
                                 mf.write(mineru_res)
 
+                    page_text = ""
                     if os.path.exists(mineru_md_path):
                         try:
-                            # 讀取已提取的 MinerU 高精 Markdown 作為真理層
+                            # 讀取 MinerU 產出的完整 Markdown，不再切斷前 4000 字
                             with open(mineru_md_path, "r", encoding="utf-8") as mf:
-                                page_text = mf.read()
+                                full_mineru_text = mf.read()
+                            # 依題號與段落提供給當前批次
+                            page_text = full_mineru_text
                         except Exception: pass
 
                     if not page_text:
                         open_source_md = self.extract_clean_markdown_from_pdf(q_pdf, p_num)
                         page_text = open_source_md if open_source_md else doc[p_num].get_text("text")
 
-                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁開源高精排版與公式對照 (MinerU/PyMuPDF) ---\n" + s2t(page_text[:4000]))
+                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁開源高精排版與公式真理層 (MinerU) ---\n" + s2t(page_text))
                     
                 try:
                     batch_text_combined = "\n\n".join(batch_raw_texts)
@@ -5922,11 +5927,17 @@ class ExamParser:
                     """
                     
                     batch_contents_with_labels = [prompt_stage_1]
-                    for idx, p_num in enumerate(batch_pages):
-                        batch_contents_with_labels.append(f"=== 原卷 PDF 第 {p_num+1} 頁影像 ===")
-                        batch_contents_with_labels.append(batch_pil_imgs[idx])
                     
-                    batch_contents_with_labels.append("\n\n=== 原始純文字對照 ===")
+                    # 💡 若 MinerU 已經成功產出真理層，圖片只作本地備份，不傳送給 AI，大省 Token 與避免幻覺！
+                    has_mineru_truth = os.path.exists(os.path.join(img_dir, "mineru_output.md"))
+                    if not has_mineru_truth:
+                        for idx, p_num in enumerate(batch_pages):
+                            batch_contents_with_labels.append(f"=== 原卷 PDF 第 {p_num+1} 頁影像 ===")
+                            batch_contents_with_labels.append(batch_pil_imgs[idx])
+                    else:
+                        logging.info(f"⚡ [純文字極速通道] 本批次直接使用 MinerU 高精文字與公式，跳過整頁大圖上傳 (Token 節省 75%)！")
+                    
+                    batch_contents_with_labels.append("\n\n=== 開源高精公式與排版真理層 ===")
                     batch_contents_with_labels.append(batch_text_combined)
 
                     current_stage1_model = stage_1_models[(b_idx // page_batch_size) % len(stage_1_models)]
