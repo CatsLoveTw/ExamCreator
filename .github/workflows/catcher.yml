@@ -65,7 +65,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai openai httpx pymupdf pillow matplotlib pydantic opencc-python-reimplemented
+          pip install google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
