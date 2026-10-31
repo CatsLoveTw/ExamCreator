@@ -373,43 +373,71 @@ def fix_latex_matrices(text: str) -> str:
     return "".join(parts)
 
 def sanitize_latex_syntax(text: str) -> str:
-    r"""具備區塊保護的高階 LaTeX 語法修復器（防範 \i 正則語法錯誤與連鎖星號污染）"""
+    r"""全方位 LaTeX 語法修復與防禦補償引擎（支援括號平衡、KaTeX跨行防護、粗體解扣）"""
     if not isinstance(text, str) or not text:
         return text
 
-    # 🚨 1. 徹底清除 AI 幻覺產生的連續星號垃圾（如 ********************）
+    # 1. 清除連鎖星號與 Markdown 粗體/LaTeX 交疊錯誤
     text = re.sub(r'\*{3,}', '', text)
-    # 🚨 2. 修復數學符號與 Markdown 粗體交疊的語法硬傷（例如 $ **a$ 或 $ **a**$ -> **$a$**）
     text = re.sub(r'\$\s*\*\*([^\$]+?)\*\*\s*\$', r'**$\1$**', text)
     text = re.sub(r'\*\*\s*\$([^\$]+?)\$\s*\*\*', r'**$\1$**', text)
     text = re.sub(r'\$\s*\*\*([^\$]+?)\s*\$', r'**$\1$**', text)
+    text = re.sub(r'\*\*\s*\$([^\$]+?)\s*\*\*', r'**$\1**', text)
 
-    # 先修復矩陣環境
+    # 2. 修復矩陣與方程組環境
     text = fix_latex_matrices(text)
 
-    # 1. 保護並清洗所有的 $$ ... $$ 大公式區塊
+    # 3. 修復常見缺少反斜線的 LaTeX 關鍵詞
+    latex_keywords = (
+        r'frac|sqrt|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|'
+        r'Delta|Omega|times|cdot|pm|le|ge|neq|approx|sim|in|notin|subset|'
+        r'cup|cap|vec|mathbf|text|log|ln|sin|cos|tan|cot|sec|csc|lim|infty'
+    )
+    # 修復類似 rac{1}{2} -> \frac{1}{2}
+    text = re.sub(rf'(?<!\\)\b({latex_keywords})\b(?=\{{|\s|[0-9a-zA-Z])', r'\\\1', text)
+
+    # 4. 處理 $$ ... $$ 區塊（清洗內部殘留的 $ 與修復換行）
     def clean_display_block(m):
-        content = m.group(1)
-        content = content.replace('$', '')
+        content = m.group(1).replace('$', '')
         content = re.sub(r'(?<=[\w\)\}])\s*\\\s+(?=[\w\(\{])', r' \\\\ ', content)
         return f"$${content.strip()}$$"
-
     text = re.sub(r'\$\$(.*?)\$\$', clean_display_block, text, flags=re.DOTALL)
 
-    # 2. 🚨 修正正則語法（修復 bad escape \i at position 27 錯誤）
-    text = re.sub(r'\$([^$]+)\$\s*([=\+\-\*/:]|\\implies|\\le|\\ge|\\rightarrow|\\[a-zA-Z]+)\s*\$([^$]+)\$', r'$\1 \2 \3$', text)
+    # 5. 處理 $ ... $ 行內公式（修復大括號未閉合、中文標點包入、公式內換行）
+    def fix_inline_math(m):
+        math_content = m.group(1)
+        # 5.1 行內公式不允許實體換行（KaTeX 會報錯），將換行轉為空格
+        math_content = math_content.replace('\n', ' ').replace('\r', ' ')
+        
+        # 5.2 大括號未閉合自動修復 (Brace Balancing)
+        open_braces = math_content.count('{')
+        close_braces = math_content.count('}')
+        if open_braces > close_braces:
+            math_content += '}' * (open_braces - close_braces)
+        elif close_braces > open_braces:
+            # 刪除末尾多餘的 '}'
+            diff = close_braces - open_braces
+            while diff > 0 and math_content.endswith('}'):
+                math_content = math_content[:-1]
+                diff -= 1
 
-    # 3. 補全裸露指令
-    def wrap_bare_latex(m):
-        cmd = m.group(0)
-        return f" ${cmd}$ "
+        # 5.3 中文標點不應包裹在公式末端（如 $x = 1。$ 改為 $x = 1$。）
+        punct_match = re.search(r'([，。；！？、：]+)$', math_content)
+        trailing_punct = ""
+        if punct_match:
+            trailing_punct = punct_match.group(1)
+            math_content = math_content[:-len(trailing_punct)].strip()
 
-    bare_pattern = r'(?<![\$\w\\])(\\(?:Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|alpha|beta|gamma|delta|epsilon|theta|iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|phi|chi|psi|omega|frac\{[^}]+\}\{[^}]+\}|sqrt\{[^}]+\}))(?![\$\w])'
+        return f"${math_content}${trailing_punct}"
 
+    text = re.sub(r'(?<!\$)\$([^\$\n]+?)\$(?!\$)', fix_inline_math, text)
+
+    # 6. 修復裸露在外的數學標記（如獨立的 \alpha, \frac{1}{2} 未被 $ 包裹）
+    bare_pattern = rf'(?<![\$\w\\])(\\(?:{latex_keywords})(?:\{{[^}}]*\}})*)(?![\$\w])'
     parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
     for i in range(len(parts)):
-        if i % 2 == 0:  # 偶數索引為純文字區塊
-            parts[i] = re.sub(bare_pattern, wrap_bare_latex, parts[i])
+        if i % 2 == 0:  # 純文字區塊
+            parts[i] = re.sub(bare_pattern, r' $\1$ ', parts[i])
             parts[i] = re.sub(r'\\textbf\{([^}]+)\}', r'**\1**', parts[i])
 
     text = "".join(parts)
@@ -4056,6 +4084,43 @@ class ExamParser:
         # 用於保存各頁面解析出來的 Bounding Boxes 與文字資料
         parsed_pages_results = [None] * len(temp_images)
         results_lock = threading.Lock()
+        
+        @staticmethod
+    def extract_clean_markdown_from_pdf(pdf_path: str, page_num: int) -> str:
+        """【開源庫優先】利用 pymupdf4llm 提取原生 PDF 頁面的 Markdown（含完整表格與雙欄文字排版）"""
+        try:
+            import pymupdf4llm
+            # 僅提取特定頁面
+            md_text = pymupdf4llm.to_markdown(pdf_path, pages=[page_num])
+            if md_text and len(md_text.strip()) > 40:
+                return md_text.strip()
+        except Exception as e:
+            logging.debug(f"pymupdf4llm 提取第 {page_num+1} 頁失敗或非原生版: {e}")
+        return ""
+
+    @staticmethod
+    def enhance_scanned_image_for_ocr(pil_img: Image.Image) -> Image.Image:
+        """【模擬考掃描檔增強】利用 OpenCV 自適應直方圖均衡化 (CLAHE) 與雙邊濾波去噪，顯著提高公式與文字清晰度"""
+        try:
+            import cv2
+            import numpy as np
+            
+            # PIL 轉 OpenCV 格式 (灰階)
+            img_np = np.array(pil_img.convert("L"))
+            
+            # 1. CLAHE 自適應局部對比增強（凸顯淡墨、細微符號、根號、下標）
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(img_np)
+            
+            # 2. 輕微雙邊濾波（去除掃描紙張顆粒與雜點，保留文字邊緣邊界）
+            denoised = cv2.bilateralFilter(enhanced, d=5, sigmaColor=50, sigmaSpace=50)
+            
+            return Image.fromarray(denoised).convert("RGB")
+        except Exception as e:
+            # 若 OpenCV 異常，回退至 PIL 原生增強
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Contrast(pil_img)
+            return enhancer.enhance(1.4)
 
         # 2. 定義併行呼叫 API 函數
         def process_rubric_page(page_num, img_path):
@@ -5485,9 +5550,17 @@ class ExamParser:
                 batch_raw_texts = []
                 for p_num in batch_pages:
                     full_page_filepath = q_image_paths[p_num]
-                    batch_pil_imgs.append(Image.open(full_page_filepath))
-                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁純文字 ---\n" + s2t(doc[p_num].get_text("text")))
-                
+                    raw_img = Image.open(full_page_filepath)
+                    
+                    # 🚀 1. 模擬考掃描檔自動增強：提升細小符號與微淡筆畫清晰度
+                    enhanced_img = self.enhance_scanned_image_for_ocr(raw_img)
+                    batch_pil_imgs.append(enhanced_img)
+                    
+                    # 🚀 2. 開源庫優先：調用 pymupdf4llm 提取排版結構完整的 Markdown
+                    open_source_md = self.extract_clean_markdown_from_pdf(q_pdf, p_num)
+                    page_text = open_source_md if open_source_md else doc[p_num].get_text("text")
+                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁開源排版解析對照 ---\n" + s2t(page_text))
+                    
                 try:
                     batch_text_combined = "\n\n".join(batch_raw_texts)
                     has_official_ans_flag = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
