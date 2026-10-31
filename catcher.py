@@ -4860,7 +4860,74 @@ class ExamParser:
         if not a_pdf or not os.path.exists(a_pdf):
             return "無官方解答。", []
 
-        logging.info(f"🧠 [共識投票] 啟動解答卷雙模型雙重驗證 (目標: {target_year} {target_subject}): {os.path.basename(a_pdf)}")
+        # 🚀【第一優先：MinerU 本地解析表格 + AI 純文字秒級隔離】
+        try:
+            # 建立暫存目錄供 MinerU 存放解答表格 Markdown
+            temp_ans_dir = os.path.abspath(f"temp_mineru_ans_{uuid.uuid4().hex[:6]}").replace("\\", "/")
+            os.makedirs(temp_ans_dir, exist_ok=True)
+            
+            logging.info(f"🚀 [MinerU 答案引擎啟動] 先以 MinerU 本地提取解答卷排版表格 (0 Token 消耗)：{os.path.basename(a_pdf)}...")
+            mineru_markdown = self.extract_via_mineru(a_pdf, temp_ans_dir)
+            
+            # 清理臨時圖檔目錄
+            import shutil
+            shutil.rmtree(temp_ans_dir, ignore_errors=True)
+
+            if mineru_markdown and len(mineru_markdown.strip()) > 50:
+                logging.info(f"⚡ [MinerU 表格提取成功] 正在以純文字向 AI 進行【{target_subject}】專屬答案抽取 (免傳大圖，極速無逾時)...")
+                
+                # 取得考科別名
+                subj_aliases = [target_subject]
+                if "數學甲" in target_subject or "數甲" in target_subject: subj_aliases += ["數學甲", "數甲", "數學甲考科"]
+                elif "數學乙" in target_subject or "數乙" in target_subject: subj_aliases += ["數學乙", "數乙", "數學乙考科"]
+                elif "數學A" in target_subject or "數A" in target_subject: subj_aliases += ["數學A", "數A"]
+                elif "數學B" in target_subject or "數B" in target_subject: subj_aliases += ["數學B", "數B"]
+                elif "國文" in target_subject: subj_aliases += ["國文", "國綜", "國語文"]
+                elif "公民" in target_subject: subj_aliases += ["公民與社會", "公民"]
+                elif "社會" in target_subject: subj_aliases += ["社會", "社會考科", "社會科"]
+                elif "自然" in target_subject: subj_aliases += ["自然", "自然考科", "自然科"]
+                alias_str = "、".join(list(dict.fromkeys(subj_aliases)))
+
+                mineru_prompt = f"""
+                這是一份大考/模考解答卷由 MinerU 提取的高精 Markdown 文字（包含表格）：
+                
+                🚨【極重要任務：科目精確隔離】🚨：
+                目標科目：【{target_subject}】（包含別名：{alias_str}）。
+                如果文本中包含國文、英文、數學、社會、自然等多個科目的答案表格：
+                1. 請仔細找到標註為【{alias_str}】的專屬答案表格。
+                2. 只提取【{target_subject}】的題號與標準答案，絕對不要抓到其他科目的答案！
+                3. 請嚴格依照 AnswerKey 結構輸出純淨的 JSON。
+                
+                === MinerU 提取之解答文本與表格 ===
+                {mineru_markdown[:15000]}
+                """
+                
+                res_fast, err_fast = self.ai_manager.generate_with_retry(
+                    contents=[mineru_prompt],
+                    response_schema=AnswerKey,
+                    temperature=0.0,
+                    preferred_model="gemini-3.5-flash-lite", # 純文字任務用 Lite 即可 1 秒回傳
+                    enable_thinking=False,
+                    task_desc=f"[MinerU純文字答案結構化 ({target_subject})]"
+                )
+                
+                if res_fast and 'answers' in res_fast and len(res_fast['answers']) >= 5:
+                    mineru_ans_map = {}
+                    for item in res_fast['answers']:
+                        clean_a = clean_ocr_answer_format(item.get('standard_answer', ''))
+                        if clean_a:
+                            mineru_ans_map[str(item.get('question_number', ''))] = clean_a
+                    
+                    if len(mineru_ans_map) >= 8:
+                        logging.info(f"🎉 [MinerU + 文字AI 完美收工] 成功精確抓出【{target_subject}】共 {len(mineru_ans_map)} 題答案，跳過 14 次大圖視覺請求！")
+                        return json.dumps(mineru_ans_map, ensure_ascii=False), [0]
+        except Exception as e:
+            logging.warning(f"⚠️ [MinerU 答案引擎回退] 本地表格解析跳過 ({e})，啟動原有雙模型圖片驗證保底...")
+
+        # -----------------------------------------------------------------
+        # 🛡️【第二防線：保留原有雙模型大圖共識投票作為終極保底】
+        # -----------------------------------------------------------------
+        logging.info(f"🧠 [啟動雙模型圖片共識保底] 驗證解答卷 (目標: {target_year} {target_subject}): {os.path.basename(a_pdf)}")
         
         # 1. 第一輪：帶入目標科目與學年驗證
         ans_dict_1, pages_1 = self._run_single_ocr(a_pdf, model="gemini-3.5-flash", target_subject=target_subject, target_year=target_year)
