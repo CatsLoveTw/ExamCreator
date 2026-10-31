@@ -62,11 +62,44 @@ jobs:
           curl -fsSL https://rclone.org/install.sh | sudo bash
           rclone version
 
-      - name: Install Python dependencies
+      - name: Cache MinerU Models
+        id: cache-mineru
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/mineru_models
+          key: mineru-models-cpu-v1
+
+      - name: Install Python dependencies & MinerU
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
+          # 1. 優先安裝 CPU 專用 PyTorch (節省數 GB 下載與磁碟空間)
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          # 2. 安裝 MinerU (magic-pdf) 與相依套件
+          pip install "magic-pdf[full]" google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+          # 3. 初始化 MinerU 設定檔 (強制指定 CPU 模式與模型路徑)
+          mkdir -p /home/runner/mineru_models
+          cat << 'EOF' > /home/runner/magic-pdf.json
+          {
+            "models-dir": "/home/runner/mineru_models",
+            "device-mode": "cpu",
+            "layout-config": {
+              "model": "layoutlmv3"
+            },
+            "formula-config": {
+              "mfd_model": "yolo_v8_mfd",
+              "mfr_model": "unimernet_small"
+            }
+          }
+          EOF
+          cp /home/runner/magic-pdf.json ~/magic-pdf.json
+
+          # 4. 若快取未命中，下載輕量化模型權重 (約 2~3 GB)
+          if [ "${{ steps.cache-mineru.outputs.cache-hit }}" != "true" ]; then
+            echo "⬇️ 正在下載 MinerU 輕量模型權重..."
+            python -c "from magic_pdf.tools.common import prepare_env; prepare_env()" || true
+          fi
 
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
         env:
