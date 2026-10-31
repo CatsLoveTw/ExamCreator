@@ -4128,12 +4128,50 @@ class ExamParser:
         parsed_pages_results = [None] * len(temp_images)
         results_lock = threading.Lock()
         
-        @staticmethod
+    @staticmethod
+    def extract_via_mineru(pdf_path: str, output_dir: str) -> Optional[str]:
+        """【開源界天花板】調用 MinerU (magic-pdf) 本地解析引擎，高精度提取公式 (LaTeX)、表格與排版"""
+        if not pdf_path or not os.path.exists(pdf_path):
+            return None
+        try:
+            import gc
+            import torch
+            from magic_pdf.pipe.UNIPipe import UNIPipe
+            from magic_pdf.rw.DiskReaderWriter import DiskReaderWriter
+
+            logging.info(f"🚀 [MinerU 開源引擎啟動] 正在本地端以 CPU 高精解析考卷公式與排版：{os.path.basename(pdf_path)}...")
+            
+            pdf_bytes = open(pdf_path, "rb").read()
+            local_image_writer = DiskReaderWriter(output_dir)
+            
+            # 使用 CPU 模式執行 UNIPipe
+            pipe = UNIPipe(pdf_bytes, {"_pdf_type": "", "model_list": []}, local_image_writer)
+            pipe.pipe_classify()
+            pipe.pipe_analyze()
+            pipe.pipe_detail()
+            
+            # 取得轉換後的 Markdown 文本 (已含高品質 LaTeX 公式)
+            md_content = pipe.pipe_dump(output_dir)
+            
+            # 釋放記憶體，防範 GHA 7GB RAM 溢出
+            del pipe
+            del pdf_bytes
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if md_content and len(md_content.strip()) > 100:
+                logging.info(f"✅ [MinerU 成功] 成功完成本地端排版與 LaTeX 公式解析！")
+                return s2t(md_content.strip())
+        except Exception as e:
+            logging.warning(f"⚠️ [MinerU 降級] 本地 MinerU 處理失敗或未配置完成 ({e})，自動平滑切換至次要備用引擎...")
+        return None
+
+    @staticmethod
     def extract_clean_markdown_from_pdf(pdf_path: str, page_num: int) -> str:
-        """【開源庫優先】利用 pymupdf4llm 提取原生 PDF 頁面的 Markdown（含完整表格與雙欄文字排版）"""
+        """【開源次要防線】利用 pymupdf4llm 提取原生 PDF 頁面的 Markdown（含完整表格與雙欄文字排版）"""
         try:
             import pymupdf4llm
-            # 僅提取特定頁面
             md_text = pymupdf4llm.to_markdown(pdf_path, pages=[page_num])
             if md_text and len(md_text.strip()) > 40:
                 return md_text.strip()
@@ -5645,10 +5683,30 @@ class ExamParser:
                     enhanced_img = self.enhance_scanned_image_for_ocr(raw_img)
                     batch_pil_imgs.append(enhanced_img)
                     
-                    # 🚀 2. 開源庫優先：調用 pymupdf4llm 提取排版結構完整的 Markdown
-                    open_source_md = self.extract_clean_markdown_from_pdf(q_pdf, p_num)
-                    page_text = open_source_md if open_source_md else doc[p_num].get_text("text")
-                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁開源排版解析對照 ---\n" + s2t(page_text))
+                    # 🚀 2. 開源庫雙軌優先：先看是否有 MinerU 全卷解析結果，次看 pymupdf4llm，最後才用原生純文字
+                    mineru_md_path = os.path.join(img_dir, "mineru_output.md")
+                    page_text = ""
+                    
+                    # 首次嘗試全卷執行 MinerU
+                    if not os.path.exists(mineru_md_path) and not getattr(self, "_mineru_attempted", False):
+                        self._mineru_attempted = True
+                        mineru_res = self.extract_via_mineru(q_pdf, img_dir)
+                        if mineru_res:
+                            with open(mineru_md_path, "w", encoding="utf-8") as mf:
+                                mf.write(mineru_res)
+
+                    if os.path.exists(mineru_md_path):
+                        try:
+                            # 讀取已提取的 MinerU 高精 Markdown 作為真理層
+                            with open(mineru_md_path, "r", encoding="utf-8") as mf:
+                                page_text = mf.read()
+                        except Exception: pass
+
+                    if not page_text:
+                        open_source_md = self.extract_clean_markdown_from_pdf(q_pdf, p_num)
+                        page_text = open_source_md if open_source_md else doc[p_num].get_text("text")
+
+                    batch_raw_texts.append(f"--- 第 {p_num+1} 頁開源高精排版與公式對照 (MinerU/PyMuPDF) ---\n" + s2t(page_text[:4000]))
                     
                 try:
                     batch_text_combined = "\n\n".join(batch_raw_texts)
