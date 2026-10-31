@@ -373,55 +373,63 @@ def fix_latex_matrices(text: str) -> str:
     return "".join(parts)
 
 def sanitize_latex_syntax(text: str) -> str:
-    r"""全方位 LaTeX 語法修復與防禦補償引擎（支援括號平衡、KaTeX跨行防護、粗體解扣）"""
+    r"""全方位 KaTeX 破版免疫與語法防禦修復引擎"""
     if not isinstance(text, str) or not text:
         return text
 
-    # 1. 清除連鎖星號與 Markdown 粗體/LaTeX 交疊錯誤
+    # 1. 徹底解開 Markdown 粗體 (**) 與 LaTeX ($) 的咬死衝突（例如 **$x=1$** 轉為 **$x=1$**）
     text = re.sub(r'\*{3,}', '', text)
     text = re.sub(r'\$\s*\*\*([^\$]+?)\*\*\s*\$', r'**$\1$**', text)
     text = re.sub(r'\*\*\s*\$([^\$]+?)\$\s*\*\*', r'**$\1$**', text)
     text = re.sub(r'\$\s*\*\*([^\$]+?)\s*\$', r'**$\1$**', text)
-    text = re.sub(r'\*\*\s*\$([^\$]+?)\s*\*\*', r'**$\1**', text)
+    text = re.sub(r'(\([A-Za-z0-9]\))\s*\$', r'\1 $', text) # 修復 (A)$x$ 黏連
 
-    # 2. 修復矩陣與方程組環境
-    text = fix_latex_matrices(text)
+    # 2. 替換 KaTeX 在行內無法支援的環境（將 align*, equation 轉化為 aligned）
+    text = re.sub(r'\\begin\{(?:align\*?|equation\*?)\}', r'\\begin{aligned}', text)
+    text = re.sub(r'\\end\{(?:align\*?|equation\*?)\}', r'\\end{aligned}', text)
 
-    # 3. 修復常見缺少反斜線的 LaTeX 關鍵詞
+    # 3. 閉合性檢查：自動補全被截斷的 \begin{aligned}, \begin{matrix}, \begin{cases}
+    env_matches = re.findall(r'\\begin\{([a-zA-Z]+)\}', text)
+    end_matches = re.findall(r'\\end\{([a-zA-Z]+)\}', text)
+    for env in env_matches:
+        if env_matches.count(env) > end_matches.count(env):
+            # 自動在文字末端或公式末端補上未閉合的環境
+            diff = env_matches.count(env) - end_matches.count(env)
+            text += (f"\\end{{{env}}}" * diff)
+
+    # 4. 修復缺失反斜線之常用數學運算符與希臘字母
     latex_keywords = (
         r'frac|sqrt|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|omega|'
         r'Delta|Omega|times|cdot|pm|le|ge|neq|approx|sim|in|notin|subset|'
         r'cup|cap|vec|mathbf|text|log|ln|sin|cos|tan|cot|sec|csc|lim|infty'
     )
-    # 修復類似 rac{1}{2} -> \frac{1}{2}
     text = re.sub(rf'(?<!\\)\b({latex_keywords})\b(?=\{{|\s|[0-9a-zA-Z])', r'\\\1', text)
 
-    # 4. 處理 $$ ... $$ 區塊（清洗內部殘留的 $ 與修復換行）
+    # 5. 處理 $$ ... $$ 區塊（防止 KaTeX 多重巢狀包裹）
     def clean_display_block(m):
         content = m.group(1).replace('$', '')
         content = re.sub(r'(?<=[\w\)\}])\s*\\\s+(?=[\w\(\{])', r' \\\\ ', content)
         return f"$${content.strip()}$$"
     text = re.sub(r'\$\$(.*?)\$\$', clean_display_block, text, flags=re.DOTALL)
 
-    # 5. 處理 $ ... $ 行內公式（修復大括號未閉合、中文標點包入、公式內換行）
+    # 6. 行內公式 $ ... $ 深度修復（去除換行、平衡大括號、抽出中文標點）
     def fix_inline_math(m):
         math_content = m.group(1)
-        # 5.1 行內公式不允許實體換行（KaTeX 會報錯），將換行轉為空格
+        # 🚨 KaTeX 致命殺手：行內公式絕對不能有 \n 或 \r，必須替換為空格
         math_content = math_content.replace('\n', ' ').replace('\r', ' ')
-        
-        # 5.2 大括號未閉合自動修復 (Brace Balancing)
-        open_braces = math_content.count('{')
-        close_braces = math_content.count('}')
-        if open_braces > close_braces:
-            math_content += '}' * (open_braces - close_braces)
-        elif close_braces > open_braces:
-            # 刪除末尾多餘的 '}'
-            diff = close_braces - open_braces
+
+        # 大括號平衡修補
+        o_b = math_content.count('{')
+        c_b = math_content.count('}')
+        if o_b > c_b:
+            math_content += ('}' * (o_b - c_b))
+        elif c_b > o_b:
+            diff = c_b - o_b
             while diff > 0 and math_content.endswith('}'):
                 math_content = math_content[:-1]
                 diff -= 1
 
-        # 5.3 中文標點不應包裹在公式末端（如 $x = 1。$ 改為 $x = 1$。）
+        # 中文標點符號不應留在 $ 內部（如 $x=1。$ 轉為 $x=1$。）
         punct_match = re.search(r'([，。；！？、：]+)$', math_content)
         trailing_punct = ""
         if punct_match:
@@ -432,16 +440,9 @@ def sanitize_latex_syntax(text: str) -> str:
 
     text = re.sub(r'(?<!\$)\$([^\$\n]+?)\$(?!\$)', fix_inline_math, text)
 
-    # 6. 修復裸露在外的數學標記（如獨立的 \alpha, \frac{1}{2} 未被 $ 包裹）
-    bare_pattern = rf'(?<![\$\w\\])(\\(?:{latex_keywords})(?:\{{[^}}]*\}})*)(?![\$\w])'
-    parts = re.split(r'(\$\$[\s\S]*?\$\$|\$[^$]*?\$)', text)
-    for i in range(len(parts)):
-        if i % 2 == 0:  # 純文字區塊
-            parts[i] = re.sub(bare_pattern, r' $\1$ ', parts[i])
-            parts[i] = re.sub(r'\\textbf\{([^}]+)\}', r'**\1**', parts[i])
-
-    text = "".join(parts)
-    text = re.sub(r' +', ' ', text)
+    # 7. 全文奇偶 $ 符號防禦補齊（避免單一漏字導致整篇詳解全反白）
+    if text.count('$') % 2 != 0:
+        text += '$'
     
     # 🚀 3. 本地開源 AST 語法修補（補齊未閉合大括號、刪除孤立括號）
     text = ast_repair_latex(text)
@@ -4142,24 +4143,37 @@ class ExamParser:
 
     @staticmethod
     def enhance_scanned_image_for_ocr(pil_img: Image.Image) -> Image.Image:
-        """【模擬考掃描檔增強】利用 OpenCV 自適應直方圖均衡化 (CLAHE) 與雙邊濾波去噪，顯著提高公式與文字清晰度"""
+        """【模擬考掃描檔高精預處理】自動旋轉校正 (Deskew)、去黑邊、CLAHE 自適應銳化"""
         try:
             import cv2
             import numpy as np
             
-            # PIL 轉 OpenCV 格式 (灰階)
             img_np = np.array(pil_img.convert("L"))
             
-            # 1. CLAHE 自適應局部對比增強（凸顯淡墨、細微符號、根號、下標）
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            # 1. 傾斜偵測與自動水平校正 (Deskewing)
+            coords = np.column_stack(np.where(img_np < 200)) # 抓取深色文字像素
+            if len(coords) > 500:
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45:
+                    angle = -(90 + angle)
+                else:
+                    angle = -angle
+                # 僅在微小傾斜 (0.5度 ~ 15度) 時進行旋轉，避免直排文字被誤轉 90 度
+                if 0.5 < abs(angle) < 15.0:
+                    (h, w) = img_np.shape[:2]
+                    center = (w // 2, h // 2)
+                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                    img_np = cv2.warpAffine(img_np, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+            # 2. CLAHE 局部自適應對比度增強 (凸顯被影印雜訊掩蓋的負號、小數點、根號)
+            clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
             enhanced = clahe.apply(img_np)
             
-            # 2. 輕微雙邊濾波（去除掃描紙張顆粒與雜點，保留文字邊緣邊界）
-            denoised = cv2.bilateralFilter(enhanced, d=5, sigmaColor=50, sigmaSpace=50)
+            # 3. 雙邊濾波去噪 (去除紙張雜斑灰階，保留文字高頻銳利邊緣)
+            denoised = cv2.bilateralFilter(enhanced, d=5, sigmaColor=60, sigmaSpace=60)
             
             return Image.fromarray(denoised).convert("RGB")
         except Exception as e:
-            # 若 OpenCV 異常，回退至 PIL 原生增強
             from PIL import ImageEnhance
             enhancer = ImageEnhance.Contrast(pil_img)
             return enhancer.enhance(1.4)
@@ -4654,7 +4668,35 @@ class ExamParser:
             combined_prompt = subject_guard_prompt + "\n" + self.ANSWERS_OCR_PROMPT + text_layer_str
             
             try:
-                with Image.open(img_path) as pil_img:
+                # 🚀【五科合一防串位：空間錨定與視窗聚焦】
+                # 在該頁尋找目標科目的標題座標，精準裁出該科答案區域
+                target_img_to_send = None
+                with PYMUPDF_LOCK:
+                    rects = []
+                    for alias in subj_aliases:
+                        found = page.search_for(alias)
+                        if found:
+                            rects.extend(found)
+                            break
+                    
+                    if rects:
+                        # 找到科目標題！以該標題為起點，向下向右擴展出專屬答案欄
+                        r = rects[0]
+                        # 覆蓋整欄：寬度向左右擴展，高度延伸到底部或下一個主標題
+                        clip_rect = fitz.Rect(
+                            max(0, r.x0 - 40),
+                            max(0, r.y0 - 20),
+                            min(page.rect.width, r.x1 + 350),
+                            min(page.rect.height, r.y1 + 750)
+                        )
+                        clip_pix = page.get_pixmap(clip=clip_rect, dpi=300)
+                        crop_p = os.path.abspath(f"temp_roi_{task_id}_p{page_num}.png")
+                        clip_pix.save(crop_p)
+                        target_img_to_send = crop_p
+
+                eval_img_path = target_img_to_send if (target_img_to_send and os.path.exists(target_img_to_send)) else img_path
+
+                with Image.open(eval_img_path) as pil_img:
                     from PIL import ImageEnhance
                     enhancer_contrast = ImageEnhance.Contrast(pil_img)
                     pil_img_enhanced = enhancer_contrast.enhance(1.6)
@@ -4668,6 +4710,11 @@ class ExamParser:
                         preferred_model=model,
                         enable_thinking=True
                     )
+                
+                if target_img_to_send and os.path.exists(target_img_to_send):
+                    try: os.remove(target_img_to_send)
+                    except Exception: pass
+                        
                     if res_dict and 'answers' in res_dict and res_dict['answers']:
                         found_valid_ans = False
                         for item in res_dict['answers']:
