@@ -4145,7 +4145,7 @@ class ExamParser:
             cmd = ["magic-pdf", "-p", os.path.abspath(pdf_path), "-o", os.path.abspath(output_dir), "-m", "auto"]
             
             # 設定逾時 3 分鐘 (180秒)，保護 GitHub Actions 不被單一壞檔卡死
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
             if result.returncode != 0:
                 logging.warning(f"⚠️ MinerU 執行日誌 (Code {result.returncode}): {result.stderr[:200]}...")
