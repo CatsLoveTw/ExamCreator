@@ -387,6 +387,15 @@ jobs:
 
           # 清除敏感金鑰與設定檔
           rm -f rclone.conf key.txt exam_images.zip mock_exam_images.zip exam_databases.zip
+      - name: Check for font glyph errors
+        if: always()
+        run: |
+          if [ -f glyph_errors.log ]; then
+            echo "⚠️ [字型缺失報告]："
+            cat glyph_errors.log
+          else
+            echo "✅ [字型渲染測試] 檢查通過，無任何缺字警告！"
+          fi
 
       - name: 🔄 自動接力重啟下一輪 (24hr Loop Dispatcher)
         if: always()
