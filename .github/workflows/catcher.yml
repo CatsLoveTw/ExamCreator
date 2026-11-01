@@ -67,7 +67,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/mineru_models
-          key: mineru-models-cpu-v1
+          key: mineru-models-cpu-v2
 
       - name: Install Python dependencies & MinerU
         run: |
@@ -98,12 +98,22 @@ jobs:
           }
           EOF
 
-          # 4. 若快取未命中，透過 huggingface-cli 下載 MinerU 官方完整模型庫
-          if [ "${{ steps.cache-mineru.outputs.cache-hit }}" != "true" ]; then
-            echo "⬇️ 正在下載 MinerU 官方模型權重 (PDF-Extract-Kit)..."
+          # 4. 實體檔案防禦檢查：只要核心模型 yolo_v8_ft.pt 不存在，就強制下載並整理路徑
+          if [ ! -f "/home/runner/mineru_models/MFD/YOLO/yolo_v8_ft.pt" ]; then
+            echo "⬇️ [下載觸發] 核心模型 yolo_v8_ft.pt 未就緒，開始透過 huggingface-cli 下載..."
             pip install huggingface_hub
             huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit-1.0 --local-dir /home/runner/mineru_models
+            
+            # 🚨 解決子路徑落差：若下載內容位於 models/ 子資料夾內，將其移出至根層級
+            if [ -d "/home/runner/mineru_models/models" ]; then
+              echo "📂 正在對齊模型子目錄結構至 /home/runner/mineru_models..."
+              mv /home/runner/mineru_models/models/* /home/runner/mineru_models/ 2>/dev/null || true
+            fi
+            echo "✅ 模型下載與路徑整理完畢！"
+          else
+            echo "✅ [快取生效] 核心模型 yolo_v8_ft.pt 已存在，跳過重複下載。"
           fi
+
 
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
         env:
