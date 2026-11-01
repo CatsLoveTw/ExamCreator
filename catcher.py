@@ -4150,49 +4150,49 @@ class ExamParser:
         
     @staticmethod
     def extract_via_mineru(pdf_path: str, output_dir: str) -> Optional[str]:
-        """【開源界天花板】呼叫 MinerU 官方 CLI，高精準提取全卷排版與 LaTeX 公式"""
         if not pdf_path or not os.path.exists(pdf_path):
             return None
         try:
             import subprocess
             import glob
             
-            logging.info(f"🚀 [MinerU 引擎接管] 啟動本地端 AI 視覺排版與公式抽取：{os.path.basename(pdf_path)}...")
+            logging.info(f"🚀 [MinerU 引擎接管] 正在解析: {os.path.basename(pdf_path)}...")
             
+            # 確保 output_dir 存在
             os.makedirs(output_dir, exist_ok=True)
             
-            # 執行 MinerU 官方命令 (-m auto 讓它自動判別掃描版或數位版)
+            # 使用 -o 指定目錄，並加入 --log-level=WARNING 減少干擾輸出
             cmd = ["magic-pdf", "-p", os.path.abspath(pdf_path), "-o", os.path.abspath(output_dir), "-m", "auto"]
             
-            # 設定逾時 3 分鐘 (180秒)，保護 GitHub Actions 不被單一壞檔卡死
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            # 🚨 執行時，我們不捕捉 stderr，讓報錯直接噴在 GitHub Actions Log，便於除錯
+            result = subprocess.run(cmd, timeout=240)
             
             if result.returncode != 0:
-                logging.warning(f"⚠️ MinerU 執行日誌 (Code {result.returncode}): {result.stderr[:200]}...")
-            
-            # 尋找產出的 Markdown 檔案 (MinerU 會過濾檔名特殊字元，故直接遞迴搜尋整個 output_dir)
+                logging.warning(f"⚠️ MinerU 命令回傳代碼: {result.returncode}")
+
+            # 🚀 暴力搜尋策略：不管 MinerU 把資料夾改名成什麼，Markdown 檔案跑不掉！
+            # 只要是在 output_dir 下產出的所有 .md 檔，全部列出來
             md_files = glob.glob(os.path.join(output_dir, "**", "*.md"), recursive=True)
             
-            # 過濾掉可能同名的舊暫存檔 (如 mineru_output.md)
-            md_files = [f for f in md_files if os.path.basename(f) != "mineru_output.md"]
+            # 過濾掉空檔案
+            valid_mds = [f for f in md_files if os.path.getsize(f) > 100]
             
-            if md_files:
-                # 若有多個，取檔案最大的（通常就是完整的解析結果）
-                best_md = max(md_files, key=os.path.getsize)
+            if valid_mds:
+                # 取最新修改的 md 檔 (通常就是剛產出的那個)
+                best_md = max(valid_mds, key=os.path.getmtime)
                 with open(best_md, "r", encoding="utf-8") as f:
                     md_content = f.read()
-                    
-                if md_content and len(md_content.strip()) > 100:
-                    logging.info(f"🎉 [MinerU 抽取成功] 全卷文字與 LaTeX 公式已完美轉化，將作為真理層傳送給 AI！")
-                    return s2t(md_content.strip())
-            else:
-                logging.warning(f"⚠️ 找不到 MinerU 產出的 Markdown 檔案於 {output_dir} 的任何子目錄中")
                 
-        except subprocess.TimeoutExpired:
-            logging.warning("⚠️ [MinerU 降級] 本地解析超時 (超過 3 分鐘)，自動切換回原生與視覺備用通道...")
+                logging.info(f"🎉 [MinerU 提取成功] 找到產出檔案: {os.path.basename(best_md)}")
+                return s2t(md_content.strip())
+            else:
+                # 偵錯用：列出當前資料夾目錄結構，看看 MinerU 到底把東西藏在哪了
+                logging.warning(f"⚠️ 找不到 Markdown！目標目錄 {output_dir} 下的結構：")
+                for root, dirs, files in os.walk(output_dir):
+                    logging.warning(f" -> {root}: {files}")
+                
         except Exception as e:
-            logging.warning(f"⚠️ [MinerU 降級] 執行時發生例外 ({e})，安全切換回備用通道...")
-            
+            logging.warning(f"⚠️ [MinerU 降級] 發生例外 ({e})，切換至備用通道...")
         return None
 
     @staticmethod
