@@ -3529,9 +3529,25 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         "import matplotlib.font_manager as fm\n"
         "import numpy as np\n"
         "import os\n"
-        "import warnings\n\n"
-        "# 抑制 matplotlib 字型缺少 glyph 的非致命警告\n"
-        "warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')\n\n"
+        "import warnings\n"
+        "# 建立一個專用日誌用來捕捉缺字，不干擾主控制台\n"
+        "class GlyphWarningCatcher(warnings.catch_warnings):\n"
+        "    def __init__(self):\n"
+        "        super().__init__(record=True)\n"
+        "        self.missing_glyphs = []\n"
+        "    def __enter__(self):\n"
+        "        self.log = super().__enter__()\n"
+        "        return self\n"
+        "    def __exit__(self, exc_type, exc_value, traceback):\n"
+        "        for w in self.log:\n"
+        "            if 'Glyph' in str(w.message) and 'missing' in str(w.message):\n"
+        "                self.missing_glyphs.append(str(w.message))\n"
+        "        super().__exit__(exc_type, exc_value, traceback)\n"
+        "        if self.missing_glyphs:\n"
+        "            with open('glyph_errors.log', 'a', encoding='utf-8') as f:\n"
+        "                for m in self.missing_glyphs:\n"
+        "                    f.write(f'{m}\\n')\n"
+        "            print(f'⚠️ [繪圖字型警示] 發現 {len(self.missing_glyphs)} 個缺字現象，詳情見 glyph_errors.log')\n"
         "_cjk_font_paths = [\n"
         "    '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',\n"
         "    '/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc',\n"
@@ -3566,13 +3582,16 @@ def clean_and_repair_python_code(py_code: str, target_filepath: str) -> str:
         "plt.rcParams['text.usetex'] = False\n"
         "plt.rcParams['mathtext.fontset'] = 'stix'\n"
     )
-    
     full_code = headless_header + "\n" + py_code
 
-    # 5. 確保結尾具備存檔與關閉圖表
+    # 將繪圖邏輯包覆在捕捉器中
     if "plt.savefig" not in full_code:
-        full_code += f'\nplt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")\nplt.close("all")\n'
-        
+        full_code += f"""
+with GlyphWarningCatcher():
+    plt.savefig(r"{norm_target_path}", dpi=200, bbox_inches="tight")
+    plt.close("all")
+"""
+
     return full_code
 
 def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, diagram_filepath: str, safe_q_num: str, task_tag: str = "", max_attempts: int = 2) -> bool:
