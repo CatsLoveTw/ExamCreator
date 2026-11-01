@@ -609,7 +609,6 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "") -> Tuple[
                 continue
 
             for line in txt.splitlines():
-            for line in txt.splitlines():
                 line_str = line.strip()
                 if not line_str:
                     continue
