@@ -4130,44 +4130,46 @@ class ExamParser:
         
     @staticmethod
     def extract_via_mineru(pdf_path: str, output_dir: str) -> Optional[str]:
-        """【開源界天花板】直接輸入 PDF，由 MinerU 本地提取全卷完整排版、公式 LaTeX 與題目附圖"""
+        """【開源界天花板】呼叫 MinerU 官方 CLI，高精準提取全卷排版與 LaTeX 公式"""
         if not pdf_path or not os.path.exists(pdf_path):
             return None
         try:
-            import gc
-            import torch
-            from magic_pdf.pipe.UNIPipe import UNIPipe
-            from magic_pdf.rw.DiskReaderWriter import DiskReaderWriter
-
-            logging.info(f"🚀 [MinerU 引擎接管] 直接輸入 PDF 進行全卷排版、LaTeX 與圖表抽取：{os.path.basename(pdf_path)}...")
+            import subprocess
+            import glob
             
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
+            logging.info(f"🚀 [MinerU 引擎接管] 啟動本地端 AI 視覺排版與公式抽取：{os.path.basename(pdf_path)}...")
             
-            # MinerU 會自動將題目附圖寫入 output_dir/images
-            image_dir = os.path.join(output_dir, "images").replace("\\", "/")
-            os.makedirs(image_dir, exist_ok=True)
-            local_image_writer = DiskReaderWriter(output_dir)
+            os.makedirs(output_dir, exist_ok=True)
             
-            pipe = UNIPipe(pdf_bytes, {"_pdf_type": "", "model_list": []}, local_image_writer)
-            pipe.pipe_classify()
-            pipe.pipe_analyze()
-            pipe.pipe_detail()
+            # 執行 MinerU 官方命令 (-m auto 讓它自動判別掃描版或數位版)
+            cmd = ["magic-pdf", "-p", os.path.abspath(pdf_path), "-o", os.path.abspath(output_dir), "-m", "auto"]
             
-            # 取得全卷 Markdown (包含標準 LaTeX 公式如 \sqrt{...} 與表格)
-            md_content = pipe.pipe_dump(output_dir)
+            # 設定逾時 3 分鐘 (180秒)，保護 GitHub Actions 不被單一壞檔卡死
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
             
-            del pipe
-            del pdf_bytes
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-            if md_content and len(md_content.strip()) > 100:
-                logging.info(f"🎉 [MinerU 抽取成功] 全卷文字與公式已轉為高精 Markdown，將作為真理層取代圖片傳輸！")
-                return s2t(md_content.strip())
+            if result.returncode != 0:
+                logging.warning(f"⚠️ MinerU 執行日誌 (Code {result.returncode}): {result.stderr[:200]}...")
+            
+            # 尋找產出的 Markdown 檔案 (MinerU 會在 output_dir 建立一個與 PDF 同名的子資料夾)
+            pdf_basename = os.path.splitext(os.path.basename(pdf_path))[0]
+            target_md_dir = os.path.join(output_dir, pdf_basename)
+            
+            md_files = glob.glob(os.path.join(target_md_dir, "*.md"))
+            if md_files:
+                with open(md_files[0], "r", encoding="utf-8") as f:
+                    md_content = f.read()
+                    
+                if md_content and len(md_content.strip()) > 100:
+                    logging.info(f"🎉 [MinerU 抽取成功] 全卷文字與 LaTeX 公式已完美轉化，將作為真理層傳送給 AI！")
+                    return s2t(md_content.strip())
+            else:
+                logging.warning(f"⚠️ 找不到 MinerU 產出的 Markdown 檔案於 {target_md_dir}")
+                
+        except subprocess.TimeoutExpired:
+            logging.warning("⚠️ [MinerU 降級] 本地解析超時 (超過 3 分鐘)，自動切換回原生與視覺備用通道...")
         except Exception as e:
-            logging.warning(f"⚠️ [MinerU 降級] 本地 MinerU 未配置或遇到例外 ({e})，安全切換回原生文字與視覺備用通道...")
+            logging.warning(f"⚠️ [MinerU 降級] 執行時發生例外 ({e})，安全切換回備用通道...")
+            
         return None
 
     @staticmethod
