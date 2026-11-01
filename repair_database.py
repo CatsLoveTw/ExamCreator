@@ -588,11 +588,10 @@ def sanitize_subject_json():
 # 3. 實體 PDF 題數真理掃描器 (Ground Truth Scanner)
 # -------------------------------------------------------------------------
 def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "") -> Tuple[int, Set[str]]:
-    """以極度嚴謹的段落排版分析真實題目卷題數（自動排除 80分鐘、100分、年份等雜訊）"""
+    """以極度嚴謹的段落排版分析真實【題目卷】題數（自動排除解答頁、評分表與封面雜訊）"""
     if not pdf_path or not os.path.exists(pdf_path):
         return 0, set()
         
-    # 國寫專用防禦：國寫永遠只有 2 大題
     if "國寫" in exam_name or "寫作" in exam_name:
         return 2, {"1", "2", "一", "二"}
 
@@ -600,11 +599,16 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "") -> Tuple[
     try:
         doc = fitz.open(pdf_path)
         for p_idx in range(len(doc)):
-            # 封面頁（通常含大考作答範例與考試時間80分鐘）一律不納入題號計算
             if p_idx == 0 and len(doc) > 1 and "作答注意事項" in doc[0].get_text("text"):
                 continue
 
             txt = doc[p_idx].get_text("text")
+            
+            # 🚨 關鍵防禦：若該頁為解答頁、詳解頁、評分原則頁，絕對不可納入題目數計算！
+            if any(k in txt for k in ["參考詳解", "試題詳解", "參考答案", "標準答案", "選擇題答案", "選填題答案", "非選擇題評分原則", "解答與解析", "【解析】"]):
+                continue
+
+            for line in txt.splitlines():
             for line in txt.splitlines():
                 line_str = line.strip()
                 if not line_str:
