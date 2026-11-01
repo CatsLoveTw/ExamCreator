@@ -86,17 +86,12 @@ jobs:
           pip install "transformers==4.46.3"
           python -c "import transformers.modeling_utils as m, pathlib; p = pathlib.Path(m.__file__); txt = p.read_text(encoding='utf-8'); 'find_pruneable_heads_and_indices' not in txt and p.write_text(txt + '\ntry:\n    from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer\nexcept Exception:\n    pass\n', encoding='utf-8')"
 
-          # 5. 初始化 MinerU 設定檔 (修正為 doclayout_yolo，徹底解決 yaml missing 報錯)
+          # 5. 初始化 MinerU 設定檔 (使用官方標準格式，消除字串索引錯誤)
           mkdir -p ~/mineru_models
           cat << 'EOF' > ~/magic-pdf.json
           {
             "models-dir": "/home/runner/mineru_models",
             "device-mode": "cpu",
-            "table-config": {
-              "model": "rapid_table",
-              "enable": false
-            },
-            "latex-delimiter-config": "None",
             "layout-config": {
               "model": "doclayout_yolo"
             },
