@@ -6811,12 +6811,13 @@ class ExamParser:
                         if extract_subquestion_base_tag(qn_str) == base_tag:
                             belongs = True
 
+                    
                     if belongs:
-                        # 收集非選項附圖
-                        valid_imgs = [p for p in q.get('image_paths', []) if "_Opt" not in p and os.path.exists(p)]
+                        # 收集非選項附圖 (使用 or [] 徹底防禦 NoneType)
+                        valid_imgs = [p for p in (q.get('image_paths') or []) if "_Opt" not in p and os.path.exists(p)]
                         pool["image_paths"].extend(valid_imgs)
-                        pool["image_bboxes"].extend(q.get('image_bboxes', []))
-                        # 若此子題有更齊全的 shared_context，動態更新至池中
+                        pool["image_bboxes"].extend(q.get('image_bboxes') or [])
+                        
                         cur_sc = str(q.get('shared_context', '')).strip()
                         if len(cur_sc) > len(pool["canonical_context"]):
                             pool["canonical_context"] = cur_sc
@@ -6845,7 +6846,7 @@ class ExamParser:
 
                     # 跨頁穿透繼承題組圖表資產
                     if target_pool["image_paths"]:
-                        opt_imgs = [p for p in q.get('image_paths', []) if "_Opt" in p]
+                        opt_imgs = [p for p in (q.get('image_paths') or []) if "_Opt" in p]
                         merged_imgs = list(dict.fromkeys(target_pool["image_paths"] + opt_imgs))
                         q['image_paths'] = merged_imgs
                         q['has_image'] = True
