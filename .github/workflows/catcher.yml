@@ -78,9 +78,13 @@ jobs:
           # 2. 安裝 MinerU 最新完整版及官方預編譯的 detectron2
           pip install -U "magic-pdf[full]" detectron2 --extra-index-url https://myhloli.github.io/wheels/
           
-          # 3. 安裝其餘大考解題管線之開源與 AI 依賴
+          # 3. 安裝其餘大考解題管線之開源與 AI 依賴 (加入 timm 供 MinerU 視覺模型使用)
           pip install timm google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+          # 4. 鎖定 transformers 相容版本並修復 modeling_utils 匯出相容性 (解決 UniMERNet 破版)
+          pip install "transformers==4.46.3"
+          python -c "import transformers.modeling_utils as m, pathlib; p = pathlib.Path(m.__file__); txt = p.read_text(encoding='utf-8'); 'find_pruneable_heads_and_indices' not in txt and p.write_text(txt + '\ntry:\n    from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer\nexcept Exception:\n    pass\n', encoding='utf-8')"
 
           # 3. 初始化 MinerU 設定檔 (直接寫入家目錄 ~/magic-pdf.json)
           mkdir -p ~/mineru_models
