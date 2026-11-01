@@ -8427,24 +8427,81 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
         }
 
     def extract_errata_from_pdf(errata_pdf_path: str):
-        """從解答更正通知 PDF 中萃取官方勘誤表格（支援純文字與掃描圖雙軌解析）"""
+        """從解答更正通知 PDF 中萃取官方勘誤表格（MinerU 高精排版優先 + AI 結構化輔助）"""
         global GLOBAL_ERRATA_MAP
         try:
-            doc = fitz.open(errata_pdf_path)
-            full_txt = ""
-            for p in doc: full_txt += p.get_text("text") + "\n"
+            temp_dir = os.path.abspath(f"temp_mineru_errata_{uuid.uuid4().hex[:6]}").replace("\\", "/")
+            os.makedirs(temp_dir, exist_ok=True)
             
-            # 🚨 雙軌解析：若為純圖片掃描檔，啟動視覺 OCR 提取更正表格
-            if len(full_txt.strip()) < 15 and len(doc) > 0:
-                logging.info(f"🔍 [更正通知掃描檔辨識] {os.path.basename(errata_pdf_path)} 為純圖片，啟動視覺 OCR...")
-                class VisualErrataItem(BaseModel):
-                    subject: str = Field(description="更正科目，如 國文, 物理, 數學A")
-                    question_number: str = Field(description="題號，如 10, 25")
-                    corrected_answer: str = Field(description="更正後的正確答案，如 B, ACD, 送分")
+            # 1. 開源庫優先：嘗試以 MinerU 或 pymupdf4llm 提取 Markdown (處理表格極佳)
+            md_text = parser.extract_via_mineru(errata_pdf_path, temp_dir)
+            if not md_text:
+                try:
+                    import pymupdf4llm
+                    md_text = pymupdf4llm.to_markdown(errata_pdf_path)
+                except Exception:
+                    pass
+                    
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-                class VisualErrataPage(BaseModel):
-                    items: List[VisualErrataItem] = Field(description="更正條目列表")
+            class VisualErrataItem(BaseModel):
+                subject: str = Field(description="更正科目，如 國文, 物理, 數學A")
+                question_number: str = Field(description="題號，如 10, 25, A")
+                corrected_answer: str = Field(description="更正後的正確答案，如 B, ACD, 送分, 123")
 
+            class VisualErrataPage(BaseModel):
+                items: List[VisualErrataItem] = Field(description="更正條目列表")
+
+            def process_ai_errata_response(res_err):
+                if res_err and 'items' in res_err:
+                    for it in res_err['items']:
+                        s = re.sub(r'(?:考科|科)$', '', it.get('subject', '').strip())
+                        qn = str(it.get('question_number', '')).strip()
+                        ca = clean_ocr_answer_format(it.get('corrected_answer', ''))
+                        
+                        # 處理送分或全體給分
+                        if any(k in str(it.get('corrected_answer', '')) for k in ["送分", "全體給分", "給分", "無答案"]):
+                            ca = "無答案（全體給分）"
+                            
+                        if s and qn and ca:
+                            # 統一科目名稱
+                            if s in ["國綜", "國語文"]: s = "國文"
+                            elif s in ["數A", "高中數學A"]: s = "數學A"
+                            elif s in ["數B", "高中數學B"]: s = "數學B"
+                            elif s in ["數甲", "高中數學甲"]: s = "數學甲"
+                            elif s in ["數乙", "高中數學乙"]: s = "數學乙"
+                            elif s in ["公民", "公社"]: s = "公民與社會"
+                            elif s in ["地科"]: s = "地球科學"
+                            
+                            set_errata_answer(s, qn, ca)
+                            logging.info(f"📢 [載入官方更正通知] 科目: {s} | 題號: {qn} ➔ 更正為: {ca}")
+
+            # 2. 雙軌驗證：若 Markdown 提取成功且內容充實，交由 AI 純文字極速提取
+            if md_text and len(md_text.strip()) > 15:
+                logging.info(f"🔍 [更正通知 Markdown 辨識] 成功提取 {os.path.basename(errata_pdf_path)} 文本，啟動 AI 結構化輔助...")
+                prompt = f"""
+                這是一份考試答案更正/勘誤通知的 Markdown 文本（可能包含表格）。
+                請精準提取其中公告的「更正科目」、「題號」與「更正後的正確答案」。
+                若文件內同時包含多個科目，請全數提取。
+                
+                【更正通知文本】：
+                {md_text}
+                """
+                res_err, _ = parser.ai_manager.generate_with_retry(
+                    contents=[prompt],
+                    response_schema=VisualErrataPage,
+                    temperature=0.0,
+                    preferred_model="gemini-3.5-flash-lite", # 純文字解析極快
+                    enable_thinking=False,
+                    task_desc="[勘誤表純文字解析]"
+                )
+                process_ai_errata_response(res_err)
+            
+            # 3. 備援防線：若為純掃描圖且 MinerU 失敗，降級為視覺 OCR
+            else:
+                logging.info(f"🔍 [更正通知視覺辨識] {os.path.basename(errata_pdf_path)} 啟動 Gemini 視覺 OCR...")
+                doc = fitz.open(errata_pdf_path)
                 for p_idx in range(len(doc)):
                     pix = doc[p_idx].get_pixmap(dpi=200)
                     tmp_p = f"temp_errata_{p_idx}.png"
@@ -8455,42 +8512,17 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                                 contents=["這是一份考試答案更正/勘誤通知，請提取更正的科目、題號與更正後答案：", p_img],
                                 response_schema=VisualErrataPage,
                                 temperature=0.0,
-                                preferred_model="gemini-3.5-flash-lite",
-                                enable_thinking=False
+                                preferred_model="gemini-3.5-flash", # 視覺任務用 flash
+                                enable_thinking=False,
+                                task_desc="[勘誤表視覺解析]"
                             )
-                            if res_err and 'items' in res_err:
-                                for it in res_err['items']:
-                                    s = re.sub(r'(?:考科|科)$', '', it.get('subject', '').strip())
-                                    qn = str(it.get('question_number', '')).strip()
-                                    ca = clean_ocr_answer_format(it.get('corrected_answer', ''))
-                                    if s and qn and ca:
-                                        set_errata_answer(s, qn, ca)
-                                        logging.info(f"📢 [視覺載入官方更正] 科目: {s} | 題號: {qn} ➔ 更正為: {ca}")
+                            process_ai_errata_response(res_err)
                     finally:
                         if os.path.exists(tmp_p): os.remove(tmp_p)
-            else:
-                # 純文字層正則提取
-                lines = full_txt.splitlines()
-                for line in lines:
-                    m = re.search(r'([\u4e00-\u9fa5]{2,5})\s+(\d+|[A-Ga-g])\s+([A-Ga-g0-9、\s]+?)\s+([A-Ga-g0-9、\s]+|送分|全體給分)', line)
-                    if m:
-                        subj, qn, orig, corr = m.group(1).strip(), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
-                        clean_s = re.sub(r'(?:考科|科)$', '', subj)
-                        if clean_s in ["國綜", "國語文"]: clean_s = "國文"
-                        elif clean_s in ["數A", "高中數學A"]: clean_s = "數學A"
-                        elif clean_s in ["數B", "高中數學B"]: clean_s = "數學B"
-                        elif clean_s in ["數甲", "高中數學甲"]: clean_s = "數學甲"
-                        elif clean_s in ["數乙", "高中數學乙"]: clean_s = "數學乙"
-                        elif clean_s in ["公民", "公社"]: clean_s = "公民與社會"
-                        elif clean_s in ["地科"]: clean_s = "地球科學"
-                        
-                        corr_clean = "無答案（全體給分）" if any(k in corr for k in ["送分", "給分"]) else clean_ocr_answer_format(corr)
-                        set_errata_answer(clean_s, qn, corr_clean)
-                        logging.info(f"📢 [載入官方更正通知] 科目: {clean_s} | 題號: {qn} | 原答案: {orig} ➔ 更正為: {corr_clean}")
-            doc.close()
+                doc.close()
         except Exception as e:
             logging.warning(f"讀取更正通知 {errata_pdf_path} 失敗: {e}")
-
+    
     for base_dir in directories:
         if not os.path.exists(base_dir):
             continue
