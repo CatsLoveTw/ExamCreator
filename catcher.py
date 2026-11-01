@@ -4150,20 +4150,23 @@ class ExamParser:
             if result.returncode != 0:
                 logging.warning(f"⚠️ MinerU 執行日誌 (Code {result.returncode}): {result.stderr[:200]}...")
             
-            # 尋找產出的 Markdown 檔案 (MinerU 會在 output_dir 建立一個與 PDF 同名的子資料夾)
-            pdf_basename = os.path.splitext(os.path.basename(pdf_path))[0]
-            target_md_dir = os.path.join(output_dir, pdf_basename)
+            # 尋找產出的 Markdown 檔案 (MinerU 會過濾檔名特殊字元，故直接遞迴搜尋整個 output_dir)
+            md_files = glob.glob(os.path.join(output_dir, "**", "*.md"), recursive=True)
             
-            md_files = glob.glob(os.path.join(target_md_dir, "*.md"))
+            # 過濾掉可能同名的舊暫存檔 (如 mineru_output.md)
+            md_files = [f for f in md_files if os.path.basename(f) != "mineru_output.md"]
+            
             if md_files:
-                with open(md_files[0], "r", encoding="utf-8") as f:
+                # 若有多個，取檔案最大的（通常就是完整的解析結果）
+                best_md = max(md_files, key=os.path.getsize)
+                with open(best_md, "r", encoding="utf-8") as f:
                     md_content = f.read()
                     
                 if md_content and len(md_content.strip()) > 100:
                     logging.info(f"🎉 [MinerU 抽取成功] 全卷文字與 LaTeX 公式已完美轉化，將作為真理層傳送給 AI！")
                     return s2t(md_content.strip())
             else:
-                logging.warning(f"⚠️ 找不到 MinerU 產出的 Markdown 檔案於 {target_md_dir}")
+                logging.warning(f"⚠️ 找不到 MinerU 產出的 Markdown 檔案於 {output_dir} 的任何子目錄中")
                 
         except subprocess.TimeoutExpired:
             logging.warning("⚠️ [MinerU 降級] 本地解析超時 (超過 3 分鐘)，自動切換回原生與視覺備用通道...")
