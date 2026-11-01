@@ -75,8 +75,8 @@ jobs:
           # 1. 優先安裝 CPU 專用 PyTorch (確保與 detectron2 版本相容)
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           
-          # 2. 安裝 MinerU 完整 CPU 版及官方預編譯的 detectron2
-          pip install -U "magic-pdf[full-cpu]" detectron2 --extra-index-url https://myhloli.github.io/wheels/
+          # 2. 安裝 MinerU 最新完整版及官方預編譯的 detectron2
+          pip install -U "magic-pdf[full]" detectron2 --extra-index-url https://myhloli.github.io/wheels/
           
           # 3. 安裝其餘大考解題管線之開源與 AI 依賴
           pip install google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
