@@ -6638,8 +6638,13 @@ class ExamParser:
             else:
                 logging.info("🎯 [選填題格子對照驗證] 全數通過！所有選填題挖空數皆與官方答案長度吻合。")
 
+            # 🚨 安全防禦：剔除無效物件，並使用 .get() 讀取題號，避免 KeyError: 'question_number' 崩潰
+            all_extracted_questions = [q for q in all_extracted_questions if isinstance(q, dict) and q.get('question_number')]
+
             for q_data in all_extracted_questions:
-                q_num = q_data['question_number']
+                q_num = str(q_data.get('question_number', '')).strip()
+                if not q_num:
+                    continue
                 has_options = len(q_data.get("options", [])) > 0
                 matched_key = next((k for k in rubric_visual_map if is_precise_match(q_data, k)), None)
                 
