@@ -72,28 +72,33 @@ jobs:
       - name: Install Python dependencies & MinerU
         run: |
           python -m pip install --upgrade pip
-          # 1. 優先安裝 CPU 專用 PyTorch (確保與 detectron2 版本相容)
+          # 1. 優先安裝 CPU 專用 PyTorch
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           
           # 2. 安裝 MinerU 最新完整版及官方預編譯的 detectron2
           pip install -U "magic-pdf[full]" detectron2 --extra-index-url https://myhloli.github.io/wheels/
           
-          # 3. 安裝其餘大考解題管線之開源與 AI 依賴 (加入 timm 供 MinerU 視覺模型使用)
+          # 3. 安裝其餘大考解題管線之開源與 AI 依賴 (含 timm)
           pip install timm google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-          # 4. 鎖定 transformers 相容版本並修復 modeling_utils 匯出相容性 (解決 UniMERNet 破版)
+          # 4. 鎖定 transformers 相容版本並修復 modeling_utils 匯出相容性
           pip install "transformers==4.46.3"
           python -c "import transformers.modeling_utils as m, pathlib; p = pathlib.Path(m.__file__); txt = p.read_text(encoding='utf-8'); 'find_pruneable_heads_and_indices' not in txt and p.write_text(txt + '\ntry:\n    from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer\nexcept Exception:\n    pass\n', encoding='utf-8')"
 
-          # 3. 初始化 MinerU 設定檔 (直接寫入家目錄 ~/magic-pdf.json)
+          # 5. 初始化 MinerU 設定檔 (修正為 doclayout_yolo，徹底解決 yaml missing 報錯)
           mkdir -p ~/mineru_models
           cat << 'EOF' > ~/magic-pdf.json
           {
             "models-dir": "/home/runner/mineru_models",
             "device-mode": "cpu",
+            "table-config": {
+              "model": "rapid_table",
+              "enable": false
+            },
+            "latex-delimiter-config": "None",
             "layout-config": {
-              "model": "layoutlmv3"
+              "model": "doclayout_yolo"
             },
             "formula-config": {
               "mfd_model": "yolo_v8_mfd",
@@ -102,13 +107,12 @@ jobs:
           }
           EOF
 
-          # 4. 實體檔案防禦檢查：只要核心模型 yolo_v8_ft.pt 不存在，就強制下載並整理路徑
+          # 6. 實體檔案防禦檢查：確保核心權重存在並移出 models/ 子目錄
           if [ ! -f "/home/runner/mineru_models/MFD/YOLO/yolo_v8_ft.pt" ]; then
             echo "⬇️ [下載觸發] 核心模型 yolo_v8_ft.pt 未就緒，開始透過 huggingface-cli 下載..."
             pip install huggingface_hub
             huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit-1.0 --local-dir /home/runner/mineru_models
             
-            # 🚨 解決子路徑落差：若下載內容位於 models/ 子資料夾內，將其移出至根層級
             if [ -d "/home/runner/mineru_models/models" ]; then
               echo "📂 正在對齊模型子目錄結構至 /home/runner/mineru_models..."
               mv /home/runner/mineru_models/models/* /home/runner/mineru_models/ 2>/dev/null || true
@@ -117,6 +121,22 @@ jobs:
           else
             echo "✅ [快取生效] 核心模型 yolo_v8_ft.pt 已存在，跳過重複下載。"
           fi
+
+      - name: ⚡ MinerU 環境快速自檢 (Fail-Fast，保證在拉取 GDrive 前確認就緒)
+        run: |
+          echo "🧪 [快速自檢] 正在以 1 頁極小 PDF 驗證 MinerU 本地推論管線..."
+          python -c "
+          import fitz
+          doc = fitz.open()
+          page = doc.new_page()
+          page.insert_text((72, 72), 'Hello World. Test formula: $E=mc^2$. Table: | A | B |')
+          doc.save('test_healthcheck.pdf')
+          doc.close()
+          "
+          # 乾跑 1 頁測試，若設定檔或模型缺少會在此秒級報錯，阻止下載 Google Drive
+          magic-pdf -p test_healthcheck.pdf -o test_healthcheck_out -m auto
+          rm -rf test_healthcheck.pdf test_healthcheck_out
+          echo "🎉 [快速自檢通過] MinerU 模型、環境與 CLI 均 100% 正常，準備連接 Google Drive！"
 
 
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
