@@ -79,7 +79,7 @@ jobs:
           pip install -U "magic-pdf[full]" detectron2 --extra-index-url https://myhloli.github.io/wheels/
           
           # 3. 安裝其餘大考解題管線之開源與 AI 依賴
-          pip install google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
+          pip install timm google-genai openai httpx pymupdf pymupdf4llm opencv-python-headless pillow matplotlib pydantic opencc-python-reimplemented pylatexenc rapidocr_onnxruntime pdfplumber
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
           # 3. 初始化 MinerU 設定檔 (直接寫入家目錄 ~/magic-pdf.json)
