@@ -98,10 +98,11 @@ jobs:
           }
           EOF
 
-          # 4. 若快取未命中，下載輕量化模型權重 (約 2~3 GB)
+          # 4. 若快取未命中，透過 huggingface-cli 下載 MinerU 官方完整模型庫
           if [ "${{ steps.cache-mineru.outputs.cache-hit }}" != "true" ]; then
-            echo "⬇️ 正在下載 MinerU 輕量模型權重..."
-            python -c "from magic_pdf.tools.common import prepare_env; prepare_env()" || true
+            echo "⬇️ 正在下載 MinerU 官方模型權重 (PDF-Extract-Kit)..."
+            pip install huggingface_hub
+            huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit-1.0 --local-dir /home/runner/mineru_models
           fi
 
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
