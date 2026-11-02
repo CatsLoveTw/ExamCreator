@@ -8555,6 +8555,16 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                             ca = "無答案（全體給分）"
                             
                         if s and qn and ca:
+                            # 🚨 數學科常識過濾防線：
+                            # 1. 數學科絕不可能有第 21 題以上的題號
+                            # 2. 數學科題號大於 7 (選填題) 絕不可能出現單純的 ABCD 字母答案
+                            if "數" in s:
+                                if qn.isdigit() and int(qn) > 20:
+                                    logging.warning(f"🛡️ [攔截荒謬更正] 數學科不可能有第 {qn} 題，已剔除此雜訊！")
+                                    continue
+                                if qn.isdigit() and int(qn) >= 8 and ca in ["A", "B", "C", "D", "E"]:
+                                    logging.warning(f"🛡️ [攔截荒謬更正] 數學科第 {qn} 題為選填題，答案不可能為 {ca}，已剔除！")
+                                    continue
                             # 統一科目名稱
                             if s in ["國綜", "國語文"]: s = "國文"
                             elif s in ["數A", "高中數學A"]: s = "數學A"
@@ -8571,9 +8581,14 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             if md_text and len(md_text.strip()) > 15:
                 logging.info(f"🔍 [更正通知 Markdown 辨識] 成功提取 {os.path.basename(errata_pdf_path)} 文本，啟動 AI 結構化輔助...")
                 prompt = f"""
-                這是一份考試答案更正/勘誤通知的 Markdown 文本（可能包含表格）。
-                請精準提取其中公告的「更正科目」、「題號」與「更正後的正確答案」。
-                若文件內同時包含多個科目，請全數提取。
+                這是一份考試答案更正/勘誤通知的文本。
+                
+                🚨🚨【極重要防偽規範（絕對禁止提取整張未變更的答案表）】🚨🚨：
+                1. 更正通知通常只有 1 到 4 題發生勘誤！
+                2. 只有在文本中明確標註【更正為】、【原答案...改為...】、【勘誤】或【送分/全體給分】的題目，才屬於更正！
+                3. 🚫【絕對嚴格禁止】：若文本下方附帶了整份考卷的「未更正原始答案表（如 1~25 題全體答案）」，絕對不可以把它當成更正提取！
+                4. 🚫【絕對嚴格禁止】：每一題必須仔細看清其「所屬科目」。嚴禁把英文、社會的答案整排套上「數學」科目！數學科絕不會有 21~25 題的 ABCD 選擇題！
+                5. 若整份文件其實沒有更正任何答案，請直接回傳空列表 `{{"items": []}}`。
                 
                 【更正通知文本】：
                 {md_text}
@@ -8582,12 +8597,17 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
                     contents=[prompt],
                     response_schema=VisualErrataPage,
                     temperature=0.0,
-                    preferred_model="gemini-3.5-flash-lite", # 純文字解析極快
+                    preferred_model="gemini-3.5-flash-lite",
                     enable_thinking=False,
                     task_desc="[勘誤表純文字解析]"
                 )
-                process_ai_errata_response(res_err)
-            
+
+                # 🚨 異常熔斷保護：若單次抓出超過 8 題更正，100% 是把一般答案表抓進來了，拒絕寫入！
+                if res_err and len(res_err.get('items', [])) > 8:
+                    logging.warning(f"🛡️ [更正熔斷攔截] 更正數量異常暴增至 {len(res_err['items'])} 題！判定為誤抓全卷答案表，已強制拒絕載入，防止污染題庫！")
+                else:
+                    process_ai_errata_response(res_err)
+                    
             # 3. 備援防線：若為純掃描圖且 MinerU 失敗，降級為視覺 OCR
             else:
                 logging.info(f"🔍 [更正通知視覺辨識] {os.path.basename(errata_pdf_path)} 啟動 Gemini 視覺 OCR...")
