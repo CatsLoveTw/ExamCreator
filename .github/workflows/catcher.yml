@@ -136,7 +136,7 @@ jobs:
             echo "✅ [快取生效] 全套核心模型已就緒，跳過重複下載。"
           fi
 
-      - name: MinerU 全真全模態自檢 (Fail-Fast: 同步測試掃描圖 OCR 與公式引擎)
+      - name: MinerU 全真全模態自檢 
         run: |
           echo "🧪 [全真自檢] 正在建立純圖片掃描 PDF，強制觸發 OCR 引擎與公式識別..."
           python -c "
