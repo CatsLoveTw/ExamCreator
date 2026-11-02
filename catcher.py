@@ -5717,6 +5717,8 @@ class ExamParser:
             # =========================================================
             # 【第一階段】：MinerU 全卷高精解析優先（單次極速完成）
             # =========================================================
+            stage1_cache_path = json_path.replace("_database.json", "_stage1_cache.json")
+            stage1_cache = {"processed_pages": [], "questions": []}
             mineru_md_path = os.path.join(img_dir, "mineru_output.md")
             
             # 1. 優先嘗試全卷 MinerU 本地解析
