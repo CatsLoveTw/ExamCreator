@@ -102,9 +102,9 @@ jobs:
           }
           EOF
 
-          # 6. 實體檔案防禦檢查：確保核心權重存在並移出 models/ 子目錄
-          if [ ! -f "/home/runner/mineru_models/MFD/YOLO/yolo_v8_ft.pt" ]; then
-            echo "⬇️ [下載觸發] 核心模型 yolo_v8_ft.pt 未就緒，開始透過 huggingface-cli 下載..."
+          # 6. 實體檔案防禦檢查：確保 MFD 與 OCR 權重完整就緒
+          if [ ! -f "/home/runner/mineru_models/OCR/paddleocr_torch/ch_PP-OCRv3_det_infer.pth" ]; then
+            echo "⬇️ [下載觸發] 核心模型或 OCR 權重未就緒，開始下載..."
             pip install huggingface_hub
             huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit-1.0 --local-dir /home/runner/mineru_models
             
@@ -112,9 +112,17 @@ jobs:
               echo "📂 正在對齊模型子目錄結構至 /home/runner/mineru_models..."
               mv /home/runner/mineru_models/models/* /home/runner/mineru_models/ 2>/dev/null || true
             fi
-            echo "✅ 模型下載與路徑整理完畢！"
+
+            # 🚨 補齊 OCR 模型權重（MinerU 專用 OCR 權重包）
+            mkdir -p /home/runner/mineru_models/OCR/paddleocr_torch
+            huggingface-cli download --resume-download PaddlePaddle/PP-OCRv3 --include "ch_PP-OCRv3_det_infer.pth" "ch_PP-OCRv3_rec_infer.pth" --local-dir /home/runner/mineru_models/OCR/paddleocr_torch || \
+            huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit --include "models/OCR/*" --local-dir /home/runner/mineru_models/temp_ocr && \
+            cp -rf /home/runner/mineru_models/temp_ocr/models/OCR/* /home/runner/mineru_models/OCR/ 2>/dev/null || true
+            rm -rf /home/runner/mineru_models/temp_ocr 2>/dev/null || true
+
+            echo "✅ 包含 OCR 在內之全套模型下載與路徑整理完畢！"
           else
-            echo "✅ [快取生效] 核心模型 yolo_v8_ft.pt 已存在，跳過重複下載。"
+            echo "✅ [快取生效] 全套核心模型已存在，跳過重複下載。"
           fi
 
       - name: ⚡ MinerU 環境快速自檢 (Fail-Fast，保證在拉取 GDrive 前確認就緒)
