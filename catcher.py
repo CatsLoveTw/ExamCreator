@@ -388,6 +388,10 @@ def sanitize_latex_syntax(text: str) -> str:
     text = re.sub(r'\\begin\{(?:align\*?|equation\*?)\}', r'\\begin{aligned}', text)
     text = re.sub(r'\\end\{(?:align\*?|equation\*?)\}', r'\\end{aligned}', text)
 
+    # 2.5 🚨 強制清洗 OCR 或 AI 幻覺產生的殘影符號（如 \l\left 變成 \left）
+    text = re.sub(r'\\l\\left', r'\\left', text)
+    text = re.sub(r'\\r\\right', r'\\right', text)
+    
     # 3. 閉合性檢查：自動補全被截斷的 \begin{aligned}, \begin{matrix}, \begin{cases}
     env_matches = re.findall(r'\\begin\{([a-zA-Z]+)\}', text)
     end_matches = re.findall(r'\\end\{([a-zA-Z]+)\}', text)
@@ -4382,7 +4386,10 @@ class ExamParser:
             1. **【答案表格對應】**：
                - 若頁首或頁中有「答案表格」（如：1. ABD, 2. CD, 3. D, 4. B, 5. E, 6.(1) 10kg, 6.(2) 20m/s...），請務必將答案精確對應至每一題的 `answer` 欄位！
                - 小題格式請標準化（例如：6.(1) 對應題號 '6(1)'，9.(2) 對應題號 '9(2)'）。
-            2. **question_number (題號)**：如 '1', '2', '6(1)', '6(2)', '14'。
+            2. **question_number (題號) 🚨【防幽靈子題極度警告】🚨**：
+               - 題號如 '1', '2', '6(1)', '14'。
+               - **絕對禁止將詳解中的「計分步驟」當成子題號！** 例如詳解中寫「(1) 求得法向量得 1 分。(2) 代入公式得 2 分」，這些是第 8 題的「評分標準」，絕對不可以拆分成 8(1) 與 8(2) 當作新題目產出！請將這些步驟全部歸納進原題號的 `scoring_rubric` 中。
+               - 所有的數學與物理公式，無論是在詳解還是評分標準中，**【強制】必須使用 $...$ 或 $$...$$ 包裹**，否則前端將無法顯示！
             3. **source_curriculum 與 exam_target（🚨 事前防偽造剛性禁令）**：
                - 只有在試卷版面上【明確印出】『出處：...』或『目標：...』時才進行提取。
                - 🚨 若版面上根本沒有印出出處或測驗目標（例如純文字解答、無單元範圍標示），這兩個欄位【必須強制留空字串 ""】，絕對禁止自行腦補、猜測或從題目反推！
@@ -7964,14 +7971,22 @@ class ExamParser:
                                 if any(k in effective_ans for k in ["無答案", "全體給分", "送分", "不計分"]):
                                     q_data['detailed_solution'] += f"\n\n**綜上所述，本題官方公佈無答案，全體給分。**"
                                 elif q_data.get('question_type', '') in ["單選題", "多選題"]:
-                                    # 只提取大寫英文字母或純數字選項，防止「即」等中文字元被包成括號 (即)
-                                    valid_opts = re.findall(r'[A-Ga-g1-9]', effective_ans)
-                                    if valid_opts:
-                                        formatted_opts = "".join([f"({c.upper()})" for c in valid_opts])
-                                        if has_conflict:
-                                            q_data['detailed_solution'] += f"\n\n**綜上所述，本題學理嚴謹推導之正確選項為：{formatted_opts}（官方原始答案為：{q_data['official_answer']}，詳見上述疑義剖析）。**"
-                                        else:
-                                            q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確選項為：{formatted_opts}**"
+                                    # 🚨 剛性防禦：如果答案字串含有 LaTeX 符號 (\) 或長度過長，代表 AI 誤判了題型（把簡答題誤當多選題），強制改走簡答題輸出模式，杜絕產生 (F)(A)(C)(3)(6) 這種荒謬字串！
+                                    if "\\" in effective_ans or "=" in effective_ans or len(effective_ans.replace(",", "")) > 6:
+                                        q_data['question_type'] = "簡答題"
+                                        clean_ans_disp = effective_ans
+                                        if any(c in clean_ans_disp for c in ["\\", "^", "_"]) and not clean_ans_disp.startswith("$"):
+                                            clean_ans_disp = f"${clean_ans_disp}$"
+                                        q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確答案為：** {clean_ans_disp}"
+                                    else:
+                                        # 真正的選擇題，只提取大寫英文字母或純數字選項
+                                        valid_opts = re.findall(r'[A-Ga-g1-9]', effective_ans)
+                                        if valid_opts:
+                                            formatted_opts = "".join([f"({c.upper()})" for c in valid_opts])
+                                            if has_conflict:
+                                                q_data['detailed_solution'] += f"\n\n**綜上所述，本題學理嚴謹推導之正確選項為：{formatted_opts}（官方原始答案為：{q_data['official_answer']}，詳見上述疑義剖析）。**"
+                                            else:
+                                                q_data['detailed_solution'] += f"\n\n**綜上所述，本題正確選項為：{formatted_opts}**"
                                 elif q_data.get('question_type', '') == "選填題" and "," in effective_ans:
                                     formatted_parts = effective_ans.split(",")
                                     blanks_desc = ", ".join([f"第 {idx+1} 空格為「{val}」" for idx, val in enumerate(formatted_parts)])
