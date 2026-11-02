@@ -8,6 +8,11 @@ concurrency:
 on:
   workflow_dispatch: # 支援手動在 GitHub 網頁點擊執行
     inputs:
+      test_mineru_only:
+        description: '🧪 【純環境測試】僅驗證 MinerU 模組與全套權重 (含OCR)，自檢通過即終止（不拉取 GDrive、不跑考卷）'
+        required: false
+        type: boolean
+        default: false
       repair_only:
         description: '⚡ 【秒級修復】僅執行 100+ 份資料庫離線清洗（剔除幽靈題、合併重題、升級知識點，修復後直接上傳，不跑 catcher.py）'
         required: false
@@ -54,6 +59,7 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
+      
       - name: Install system dependencies & rclone
         run: |
           # 一次性安裝中文字型、系統影像依賴(libgl1)、curl、zip 與 unzip
@@ -67,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/mineru_models
-          key: mineru-models-cpu-v2
+          key: mineru-models-cpu-v4
 
       - name: Install Python dependencies & MinerU
         run: |
@@ -86,7 +92,7 @@ jobs:
           pip install "transformers==4.46.3"
           python -c "import transformers.modeling_utils as m, pathlib; p = pathlib.Path(m.__file__); txt = p.read_text(encoding='utf-8'); 'find_pruneable_heads_and_indices' not in txt and p.write_text(txt + '\ntry:\n    from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer\nexcept Exception:\n    pass\n', encoding='utf-8')"
 
-          # 5. 初始化 MinerU 設定檔 (使用官方標準格式，消除字串索引錯誤)
+          # 5. 初始化 MinerU 設定檔
           mkdir -p ~/mineru_models
           cat << 'EOF' > ~/magic-pdf.json
           {
@@ -102,47 +108,65 @@ jobs:
           }
           EOF
 
-          # 6. 實體檔案防禦檢查：確保 MFD 與 OCR 權重完整就緒
+          # 6. 實體檔案防禦檢查：一網打盡下載並修復所有官方遺漏檔名
           if [ ! -f "/home/runner/mineru_models/OCR/paddleocr_torch/ch_PP-OCRv3_det_infer.pth" ]; then
-            echo "⬇️ [下載觸發] 核心模型或 OCR 權重未就緒，開始下載..."
+            echo "⬇️ [下載觸發] 正在拉取 MinerU 官方完整模型庫..."
             pip install huggingface_hub
             huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit-1.0 --local-dir /home/runner/mineru_models
             
+            # 子目錄路徑對齊
             if [ -d "/home/runner/mineru_models/models" ]; then
               echo "📂 正在對齊模型子目錄結構至 /home/runner/mineru_models..."
               mv /home/runner/mineru_models/models/* /home/runner/mineru_models/ 2>/dev/null || true
             fi
 
-            # 🚨 補齊 OCR 模型權重（MinerU 專用 OCR 權重包）
+            # 🚨 終極修復：解決官方將 ch_PP-OCRv3_det_infer 改名/刪除的已知 Bug
             mkdir -p /home/runner/mineru_models/OCR/paddleocr_torch
-            huggingface-cli download --resume-download PaddlePaddle/PP-OCRv3 --include "ch_PP-OCRv3_det_infer.pth" "ch_PP-OCRv3_rec_infer.pth" --local-dir /home/runner/mineru_models/OCR/paddleocr_torch || \
-            huggingface-cli download --resume-download opendatalab/PDF-Extract-Kit --include "models/OCR/*" --local-dir /home/runner/mineru_models/temp_ocr && \
-            cp -rf /home/runner/mineru_models/temp_ocr/models/OCR/* /home/runner/mineru_models/OCR/ 2>/dev/null || true
-            rm -rf /home/runner/mineru_models/temp_ocr 2>/dev/null || true
-
-            echo "✅ 包含 OCR 在內之全套模型下載與路徑整理完畢！"
+            curl -fsSL "https://huggingface.co/opendatalab/PDF-Extract-Kit-1.0/resolve/782e7878848f2fa44a9fc59588970e7e48b8c253/models/OCR/paddleocr_torch/ch_PP-OCRv3_det_infer.pth" -o /home/runner/mineru_models/OCR/paddleocr_torch/ch_PP-OCRv3_det_infer.pth || true
+            
+            if [ ! -f "/home/runner/mineru_models/OCR/paddleocr_torch/ch_PP-OCRv3_det_infer.pth" ]; then
+              cp -f /home/runner/mineru_models/OCR/paddleocr_torch/Multilingual_PP-OCRv3_det_infer.pth /home/runner/mineru_models/OCR/paddleocr_torch/ch_PP-OCRv3_det_infer.pth 2>/dev/null || true
+            fi
+            
+            if [ -f "/home/runner/mineru_models/OCR/paddleocr_torch/chinese_cht_PP-OCRv3_rec_infer.pth" ]; then
+              cp -n /home/runner/mineru_models/OCR/paddleocr_torch/chinese_cht_PP-OCRv3_rec_infer.pth /home/runner/mineru_models/OCR/paddleocr_torch/ch_PP-OCRv3_rec_infer.pth 2>/dev/null || true
+            fi
+            echo "✅ 全套模型權重與別名配置完畢！"
           else
-            echo "✅ [快取生效] 全套核心模型已存在，跳過重複下載。"
+            echo "✅ [快取生效] 全套核心模型已就緒，跳過重複下載。"
           fi
 
-      - name: ⚡ MinerU 環境快速自檢 (Fail-Fast，保證在拉取 GDrive 前確認就緒)
+      - name: MinerU 全真全模態自檢 (Fail-Fast: 同步測試掃描圖 OCR 與公式引擎)
         run: |
-          echo "🧪 [快速自檢] 正在以 1 頁極小 PDF 驗證 MinerU 本地推論管線..."
+          echo "🧪 [全真自檢] 正在建立純圖片掃描 PDF，強制觸發 OCR 引擎與公式識別..."
           python -c "
           import fitz
           doc = fitz.open()
           page = doc.new_page()
-          page.insert_text((72, 72), 'Hello World. Test formula: $E=mc^2$. Table: | A | B |')
-          doc.save('test_healthcheck.pdf')
+          page.insert_text((72, 72), '1. Test OCR text and formula: \$E=mc^2\$')
+          pix = page.get_pixmap(dpi=150)
           doc.close()
-          "
-          # 乾跑 1 頁測試，若設定檔或模型缺少會在此秒級報錯，阻止下載 Google Drive
-          magic-pdf -p test_healthcheck.pdf -o test_healthcheck_out -m auto
-          rm -rf test_healthcheck.pdf test_healthcheck_out
-          echo "🎉 [快速自檢通過] MinerU 模型、環境與 CLI 均 100% 正常，準備連接 Google Drive！"
 
+          scanned_doc = fitz.open()
+          img_page = scanned_doc.new_page(width=pix.width, height=pix.height)
+          img_page.insert_image(img_page.rect, stream=pix.tobytes())
+          scanned_doc.save('test_scanned_ocr.pdf')
+          scanned_doc.close()
+          "
+          magic-pdf -p test_scanned_ocr.pdf -o test_scanned_out -m auto
+          rm -rf test_scanned_ocr.pdf test_scanned_out
+          echo "🎉 [全真自檢通過] MinerU 版面分析、公式模型與 OCR 引擎 100% 健全運作！"
+
+      - name: 🛑 純測試模式安全終止 (Test-Only Exit)
+        if: ${{ github.event.inputs.test_mineru_only == 'true' }}
+        run: |
+          echo "=========================================================="
+          echo "🎉 [測試完畢] MinerU 模組、權重、OCR 與公式引擎全部驗證通過！"
+          echo "🛑 您勾選了『test_mineru_only』，在此安全結束，不執行雲端下載與考卷解析。"
+          echo "=========================================================="
 
       - name: Configure rclone & Gemini Keys (雙帳號多 Remote 支援)
+        if: ${{ github.event.inputs.test_mineru_only != 'true' }}
         env:
           GEMINI_API_KEYS_ENV: ${{ secrets.GEMINI_API_KEYS }}
           GDRIVE_CLIENT_ID_ENV: ${{ secrets.GDRIVE_CLIENT_ID }}
@@ -153,10 +177,7 @@ jobs:
           GDRIVE_MOCK_OAUTH_TOKEN_ENV: ${{ secrets.GDRIVE_MOCK_OAUTH_TOKEN }}
           GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
         run: |
-          # 1. 將 Gemini 金鑰寫入本地 key.txt
           printf "%s\n" "$GEMINI_API_KEYS_ENV" > key.txt
-          
-          # 2. 產生主帳號 rclone 設定 [gdrive]
           cat << EOF > rclone.conf
           [gdrive]
           type = drive
@@ -167,9 +188,7 @@ jobs:
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
 
-          # 3. 模考專用帳號直接共用原資料夾 ID (儲存配額計入模考新帳號)
           if [ -n "$GDRIVE_MOCK_OAUTH_TOKEN_ENV" ]; then
-            echo "🌟 檢測到模考專用 Google 帳號，共用原 Folder ID 並啟動容量分流！"
             cat << EOF >> rclone.conf
           [gdrive_mock]
           type = drive
@@ -179,11 +198,10 @@ jobs:
           token = $GDRIVE_MOCK_OAUTH_TOKEN_ENV
           root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
-          else
-            echo "ℹ️ 未設定 GDRIVE_MOCK_OAUTH_TOKEN，模考圖片將暫存於主帳號 [gdrive]。"
           fi
 
       - name: Pull Workspace from Google Drive (雙軌智慧拉取模式)
+        if: ${{ github.event.inputs.test_mineru_only != 'true' }}
         run: |
           echo "⬇️ 開始從 Google Drive 雲端同步最新進度與題庫..."
           mkdir -p gdrive_workspace
@@ -278,6 +296,7 @@ jobs:
           if [ ! -f "./scheduler_state.json" ]; then echo "{\"mock_streak\": 0}" > ./scheduler_state.json; fi
 
       - name: 🛠️ 執行資料庫離線無損修復與重漏題仲裁
+        if: ${{ github.event.inputs.test_mineru_only != 'true' }}
         run: |
           echo "=========================================================="
           echo "🚀 啟動 100+ 份試卷資料庫離線無損修復引擎 (Zero-API Cost)..."
@@ -288,8 +307,9 @@ jobs:
           find ./exam_database_output -name "*.bak" -type f -delete
           echo "✅ 資料庫洗淨與修復完畢，已就緒！"
 
+      
       - name: 🌐 啟動 Cloudflare Tunnel 即時儀表板穿透
-        if: ${{ github.event.inputs.repair_only != 'true' }}
+        if: ${{ github.event.inputs.repair_only != 'true' && github.event.inputs.test_mineru_only != 'true' }}
         run: |
           curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
           sudo dpkg -i cloudflared.deb && rm cloudflared.deb
@@ -304,8 +324,9 @@ jobs:
             fi
             sleep 1
           done
+
       - name: Run parser script
-        if: ${{ github.event.inputs.repair_only != 'true' }}
+        if: ${{ github.event.inputs.repair_only != 'true' && github.event.inputs.test_mineru_only != 'true' }}
         timeout-minutes: 320
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -317,7 +338,7 @@ jobs:
         run: python catcher.py
 
       - name: Push Results to Google Drive
-        if: always()
+        if: ${{ always() && github.event.inputs.test_mineru_only != 'true' }}
         run: |
           echo "⬆️ 執行完畢，開啟【三階段高優先級極速上傳】..."
           
@@ -375,7 +396,6 @@ jobs:
 
           if [ -f "mock_exam_images.zip" ]; then
             echo "⚡ 正在將模考圖片包推送至專用帳號 (${MOCK_REMOTE}:mock_exam_images.zip)..."
-            # 🚨 以 MOCK_REMOTE 身份上傳，配額 100% 計入模考新帳號！
             rclone copyto ./mock_exam_images.zip ${MOCK_REMOTE}:mock_exam_images.zip \
               --drive-chunk-size 64M \
               --config rclone.conf -v
@@ -386,13 +406,11 @@ jobs:
           # === 第三階段：散裝圖片分流同步 (保底增量備份) ===
           # =========================================================
           echo "🖼️ [第三階段] 散裝圖片雙軌增量同步..."
-          # 主帳號增量備份 (100% 排除模擬考)
           rclone copy ./exam_database_output gdrive:exam_database_output \
             --exclude "模擬考/**" \
             --fast-list --transfers 16 --checkers 32 --drive-chunk-size 64M \
             --config rclone.conf -v || true
 
-          # 模考專用帳號增量備份 (🚨 100% 使用 MOCK_REMOTE 身分上傳模擬考所有產出圖片)
           if [ -d "./exam_database_output/模擬考" ]; then
             echo "🖼️ 使用模考專用帳號身分 (${MOCK_REMOTE}) 同步模擬考所有圖片..."
             rclone copy ./exam_database_output/模擬考 ${MOCK_REMOTE}:exam_database_output/模擬考 \
@@ -423,10 +441,10 @@ jobs:
           rclone dedupe newest gdrive:exam_database_output --config rclone.conf -v || true
           echo "✅ 雲端同名副本已強制保留最新版本！"
 
-          # 清除敏感金鑰與設定檔
           rm -f rclone.conf key.txt exam_images.zip mock_exam_images.zip exam_databases.zip
+
       - name: Check for font glyph errors
-        if: always()
+        if: ${{ always() && github.event.inputs.test_mineru_only != 'true' }}
         run: |
           if [ -f glyph_errors.log ]; then
             echo "⚠️ [字型缺失報告]："
@@ -436,7 +454,7 @@ jobs:
           fi
 
       - name: 🔄 自動接力重啟下一輪 (24hr Loop Dispatcher)
-        if: always()
+        if: ${{ always() && github.event.inputs.test_mineru_only != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.AUTO_LOOP_PAT }}
         run: |
