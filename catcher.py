@@ -5715,47 +5715,96 @@ class ExamParser:
             GLOBAL_METRICS.set_stage("🎨 正在執行「跨頁縫合級」評分標準視覺萃取...")
             
             # =========================================================
-            # 【第一階段】：分頁批次掃描與附圖裁切
+            # 【第一階段】：MinerU 全卷高精解析優先（單次極速完成）
             # =========================================================
-            # 💡 [斷點續傳機制] 初始化題目卷的批次快取
-            stage1_cache_path = json_path.replace("_database.json", "_stage1_cache.json")
-            stage1_cache = {"processed_pages": [], "questions": []}
-            if os.path.exists(stage1_cache_path):
+            mineru_md_path = os.path.join(img_dir, "mineru_output.md")
+            
+            # 1. 優先嘗試全卷 MinerU 本地解析
+            if not os.path.exists(mineru_md_path) and not getattr(self, "_mineru_attempted", False):
+                self._mineru_attempted = True
+                mineru_res = self.extract_via_mineru(q_pdf, img_dir)
+                if mineru_res:
+                    with open(mineru_md_path, "w", encoding="utf-8") as mf:
+                        mf.write(mineru_res)
+
+            full_mineru_text = ""
+            if os.path.exists(mineru_md_path):
                 try:
-                    with open(stage1_cache_path, "r", encoding="utf-8") as f:
-                        stage1_cache = json.load(f)
-                    all_extracted_questions = stage1_cache.get("questions", [])
-                    logging.info(f"📂 [Stage 1 續傳] 載入已掃描的 {len(stage1_cache.get('processed_pages', []))} 頁題目進度！")
-                except Exception as e:
-                    logging.warning(f"讀取 Stage 1 快取失敗: {e}")
+                    with open(mineru_md_path, "r", encoding="utf-8") as mf:
+                        full_mineru_text = mf.read()
+                except Exception: pass
 
+            # 🚀【MinerU 旗艦通道】：若 MinerU 成功產出全卷 Markdown，單次向 AI 提取全卷所有題目
+            if full_mineru_text and len(full_mineru_text.strip()) > 100:
+                logging.info(f"⚡ [全卷單次極速結構化] MinerU 已提供全卷排版與 LaTeX，直接單次請求 AI 提取全卷題目！")
+                GLOBAL_METRICS.set_stage(f"⚡ 正在進行全卷題目結構化 (MinerU 純文字單次通道)")
+                
+                has_official_ans_flag = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
+                mineru_all_prompt = f"""
+                你是一位專業的台灣大考試卷數位化專家。
+                這是一份由 MinerU 高精度本地引擎轉出的【全卷試題 Markdown 文本】（包含完整的排版、表格與標準 LaTeX 數學公式）。
+                
+                學年度：{year}，科目：{subject}。
+                官方解答狀況：{'【有官方解答】' if has_official_ans_flag else '【無官方解答】'}。
+                
+                【任務】：
+                請仔細閱讀下方全卷 Markdown 文本，一次性提取出【全卷所有考題】（包含單選、多選、選填、非選計算題），並填入 PageExtraction 結構中。
+                
+                🚨【極重要規範】：
+                1. 請按照試卷題目順序，完整提取每一道題目，不得漏掉任何一題！
+                2. 選填題題號必須為大寫英文字母（如 A, B, C, D），且 options 必須為空列表 []。
+                3. 請完整保留文本中所有的 LaTeX 數學公式（如 \\frac{{...}}{{...}}、\\sqrt{{...}}）。
+                4. 題幹 question_text 嚴禁劇透或回填選填題答案！
+                
+                官方參考答案：
+                {ans_text}
+                
+                === 全卷高精 Markdown 文本 ===
+                {full_mineru_text}
+                """
+                
+                res_all, err_all = self.ai_manager.generate_with_retry(
+                    contents=[mineru_all_prompt],
+                    response_schema=PageExtraction,
+                    temperature=0.0,
+                    preferred_model="gemini-3.5-flash",
+                    enable_thinking=True,
+                    task_desc=f"{paper_tag} [MinerU全卷一次性結構化]"
+                )
+                
+                if res_all and res_all.get('questions'):
+                    for q_data in res_all['questions']:
+                        q_data['full_page_image_path'] = q_image_paths[0] if q_image_paths else ""
+                        q_data['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
+                        q_data['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
+                        q_data['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else ""
+                        q_data['question_page_image_paths'] = q_image_paths
+                        q_data['answer_page_image_paths'] = a_image_paths
+                        q_data['rubric_page_image_paths'] = rubric_image_paths
+                        q_data['school_name'] = school_name if exam_type == "SCHOOL" else ""
+                        q_data['image_paths'] = []
+                        q_data['_cropped_pil_images'] = []
+                        all_extracted_questions.append(q_data)
+                    logging.info(f"🎉 [MinerU 單次結構化大獲成功] 全卷共 {len(all_extracted_questions)} 題一次性精確收錄完畢！")
+
+            # ---------------------------------------------------------
+            # 🛡️ 巧妙阻斷：若 MinerU 已經抓完題目，直接讓 pages = []！
+            # 這樣下方的 for 迴圈直接跑 0 次（自動跳過），其內部幾百行程式碼完全不需要動任何縮排！
+            # ---------------------------------------------------------
             pages = []
-            # 🚨 剛性範圍約束：題目擷取【嚴格鎖定】在當前試卷的 q_page_idxs 範圍內，絕不跨入詳解或下一份試卷！
-            allowed_q_set = set(q_page_idxs) if 'q_page_idxs' in locals() else set(range(min(len(doc), mock_sol_page_indices[0] if (is_combined_pdf and mock_sol_page_indices) else len(doc))))
-            for page_num in range(len(doc)):
-                if page_num not in allowed_q_set:
-                    continue
-                if is_combined_pdf and page_num in ans_page_indices:
-                    continue
-
-                page = doc[page_num]
-                raw_page_text = page.get_text("text")
-
-                # 2. 🚨 調用智能分類器，全面攔截封面、目錄、知識彙整與非題目的解答頁
-                p_type = self.classify_page_type(raw_page_text, page_num, len(doc))
-                if p_type in ["COVER", "TOC", "SUMMARY"]:
-                    logging.info(f"  -> ⏭️ [{p_type} 自動過濾] 第 {page_num + 1} 頁判定為【{p_type} (封面/目錄/重點摘要)】，自動排除！")
-                    continue
-                elif p_type == "SOLUTION":
-                    logging.info(f"  -> ⏭️ [詳解頁自動排除] 第 {page_num + 1} 頁判定為【SOLUTION (參考詳解)】，不作為題目擷取。")
-                    continue
-                    
-                pages.append(page_num)
+            if not all_extracted_questions:
+                allowed_q_set = set(q_page_idxs) if 'q_page_idxs' in locals() else set(range(len(doc)))
+                for page_num in range(len(doc)):
+                    if page_num not in allowed_q_set: continue
+                    if is_combined_pdf and page_num in ans_page_indices: continue
+                    raw_page_text = doc[page_num].get_text("text")
+                    p_type = self.classify_page_type(raw_page_text, page_num, len(doc))
+                    if p_type in ["COVER", "TOC", "SUMMARY", "SOLUTION"]: continue
+                    pages.append(page_num)
 
             page_batch_size = 2 if is_stem else 3
 
             for b_idx in range(0, len(pages), page_batch_size):
-
                 check_global_timeout()
                 batch_pages = pages[b_idx : b_idx + page_batch_size]
                 
@@ -6438,15 +6487,23 @@ class ExamParser:
                         lines = [l for l in p_txt.splitlines() if not any(k in l for k in ["作答注意事項", "作答示例", "例：", "答案卡第"])]
                         p_txt = "\n".join(lines)
                     
-                    found_nums = re.findall(r'(?:^|\n)\s*(?:第?\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、\s)])(?!\d)', p_txt)
-                    for fn in found_nums:
-                        n_str = fn[0] or fn[1]
-                        if n_str:
-                            val = int(n_str)
-                            if val <= 80: # 正常台灣高中考卷題號範圍
-                                paper_physical_q_nums.add(str(val))
-                                if val > max_paper_q_val:
-                                    max_paper_q_val = val
+                    # 依考科設定合理題號天花板 (數學絕對不超過 30 題；自然/社會不超過 80 題)
+                    max_allowed_num_limit = 30 if any(k in clean_subj_name for k in ["數", "math"]) else 80
+
+                    for line in p_txt.splitlines():
+                        line_clean = line.strip()
+                        # 排除配分干擾（例如「共 50 分」、「佔 50%」）
+                        if any(bad in line_clean for bad in ["分", "％", "%", "滿分", "配分", "總計"]):
+                            continue
+                        found_nums = re.findall(r'(?:^|\s)(?:第?\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、\s)])(?!\d)', line_clean)
+                        for fn in found_nums:
+                            n_str = fn[0] or fn[1]
+                            if n_str:
+                                val = int(n_str)
+                                if 1 <= val <= max_allowed_num_limit:
+                                    paper_physical_q_nums.add(str(val))
+                                    if val > max_paper_q_val:
+                                        max_paper_q_val = val
 
                 logging.info(f"📑 [題目卷真理校驗] 題目卷文字層偵測到實體最大題號為: 第 {max_paper_q_val} 題 (題號集合: {sorted([int(x) for x in paper_physical_q_nums])})")
 
