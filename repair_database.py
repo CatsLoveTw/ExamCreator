@@ -23,7 +23,8 @@ GHOST_KEYWORDS_EXTENDED = [
     "不適用（此頁為試題封面", "題目內容未提供", "選項內容未提供", "請補充",
     "作答示例", "第壹部分作答示例", "劃記方式之說明", "例：若第", "無法從提供的影像中",
     "重點摘要", "觀念摘要", "公式整理", "單元重點", "學習重點", "知識綱要", 
-    "單元目錄", "章節索引", "目次", "參考詳解", "試題詳解", "參考答案暨詳解"
+    "單元目錄", "章節索引", "目次", "參考詳解", "試題詳解", "參考答案暨詳解",
+    "詳見題目卷", "詳見試卷", "見題目卷"
 ]
 
 def is_phantom_table_or_cover(q: dict) -> bool:
@@ -462,15 +463,25 @@ def harmonize_group_shared_context(questions: List[dict]) -> List[dict]:
 
 def heal_question_types(questions: List[dict]) -> List[dict]:
     """
-    題型自癒修正器：
-    非選擇題/手寫計算證明題（沒有 options 選項，或 options 為空）
-    若被誤標記為「混合題」，強制扶正為「簡答題」。
+    全能題型自癒修正器：
+    1. 國寫考科一律強制為「簡答題」
+    2. 沒有選項 (options 為空) 卻被標為單選題/多選題/混合題者，一律扶正為「簡答題」
     """
     for q in questions:
         opts = q.get("options", []) or []
         q_type = str(q.get("question_type", "")).strip()
-        if q_type == "混合題" and len(opts) == 0:
+        sub = str(q.get("sub_subject", "")).strip()
+
+        # 🚨 國寫考科絕對不可能有多選或單選
+        if "國寫" in sub:
             q["question_type"] = "簡答題"
+            q["options"] = []
+            continue
+
+        # 🚨 沒有選項卻標多選/單選者，一律扶正為簡答題
+        if len(opts) == 0 and q_type in ["混合題", "單選題", "多選題"]:
+            q["question_type"] = "簡答題"
+            
     return questions
 
 # -------------------------------------------------------------------------
