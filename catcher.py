@@ -1786,7 +1786,14 @@ class LiveDashboardMetrics:
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    if "runs" not in data: data = {"runs": []}
+                    if "runs" not in data: 
+                        data = {"runs": []}
+                    else:
+                        # 🧹 自動過濾歷史中「0題0卷」的無效崩潰紀錄，只保留真正有產出的工作階段
+                        data["runs"] = [
+                            r for r in data["runs"] 
+                            if r.get("completed_questions", 0) > 0 or r.get("completed_papers", 0) > 0
+                        ]
                     return data
             except Exception: pass
         return {"runs": []}
