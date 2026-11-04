@@ -808,32 +808,21 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
                 should_purge = True
                 purge_reason = "含有已淘汰之『理組/文組/高三』污染標籤，強制清理重跑"
 
-            # 🚨 自動攔截清理：模考若由大模型自由推導（含『同學們，我們來深入解析』），判定為未載入詳解本之舊版本，強制銷毀重跑！
-            if is_mock_or_school and not should_purge:
-                try:
-                    with open(full_p, "r", encoding="utf-8") as jf:
-                        d_check = json.load(jf)
-                    if isinstance(d_check, list) and len(d_check) > 0:
-                        first_sol = str(d_check[0].get("detailed_solution", ""))
-                        if "同學們，我們來深入解析" in first_sol or "同學們，我們來" in first_sol:
-                            should_purge = True
-                            purge_reason = "模考誤用 AI 自由發揮模板，未載入官方真實詳解本，強制清理重跑！"
-                except Exception:
-                    pass
-
             # 讀取並檢驗內容是否含有詳解
             try:
                 with open(full_p, "r", encoding="utf-8") as jf:
                     data = json.load(jf)
                 if isinstance(data, list) and len(data) > 0:
                     empty_sol_count = sum(1 for q in data if len(str(q.get("detailed_solution", "")).strip()) < 20)
-                    # 🚨 只要超過 25% 的題目完全沒有詳解，即判定為偽完工空殼，必須刪除讓 catcher.py 重跑！
-                    if empty_sol_count >= len(data) * 0.25:
-                        should_purge = True
-                        purge_reason = f"含有 {empty_sol_count}/{len(data)} 題無詳解空殼題目"
-                    else:
-                        # 情況 A：若檔名遺失出版社/次數標籤，但題目本身有詳解，則不刪除，交由後續重新命名歸位！
-                        pass
+                    # 🚨 若題目缺少詳解：不刪除題目結構，直接轉移為 partial 讓 catcher.py 接力解題！
+                    if empty_sol_count > 0:
+                        partial_p = full_p.replace("_database.json", "_partial_database.json")
+                        with open(partial_p, "w", encoding="utf-8") as pf:
+                            json.dump(data, pf, ensure_ascii=False, indent=4)
+                        os.remove(full_p)
+                        register_cloud_purge(full_p)
+                        logging.info(f"🔄 [空殼自癒降級] 檔案 {f} 缺少 {empty_sol_count} 題詳解，已安全轉為 partial 待補齊，不再重複銷毀！")
+                        continue
                 else:
                     should_purge = True
                     purge_reason = "空白或損毀之 JSON 檔案"
@@ -841,32 +830,16 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
                 should_purge = True
                 purge_reason = "無法讀取之損毀檔案"
 
-            # 執行銷毀並登記雲端清除（包含對應的 images 圖檔資料夾）
+            # 只有在完全空白或檔案損毀時才進行物理銷毀
             if should_purge:
                 try:
-                    # 1. 刪除錯誤的 JSON 資料庫
                     os.remove(full_p)
                     register_cloud_purge(full_p)
-                    
-                    # 2. 🚨 連坐刪除對應的 images 圖檔目錄，避免殘留切錯的舊圖或孤兒圖檔
-                    spec_base = clean_f.replace("_database.json", "")
-                    possible_img_dirs = [
-                        os.path.join(root, "images", spec_base),
-                        os.path.join(root, spec_base),
-                        os.path.join(DATABASE_DIR, "模擬考", "images", spec_base)
-                    ]
-                    for img_d in possible_img_dirs:
-                        if os.path.exists(img_d):
-                            import shutil
-                            shutil.rmtree(img_d, ignore_errors=True)
-                            register_cloud_purge(img_d)
-                            logging.info(f"🖼️ [同步清理圖檔] 已徹底刪除對應之舊圖片目錄：{os.path.basename(img_d)}")
-
                     purged_count += 1
-                    logging.info(f"🗑️ [安全淨化銷毀] 已刪除模擬考污染檔案：{f} (原因: {purge_reason})，並已登記雲端清除！")
+                    logging.info(f"🗑️ [損毀清理] 已刪除損毀檔案：{f} (原因: {purge_reason})")
                 except Exception as e:
                     logging.warning(f"無法刪除檔案 {full_p}: {e}")
-
+                    
     return protected_official_count, purged_count
 
 # -------------------------------------------------------------------------
