@@ -6462,21 +6462,34 @@ class ExamParser:
                     if match_letter: return match_letter.group(1)
                     return q_num_str
 
+                def has_stub_text(q_obj: dict) -> bool:
+                    """檢驗題目是否為空殼假題幹"""
+                    txt = str(q_obj.get("question_text", "")).strip()
+                    return any(bad in txt for bad in ["詳見題目卷", "詳見試卷", "見題目卷", "題目內容缺失"]) or len(txt) < 8
+
                 def is_question_covered(expected_base: str, extracted_questions: list) -> bool:
                     expected_base = str(expected_base).strip()
                     for q_item in extracted_questions:
                         q_num = str(q_item.get("question_number", "")).strip()
-                        if q_num == expected_base: return True
+                        if q_num == expected_base:
+                            # 🚨 關鍵自癒：如果題幹是空殼（詳見題目卷），視為未完成，強制排入補漏清單！
+                            if has_stub_text(q_item):
+                                return False
+                            return True
                         range_match = re.match(r'^(\d+)-(\d+)$', q_num)
                         if range_match:
                             try:
                                 start, end = int(range_match.group(1)), int(range_match.group(2))
                                 val = int(expected_base)
-                                if start <= val <= end: return True
+                                if start <= val <= end:
+                                    if has_stub_text(q_item): return False
+                                    return True
                             except ValueError: pass
                         if q_num.startswith(expected_base) and len(q_num) > len(expected_base):
                             next_char = q_num[len(expected_base)]
-                            if not next_char.isalnum(): return True
+                            if not next_char.isalnum():
+                                if has_stub_text(q_item): return False
+                                return True
                     return False
 
                 def get_official_answer_for_base(base_num: str, ans_dict: dict) -> str:
@@ -7309,12 +7322,22 @@ class ExamParser:
                 q_num = q.get("question_number")
                 q_key = get_unique_q_key(q)
                 if q_key in partial_map:
+                    cached_q = partial_map[q_key]
+                    
+                    # 🚨 題幹自癒手術：若快取中是空殼題幹，但現在題目卷抓到了真實題幹，只更新題幹與圖片，保留詳解！
+                    if any(bad in str(cached_q.get("question_text", "")) for bad in ["詳見題目卷", "詳見試卷", "見題目卷"]):
+                        if len(str(q.get("question_text", "")).strip()) >= 8 and not any(bad in str(q.get("question_text", "")) for bad in ["詳見題目卷", "詳見試卷"]):
+                            logging.info(f"🎯 [題幹真題換血] 題號 {q_num} 已成功將『詳見題目卷』替換為題目卷真實題幹！")
+                            cached_q["question_text"] = q["question_text"]
+                            if q.get("options"): cached_q["options"] = q["options"]
+                            if q.get("image_paths"): cached_q["image_paths"] = q["image_paths"]
+
                     logging.info(f"⏭️  題號 {q_num} ({q.get('question_type')}) 已存在暫存詳解，自動加載成果。")
-                    q.update(partial_map[q_key])
+                    q.update(cached_q)
                     all_final_questions.append(q)
                 else:
                     task_queue.append({"q_data": q, "critique": "", "retry_count": 0, "recheck_count": 0})
-
+                    
         def process_question_chunk(current_batch, batch_size):
             """處理單一批次題目的獨立執行緒函式"""
             successful_items = []
@@ -8208,10 +8231,11 @@ class ExamParser:
                 target_min = min_v
                 break
 
-        # 只要題數少於提取題數，或者少於該考科法定最低題數（如 43 < 65），【強制維持 partial】！
-        # 🚨 剛性門檻：題數不足、或有任何題目沒有詳細解答者，【強制維持 partial】，絕不產生空殼 database.json！
+        # 🚨 剛性門檻：題數不足、有空白詳解、或題幹殘留「詳見題目卷」者，【強制維持 partial】，下次自動補齊真題！
         has_empty_sols = any(len(str(q.get("detailed_solution", "")).strip()) < 20 for q in valid_solved_questions)
-        is_partial = (len(valid_solved_questions) < len(all_extracted_questions)) or (len(valid_solved_questions) < target_min) or has_empty_sols
+        has_stub_questions = any(any(bad in str(q.get("question_text", "")) for bad in ["詳見題目卷", "詳見試卷", "題目內容缺失"]) for q in valid_solved_questions)
+        
+        is_partial = (len(valid_solved_questions) < len(all_extracted_questions)) or (len(valid_solved_questions) < target_min) or has_empty_sols or has_stub_questions
         
         valid_solved_questions = clean_paths(valid_solved_questions)
         for q in valid_solved_questions:
