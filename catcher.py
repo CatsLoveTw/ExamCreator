@@ -8202,8 +8202,10 @@ class ExamParser:
                 break
 
         # 只要題數少於提取題數，或者少於該考科法定最低題數（如 43 < 65），【強制維持 partial】！
-        is_partial = (len(valid_solved_questions) < len(all_extracted_questions)) or (len(valid_solved_questions) < target_min)
-
+        # 🚨 剛性門檻：題數不足、或有任何題目沒有詳細解答者，【強制維持 partial】，絕不產生空殼 database.json！
+        has_empty_sols = any(len(str(q.get("detailed_solution", "")).strip()) < 20 for q in valid_solved_questions)
+        is_partial = (len(valid_solved_questions) < len(all_extracted_questions)) or (len(valid_solved_questions) < target_min) or has_empty_sols
+        
         valid_solved_questions = clean_paths(valid_solved_questions)
         for q in valid_solved_questions:
             q["academic_year"] = standard_academic_year
