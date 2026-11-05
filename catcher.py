@@ -8261,24 +8261,16 @@ class ExamParser:
         GLOBAL_METRICS.update_exam_progress(GLOBAL_METRICS.current_paper, len(valid_solved_questions), len(all_extracted_questions), final_status)
 
         if is_partial:
-            # 題數未齊全時寫入 partial，但絕對保留現有的 database.json，不加入雲端刪除清單
+            # 題數未滿時只寫入 partial，清晰回報進度
             with open(partial_json_path, "w", encoding="utf-8") as f:
                 json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
-            # 🚨 若題目已解出大部分（大於等於 8 題），同步保留/更新為正式庫，避免雲端完全沒有可用資料庫
-            if len(valid_solved_questions) >= 8 and not os.path.exists(json_path):
-                with open(json_path, "w", encoding="utf-8") as f:
-                    json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
-            logging.warning(f"💾 [部分完成存檔] [{year} {subject}] 已儲存 {len(valid_solved_questions)} 題進度至 partial，現存資料庫予以保留不刪除。")
-
-            # 🚨 核心阻斷：若是因為每日額度耗盡 (RPD) 而中斷，保存進度後立刻向上拋出異常，終止後續考卷盲跑！
-            if rpd_hit:
-                logging.critical(f"🛑 [全域額度耗盡] 考卷 {spec_name} 進度已落盤，觸發全域配額耗盡保護，準備進入 GHA 上傳！")
-                raise RPDExhaustedException("每日 API 金鑰額度皆已耗盡。")
+            logging.warning(f"⏳ [未完工暫存] [{year} {subject}] 目前完成 {len(valid_solved_questions)}/{len(all_extracted_questions)} 題，已存入 partial，下次繼續補解！")
         else:
-            # 全卷 100% 每題都有完美詳解，才正式寫入資料庫並清除 Raw 快取
+            # 全卷 100% 完工，才寫入正式 database.json
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(valid_solved_questions, f, ensure_ascii=False, indent=4)
             logging.info(f"🎉 [{year} {subject}] 全部 {len(valid_solved_questions)} 題皆已 100% 高品質完成解析並儲存：{json_path}")
+            logging.info(f"✅ [{year} {subject}] 100% 完工！已正式儲存至 {json_path}")
             
             # 🚨 即時紀錄考卷類型，更新跨 Run 3:1 繼承計數器
             record_completed_exam_to_scheduler(exam_type)
@@ -8292,7 +8284,7 @@ class ExamParser:
                     except Exception:
                         pass
                         
-            # ☁️ 2. 登記待清理之雲端暫存檔，稍後於 GitHub Action 結尾統一高速批次銷毀（零等待、不洩漏路徑）
+            # ☁️ 2. 登記待清理之雲端暫存檔
             rel_parent = type_folder.replace("\\", "/")
             for tmp_name in [os.path.basename(partial_json_path), os.path.basename(raw_extracted_json_path)]:
                 cloud_target = f"gdrive:exam_database_output/{rel_parent}/{tmp_name}"
@@ -8488,9 +8480,9 @@ def auto_find_exam_sets(directories: List[str]) -> List[dict]:
             elif league_match:
                 raw_l = league_match.group(1)
                 org_map = {
-                    "北北基": "北模", "台北區": "北模", "臺北區": "北模", "新北基": "北模", "北區": "北模",
-                    "台中區": "中模", "台中市": "中模", "臺中市": "中模", "中區": "中模",
-                    "高雄區": "南模", "南區": "南模",
+                    "北模": "北模", "北北基": "北模", "台北區": "北模", "臺北區": "北模", "新北基": "北模", "北區": "北模",
+                    "中模": "中模", "台中區": "中模", "台中市": "中模", "臺中市": "中模", "中區": "中模",
+                    "南模": "南模", "高雄區": "南模", "南區": "南模",
                     "竹模": "竹模", "竹苗區": "竹模", "新竹區": "竹模",
                     "全模": "全模", "全區": "全模", "全國高中": "全模", "全國公私立": "全模", "公私立高級中學": "全模", "全國聯合": "全模", "公私立高中": "全模", "各公立高中": "全模"
                 }
