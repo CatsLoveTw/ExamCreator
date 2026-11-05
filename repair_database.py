@@ -825,14 +825,26 @@ def quarantine_and_purge_corrupted_mocks() -> Tuple[int, int]:
                     data = json.load(jf)
                 if isinstance(data, list) and len(data) > 0:
                     empty_sol_count = sum(1 for q in data if len(str(q.get("detailed_solution", "")).strip()) < 20)
-                    # 🚨 若題目缺少詳解：不刪除題目結構，直接轉移為 partial 讓 catcher.py 接力解題！
-                    if empty_sol_count > 0:
-                        partial_p = full_p.replace("_database.json", "_partial_database.json")
-                        with open(partial_p, "w", encoding="utf-8") as pf:
-                            json.dump(data, pf, ensure_ascii=False, indent=4)
+                    
+                    # 🚨 1. 若 100% 全為無詳解空殼：直接物理銷毀，絕不留戀轉 partial，阻斷死循環！
+                    if empty_sol_count == len(data):
+                        should_purge = True
+                        purge_reason = f"全卷 {empty_sol_count}/{len(data)} 題均無詳解 (純空殼)，直接清除重跑"
+                    
+                    # 🚨 2. 若僅部分無詳解：直接轉移為【標準規範檔名】的 partial，避免被後續異名清理自殘誤殺！
+                    elif empty_sol_count > 0:
                         os.remove(full_p)
                         register_cloud_purge(full_p)
-                        logging.info(f"🔄 [空殼自癒降級] 檔案 {f} 缺少 {empty_sol_count} 題詳解，已安全轉為 partial 待補齊，不再重複銷毀！")
+                        
+                        # 取得該考卷標準規範化名稱
+                        meta_info = standardize_exam_metadata(str(clean_f), "MOCK_GSAT" if "學測" in clean_f else "MOCK_AST", clean_f)
+                        canon_target_dir = os.path.join(DATABASE_DIR, meta_info["type_folder"])
+                        os.makedirs(canon_target_dir, exist_ok=True)
+                        canon_partial_p = os.path.join(canon_target_dir, f"{meta_info['spec_name']}_partial_database.json")
+                        
+                        with open(canon_partial_p, "w", encoding="utf-8") as pf:
+                            json.dump(data, pf, ensure_ascii=False, indent=4)
+                        logging.info(f"🔄 [部分缺失轉移] 檔案 {f} 缺少 {empty_sol_count} 題，已標準化轉存至 {os.path.basename(canon_partial_p)} 待補齊！")
                         continue
                 else:
                     should_purge = True
