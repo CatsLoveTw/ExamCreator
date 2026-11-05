@@ -245,7 +245,19 @@ jobs:
           if [ -f "./gdrive_workspace/exam_databases.zip" ]; then
             echo "⚡ 找到題庫高速包 exam_databases.zip，正在秒級解壓縮..."
             unzip -q -o "./gdrive_workspace/exam_databases.zip" -d ./
-            echo "✅ 題庫資料庫已瞬間恢復完成！"
+            
+            # 🚨 立即破除殭屍復活：刪除 zip 內殘留的舊版扁平空殼與異名檔案
+            echo "🧹 正在清理 zip 內殘留的舊版扁平空殼檔案..."
+            find exam_database_output -maxdepth 2 -type f \( \
+              -name "*_學測模擬_國文_database.json" -o \
+              -name "*_學測模擬_數學A_database.json" -o \
+              -name "*_學測模擬_國寫_database.json" -o \
+              -name "*_分科模擬_地理_database.json" -o \
+              -name "*_分科模擬_公民與社會_database.json" -o \
+              -name "*_全模_全期_*_partial_database.json" \
+            \) -delete 2>/dev/null || true
+            
+            echo "✅ 題庫資料庫已瞬間恢復並消滅舊版殭屍檔！"
           fi
 
           # 3. ⚡ 優先解壓大考圖片高速包 exam_images.zip
