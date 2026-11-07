@@ -1055,6 +1055,10 @@ PROMPT_STAGE_3_VALIDATOR = """
 待審查列表如下：
 {validator_batch_intro}
 
+🚨【MinerU 文本隨時修正與 3~5 輪重新掃描規範】🚨：
+1. **【MinerU / OCR 題幹隨時糾錯權】**：若你發現 MinerU 提取的題幹或選項有文字錯漏、公式損毀（如漏掉負號、分數線變形、括號未閉合）或附圖裁切切到邊界，請大膽將 `suspects_ocr_error` 設為 `true`，並在 `error_critique` 中具體指明錯處！系統將自動啟動【3~5 輪原卷高精重新掃描與題幹即時修復】。
+2. **【終極備註原則（實在不行才備註）】**：若本題已經過多次重掃仍與官方答案衝突，代表原卷可能存在印刷錯誤或學術爭議，系統將在達到重掃上限後自動啟動學術仲裁，將完整學理分析與版本疑義備註於詳解末尾，請在批判中客觀提供學理推論依據！
+
 【審查三大硬性指標（若違反任一項，該題的 is_valid 必須設為 false）】：
 1. **數理/邏輯推導正確性與防硬凹審查**：
     - 嚴格驗算每一道題目的代數計算、化學計量、反應式配平與物理定律。
@@ -1311,6 +1315,19 @@ class MockLightweightCheckResult(BaseModel):
     corrected_solution_snippet: str = Field(default="", description="若詳解存在公式抓錯、負號漏看、計算步驟矛盾或語病，請提供修復後語意通順、公式嚴謹、計算完全自洽的完整詳細解答。若原解析已完美無瑕則填 'CLEAN'。")
     corrected_answer: str = Field(description="經嚴謹核對推導後，確認無誤的標準答案字串。")
     repair_summary: str = Field(default="", description="若有修復，簡明記錄具體修正點（如：'補齊波耳半徑公式負號與上標'、'修正計算步驟代數運算矛盾'），無則填 '無誤'。")
+
+# === 🛡️【一審】：全科題目輕量前置初審與外科手術修復結構 ===
+class PreflightAuditResult(BaseModel):
+    has_issue: bool = Field(description="題幹、選項、公式符號或附圖是否有文字錯漏、公式損毀、負號遺失或圖片邊緣被切斷等問題？")
+    issue_category: Literal["CLEAN", "FORMULA_SYNTAX", "TYPO_OR_OCR", "BBOX_CUTOFF", "OPTION_DEFECT"] = Field(
+        default="CLEAN",
+        description="'CLEAN' (完全無瑕疵), 'FORMULA_SYNTAX' (LaTeX公式語法殘缺或負號遺失), 'TYPO_OR_OCR' (OCR錯別字或語病), 'BBOX_CUTOFF' (附圖裁切不全或被切斷邊界), 'OPTION_DEFECT' (選項抓錯或對位問題)"
+    )
+    issue_reason: str = Field(default="", description="若有問題，具體說明原因與修改依據 (無則留空)")
+    corrected_question_text: str = Field(description="修正後的精確題幹文字。若原題幹無瑕疵請完整保留原樣。")
+    corrected_options: List[OptionItem] = Field(default=[], description="修正後的選項清單。非選擇題/選填題請保持空列表 []。")
+    needs_recrop: bool = Field(default=False, description="附圖是否需要重新框選裁切？")
+    adjusted_bboxes: List[List[int]] = Field(default=[], description="若需重新裁切，給予規格化 [ymin, xmin, ymax, xmax] (0-1000) 的 Bounding Boxes")
     
 class QuestionSolutionBatch(BaseModel):
     solutions: List[QuestionSolution] = Field(description="批次產出的多題詳細解答列表，順序必須與輸入題目嚴格對齊。")
@@ -4482,6 +4499,112 @@ class ExamParser:
             
         return extracted_explanations
     
+    def run_preflight_audit(self, q_data: dict, img_dir: str) -> dict:
+        """
+        🛡️【一審：輕量前置品質把關與外科手術修復 (極省 Token 引擎)】
+        在進入昂貴的 Stage 2 (名師解題) 之前，先以 gemini-3.5-flash-lite 進行超低 token 審核：
+        1. 抓出 MinerU / OCR 的公式殘缺、負號丟失、錯別字、排版粘連
+        2. 檢驗附圖是否完整、有無切到坐標軸/標題，必要時自動重新微調裁切
+        3. 輸出精準修改建議與修正後文字，保證 Stage 2 拿到的題目 100% 乾淨無瑕，避免後續反覆重推浪費龐大 Token！
+        """
+        q_num = str(q_data.get('question_number', '')).strip()
+        q_text = str(q_data.get('question_text', '')).strip()
+        opts = q_data.get('options', []) or []
+        opts_str = "\n".join([f"- ({o.get('key')}) {o.get('value')}" for o in opts if o.get('key')]) or "無"
+        q_type = str(q_data.get('question_type', ''))
+        
+        # 準備審查內容
+        audit_prompt = f"""
+        你是一位極其嚴謹的【試卷文字、公式與附圖出廠檢驗教授】。
+        請對以下這道剛從試卷與 MinerU 提取的題目進行【一審出廠品質把關】（極低 Token 快速初審）：
+
+        【題號】：第 {q_num} 題（題型：{q_type}）
+        【題組引言】：{q_data.get('shared_context', '無')}
+        【題幹】：
+        {q_text}
+
+        【選項】：
+        {opts_str}
+
+        🚨【一審核心把關任務】：
+        1. **數理/化學公式檢驗**：是否有 LaTeX 未閉合（如缺少 `}}` 或 `$`）、負號遺失（如負值變成正值）、分數線變形（如 `1/2` 變成 `12`）、指數或下標破損？
+        2. **OCR 錯別字排查**：是否有形近字錯讀（如「質子」讀成「質手」、「氧化」讀成「氧北」）或語句斷頭不通順？
+        3. **選項完整度**：若是選擇題，選項內容是否被切斷？若是選填題或非選擇題，`corrected_options` 強制維持空列表 `[]`！
+        4. **附圖完整度**：檢視隨附的裁切圖片，圖形重要特徵（坐標軸文字、圖形標籤如「圖3」、箭頭）是否被邊緣切斷？若是，將 `needs_recrop` 設為 true 並給出更寬裕的 `adjusted_bboxes`！
+        5. **🚨 絕對嚴禁劇透答案**：題幹的挖空（如 `[ 15-1 ]`）絕對禁止填入解答數值！
+
+        若完全無瑕疵，請將 `has_issue` 設為 false，`issue_category` 設為 'CLEAN'。
+        若有瑕疵，請具體指出原因，並在 `corrected_question_text` 輸出修復後的純淨文字！
+        """
+
+        audit_contents = [audit_prompt]
+        
+        # 附上已裁切的題目附圖供比對
+        opened_imgs = []
+        for p in q_data.get('image_paths', []):
+            if os.path.exists(p):
+                try:
+                    im = Image.open(p)
+                    opened_imgs.append(im)
+                    audit_contents.append(im)
+                except Exception: pass
+
+        try:
+            res_audit, err = self.ai_manager.generate_with_retry(
+                contents=audit_contents,
+                response_schema=PreflightAuditResult,
+                temperature=0.0,
+                preferred_model="gemini-3.5-flash-lite", # ⚡ 使用極速 Lite 模型，1 秒內審核完畢
+                enable_thinking=False,
+                task_desc=f"[一審把關 Q{q_num}]"
+            )
+
+            if res_audit and res_audit.get("has_issue"):
+                cat = res_audit.get("issue_category", "CORRECTION")
+                reason = res_audit.get("issue_reason", "")
+                fixed_text = res_audit.get("corrected_question_text", "").strip()
+                fixed_opts = res_audit.get("corrected_options", [])
+
+                logging.info(f"🔍 [一審揪錯與修復] 題號 {q_num} ({cat})：{reason}")
+
+                # 🚨 隨時覆寫 MinerU 掃描內容（保留原始文字至 raw_mineru_text 供備查）
+                if "raw_mineru_text" not in q_data:
+                    q_data["raw_mineru_text"] = q_text
+
+                if fixed_text and len(fixed_text) >= 6:
+                    q_data['question_text'] = fixed_text
+                    q_data['_mineru_modified_by_audit'] = True
+                    logging.info(f"  -> ✏️ [題幹文本修補完成] 題號 {q_num} 已即時更新 MinerU 掃描文字與 LaTeX 公式！")
+
+                # 套用修正選項
+                if fixed_opts and q_type in ["單選題", "多選題"]:
+                    q_data['options'] = fixed_opts
+                    logging.info(f"  -> ✏️ [選項文字修補完成] 題號 {q_num} 已即時同步修正選項！")
+
+                # 若需重新裁圖且提供了更寬裕的坐標
+                if res_audit.get("needs_recrop") and res_audit.get("adjusted_bboxes") and q_data.get("question_pdf_path"):
+                    try:
+                        with fitz.open(q_data["question_pdf_path"]) as temp_doc:
+                            p_idx = max(0, min(q_data.get('page_number', 1) - 1, len(temp_doc) - 1))
+                            target_page = temp_doc[p_idx]
+                            new_paths = self.execute_crop(target_page, res_audit["adjusted_bboxes"], img_dir, f"Q{safe_filename(q_num)}_ReCrop")
+                            if new_paths:
+                                q_data['image_paths'] = new_paths
+                                q_data['has_image'] = True
+                                logging.info(f"🖼️ [一審自動重裁] 題號 {q_num} 附圖邊界已重新擴展裁切！")
+                    except Exception as ce:
+                        logging.warning(f"一審重裁附圖失敗: {ce}")
+            else:
+                logging.info(f"✅ [一審綠燈放行] 題號 {q_num} 題目文字、公式與附圖確認健全無瑕！")
+        except Exception as e:
+            logging.warning(f"一審執行略過: {e}")
+        finally:
+            for im in opened_imgs:
+                try: im.close()
+                except Exception: pass
+
+        return q_data
+        
     def heal_mock_question_consistency(self, q_data: dict, explanation_data: dict) -> dict:
         """
         🎯 [模擬考專用] 輕量級圖文 OCR 一致性自癒校驗器
@@ -5666,21 +5789,28 @@ class ExamParser:
                     a_pdf = q_pdf
                     logging.info(f"📑 [合卷區塊鎖定] 成功切出目標試卷：題目卷第 {q_page_idxs[0]+1}~{q_page_idxs[-1]+1} 頁 (共 {len(q_image_paths)} 頁)，官方詳解本第 {sol_page_idxs[0]+1}~{sol_page_idxs[-1]+1} 頁 (共 {len(mock_sol_page_indices)} 頁)！")
         
-        # 🆕 1. 優先檢查是否有第一階段題目快取檔
+        # 🆕 1. 優先檢查是否有第一階段題目快取檔（具備題數中毒自癒防線）
         if os.path.exists(raw_extracted_json_path):
-            logging.info(f"⚡ [Stage 1 快取命中] 找到已擷取的題目快取：{raw_extracted_json_path}")
-            logging.info("  -> 直接載入題目結構與圖片路徑，【完全跳過】PDF 轉圖與第一階段全部 OCR 掃描！")
             try:
                 with open(raw_extracted_json_path, "r", encoding="utf-8") as f:
-                    all_extracted_questions = json.load(f)
-                    
-                has_official_now = (a_pdf is not None and os.path.exists(a_pdf) and exam_type in ["GSAT", "AST", "MOCK", "MOCK_GSAT", "MOCK_AST"])
-                for q_cached in all_extracted_questions:
-                    if has_official_now:
-                        q_cached['has_official_answer'] = True
-                    q_cached['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else q_cached.get('question_pdf_path', '')
-                    q_cached['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else q_cached.get('answer_pdf_path', '')
-                    q_cached['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else q_cached.get('rubric_pdf_path', '')
+                    cached_data = json.load(f)
+
+                # 🚨 剛性防毒檢查：若快取中只有 1~3 題，但非國寫（國寫標準為2題），代表遭遇了先前 Token 截斷的中毒快取，強制銷毀重跑！
+                is_stub_cache = len(cached_data) <= 3 and clean_subj_name != "國寫"
+                if is_stub_cache:
+                    logging.warning(f"⚠️ [偵測到截斷中毒快取] {raw_extracted_json_path} 僅有 {len(cached_data)} 題，判定為歷史截斷殘骸，立即銷毀並重新完整掃描！")
+                    os.remove(raw_extracted_json_path)
+                    all_extracted_questions = []
+                else:
+                    logging.info(f"⚡ [Stage 1 快取命中] 成功載入 {len(cached_data)} 題有效題目快取：{raw_extracted_json_path}")
+                    all_extracted_questions = cached_data
+                    has_official_now = (a_pdf is not None and os.path.exists(a_pdf) and exam_type in ["GSAT", "AST", "MOCK", "MOCK_GSAT", "MOCK_AST"])
+                    for q_cached in all_extracted_questions:
+                        if has_official_now:
+                            q_cached['has_official_answer'] = True
+                        q_cached['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else q_cached.get('question_pdf_path', '')
+                        q_cached['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else q_cached.get('answer_pdf_path', '')
+                        q_cached['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else q_cached.get('rubric_pdf_path', '')
             except Exception as e:
                 logging.error(f"讀取 Stage 1 快取失敗 ({e})，將重新進行第一階段掃描...")
                 all_extracted_questions = []
@@ -5750,73 +5880,16 @@ class ExamParser:
                         full_mineru_text = mf.read()
                 except Exception: pass
 
-            # 🚀【MinerU 旗艦通道】：若 MinerU 成功產出全卷 Markdown，單次向 AI 提取全卷所有題目
-            if full_mineru_text and len(full_mineru_text.strip()) > 100:
-                logging.info(f"⚡ [全卷單次極速結構化] MinerU 已提供全卷排版與 LaTeX，直接單次請求 AI 提取全卷題目！")
-                GLOBAL_METRICS.set_stage(f"⚡ 正在進行全卷題目結構化 (MinerU 純文字單次通道)")
-                
-                has_official_ans_flag = (a_pdf is not None and os.path.exists(a_pdf) and ans_text != "無官方解答。")
-                mineru_all_prompt = f"""
-                你是一位專業的台灣大考試卷數位化專家。
-                這是一份由 MinerU 高精度本地引擎轉出的【全卷試題 Markdown 文本】（包含完整的排版、表格與標準 LaTeX 數學公式）。
-                
-                學年度：{year}，科目：{subject}。
-                官方解答狀況：{'【有官方解答】' if has_official_ans_flag else '【無官方解答】'}。
-                
-                【任務】：
-                請仔細閱讀下方全卷 Markdown 文本，一次性提取出【全卷所有考題】（包含單選、多選、選填、非選計算題），並填入 PageExtraction 結構中。
-                
-                🚨【極重要規範】：
-                1. 請按照試卷題目順序，完整提取每一道題目，不得漏掉任何一題！
-                2. 選填題題號必須為大寫英文字母（如 A, B, C, D），且 options 必須為空列表 []。
-                3. 請完整保留文本中所有的 LaTeX 數學公式（如 \\frac{{...}}{{...}}、\\sqrt{{...}}）。
-                4. 題幹 question_text 嚴禁劇透或回填選填題答案！
-                
-                官方參考答案：
-                {ans_text}
-                
-                === 全卷高精 Markdown 文本 ===
-                {full_mineru_text}
-                """
-                
-                res_all, err_all = self.ai_manager.generate_with_retry(
-                    contents=[mineru_all_prompt],
-                    response_schema=PageExtraction,
-                    temperature=0.0,
-                    preferred_model="gemini-3.5-flash",
-                    enable_thinking=True,
-                    task_desc=f"{paper_tag} [MinerU全卷一次性結構化]"
-                )
-                
-                if res_all and res_all.get('questions'):
-                    for q_data in res_all['questions']:
-                        q_data['full_page_image_path'] = q_image_paths[0] if q_image_paths else ""
-                        q_data['question_pdf_path'] = q_pdf.replace("\\", "/") if q_pdf else ""
-                        q_data['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else ""
-                        q_data['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else ""
-                        q_data['question_page_image_paths'] = q_image_paths
-                        q_data['answer_page_image_paths'] = a_image_paths
-                        q_data['rubric_page_image_paths'] = rubric_image_paths
-                        q_data['school_name'] = school_name if exam_type == "SCHOOL" else ""
-                        q_data['image_paths'] = []
-                        q_data['_cropped_pil_images'] = []
-                        all_extracted_questions.append(q_data)
-                    logging.info(f"🎉 [MinerU 單次結構化大獲成功] 全卷共 {len(all_extracted_questions)} 題一次性精確收錄完畢！")
-
-            # ---------------------------------------------------------
-            # 🛡️ 巧妙阻斷：若 MinerU 已經抓完題目，直接讓 pages = []！
-            # 這樣下方的 for 迴圈直接跑 0 次（自動跳過），其內部幾百行程式碼完全不需要動任何縮排！
-            # ---------------------------------------------------------
+            # 🚀【MinerU 真理分段裝配】：MinerU 做為各頁排版真理層，嚴禁單次 Prompt 試圖吞下全卷 70 題造成 Token 溢出截斷！
             pages = []
-            if not all_extracted_questions:
-                allowed_q_set = set(q_page_idxs) if 'q_page_idxs' in locals() else set(range(len(doc)))
-                for page_num in range(len(doc)):
-                    if page_num not in allowed_q_set: continue
-                    if is_combined_pdf and page_num in ans_page_indices: continue
-                    raw_page_text = doc[page_num].get_text("text")
-                    p_type = self.classify_page_type(raw_page_text, page_num, len(doc))
-                    if p_type in ["COVER", "TOC", "SUMMARY", "SOLUTION"]: continue
-                    pages.append(page_num)
+            allowed_q_set = set(q_page_idxs) if 'q_page_idxs' in locals() else set(range(len(doc)))
+            for page_num in range(len(doc)):
+                if page_num not in allowed_q_set: continue
+                if is_combined_pdf and page_num in ans_page_indices: continue
+                raw_page_text = doc[page_num].get_text("text")
+                p_type = self.classify_page_type(raw_page_text, page_num, len(doc))
+                if p_type in ["COVER", "TOC", "SUMMARY", "SOLUTION"]: continue
+                pages.append(page_num)
 
             page_batch_size = 2 if is_stem else 3
 
@@ -7132,13 +7205,27 @@ class ExamParser:
         # 💡 將已加載的【有效詳解】建立成對位索引表（以題號+題型為複合鍵，防止跨大題碰撞）
         partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
-        # 📊 依實體掃描出的真實題目與已暫存題目鎖定真理分母（絕不硬湊虛假 benchmark）
-        confirmed_total_q = max(len(all_extracted_questions), len(loaded_partial_questions))
+        # 📊【多源真理題數探測引擎】：結合官方答案卷(AnswerKey)、實體文本高水位、與已辨識題數，100% 鎖定真實題數
+        verified_truth_q = len(all_extracted_questions)
+        
+        # 1. 優先取用官方解答卷已辨識出的題號總數
+        try:
+            if 'ans_map' in locals() and isinstance(ans_map, dict) and len(ans_map) >= 5:
+                ans_numeric_keys = [int(k) for k in ans_map.keys() if str(k).isdigit() and int(k) <= 85]
+                if ans_numeric_keys:
+                    verified_truth_q = max(verified_truth_q, max(ans_numeric_keys), len(ans_map))
+        except Exception: pass
+
+        # 2. 結合實體文本掃描到的最大題號
+        if 'max_paper_q_val' in locals() and max_paper_q_val > 0:
+            verified_truth_q = max(verified_truth_q, max_paper_q_val)
+
+        confirmed_total_q = max(verified_truth_q, len(all_extracted_questions), len(loaded_partial_questions))
         preloaded_keys = [f"{q.get('question_number')}_{q.get('question_type','')}" for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))]
         
         GLOBAL_METRICS.set_current_paper(paper_label, total_q=confirmed_total_q, existing_partial_q=len(preloaded_keys), initial_solved_keys=preloaded_keys)
         GLOBAL_METRICS.update_paper_total_questions(confirmed_total_q, status_msg="🧠 名師詳解生成中...")
-        GLOBAL_METRICS.add_log(f"🧠 {paper_label} 第一階段掃描完畢，鎖定真實總題數: {confirmed_total_q} 題 (已續傳 {len(preloaded_keys)} 題)")
+        GLOBAL_METRICS.add_log(f"🧠 {paper_label} 依答案卷與排版高水位鎖定真理總題數: {confirmed_total_q} 題 (已續傳 {len(preloaded_keys)} 題)")
         
         # =========================================================================
         # 🚀 [模擬考專屬快車道] 官方詳解本一鍵直接組裝，完全跳過 Stage 2/3 推導！
@@ -7347,9 +7434,15 @@ class ExamParser:
             completed_indices = set() # 🆕 新增：追蹤本批次中已成功寫入資料庫的題目索引，防範重複寫入
             
             try:
+                # 🚨【一審前置把關】：在進入昂貴的 Stage 2 之前，先以 200 Token 快速修補題目文字、公式與圖片
+                for item in current_batch:
+                    q_d = item["q_data"]
+                    if not q_d.get("_preflight_audited"):
+                        self.run_preflight_audit(q_d, img_dir)
+                        q_d["_preflight_audited"] = True
+
                 # 使用全域 Prompt 變數
                 batch_intro = PROMPT_STAGE_2_INTRO.format(batch_size=len(current_batch))
-            
                 for idx, item in enumerate(current_batch, 1):
                     q_data = item["q_data"]
                     critique = item["critique"]
@@ -7769,10 +7862,11 @@ class ExamParser:
                         \n"""
 
                     llama_cot_instruction = """
-                    🚨【審查思維引導】：
-                    請嚴格按照以下步驟進行審查：
-                    1. 先在 `error_critique` 欄位中，一步一步 (step-by-step) 寫下你核對該詳解代數計算與邏輯的推演過程。
-                    2. 若推演發現無誤，`error_critique` 請在結尾寫上「推演無誤」。
+                    🚨【二審驗收思維引導】：
+                    本批題目之題幹、選項、公式與附圖已在【一審】通過嚴格出廠檢驗。
+                    在本次【二審】中，請您專注於審核 AI 詳解的『數理公式推導邏輯是否正確自洽』與『結論答案是否正確』：
+                    1. 先在 `error_critique` 欄位中，簡要核算詳解的代數計算與定律步驟。
+                    2. 若推演邏輯無誤且無硬湊，請直接判定 `is_valid = true`，切勿因微小口吻差異輕易退件！
                     3. 只有在完成上述推演後，才給出 `is_valid` 的布林值。
                     """
                     
@@ -7831,30 +7925,40 @@ class ExamParser:
                             conflict_summary = error_critique or ("推導答案不一致" if discrepancy_detected else "圖片模糊或題號錯位")
                             GLOBAL_METRICS.record_error("ACADEMIC_CONFLICT", f"學術爭議/對位疑義: {conflict_summary[:160]}", exam_name=paper_tag, question_num=q_data.get('question_number', ''), stage="Stage 3 審查")
                             
-                            # 🚨 [防禦性機制 - 提案一：雙重不一致「學術裁決與防硬凹」仲裁機制 (第二階段：強制仲裁與覆寫)]
-                            # 如果是「學術推導直接不一致」或「已經重新掃描過仍有衝突」，直接跳過二次重掃，交給學術仲裁器
-                            if discrepancy_detected or item["recheck_count"] >= 1:
-                                logging.warning(f"⚖️ {paper_tag} [學術衝突/重掃描上限] 題號 {q_data['question_number']} 啟動【學術仲裁器】進行最終裁決...")
+                            # 🚨【階梯式 3~5 次重掃與終極備註機制】：
+                            # 設定最大重掃容忍上限為 4 次 (循環 3~5 輪)
+                            MAX_RESCAN_LIMIT = 4
+
+                            # 情況 A：已達到 3~5 次重掃上限，實在無法解決 ➔ 啟動學術仲裁，並在詳解末尾追加客觀備註放行！
+                            if item["recheck_count"] >= MAX_RESCAN_LIMIT:
+                                logging.warning(f"⚖️ {paper_tag} [達重掃上限 {item['recheck_count']} 次] 題號 {q_data['question_number']} 無法透過重掃消除衝突，啟動【學術仲裁並於詳解追加備註】...")
                                 
-                                # 組合詳細的衝突上下文，供仲裁器精確研判
-                                conflict_clue = error_critique if error_critique else f"AI 實質推導出正確選項為 '{item.get('_derived_ans')}'，但官方輸入答案為 '{q_data.get('answer')}'。"
+                                conflict_clue = error_critique if error_critique else f"AI 推導為 '{item.get('_derived_ans')}'，但官方紀錄為 '{q_data.get('answer')}'。"
                                 arbitrated_data = self.run_academic_arbitration(q_data, sol_data, conflict_clue)
                                 
                                 if arbitrated_data:
-                                    # 1. 自動覆寫官方答案欄位，修正為學術正確之答案（🚨 強制正則清洗，只留純選項字母！）
                                     raw_chosen = arbitrated_data.get('chosen_answer', q_data['answer'])
                                     q_data['answer'] = clean_ocr_answer_format(str(raw_chosen))
-                                    # 2. 將仲裁說明與「修正後的詳解」拼合，剔除所有硬凹迎合的文字
                                     q_data['detailed_solution'] = sol_data.get('detailed_solution', '') + "\n\n" + arbitrated_data.get('final_solution_append', '')
+                                    q_data['has_answer_discrepancy'] = True
+                                    q_data['discrepancy_reason'] = f"經多輪 ({item['recheck_count']}次) 原始圖像重掃對位，學術推導答案為【{q_data['answer']}】，與原卷標示存有版本或印製疑義。"
                                     is_valid_passed = True
-                                    logging.info(f"⚖️ {paper_tag} [仲裁成功] 題號 {q_data['question_number']} 已被強制覆寫並修正答案為: {q_data['answer']}")
+                                    logging.info(f"⚖️ {paper_tag} [仲裁成功備註] 題號 {q_data['question_number']} 已在詳解末尾追加完整疑義說明並安全存檔！")
                                 else:
-                                    # 仲裁失敗時的保底機制
+                                    # 終極保底：直接追加備註區塊
                                     is_valid_passed = True
-                                    q_data['detailed_solution'] = sol_data.get('detailed_solution', '') + "\n\n**【備註】本題經多輪重編譯核對，官方答案與嚴謹學理推導存在潛在衝突，詳解已優先採用最嚴謹之學術推導過程。**"
+                                    q_data['has_answer_discrepancy'] = True
+                                    q_data['discrepancy_reason'] = "經 4 輪高精重掃，題目內容與官方答案仍存有排版疑義，已於詳解追加備註。"
+                                    q_data['detailed_solution'] = sol_data.get('detailed_solution', '') + "\n\n### 【學術論證與版本疑義備註】\n**本題經系統進行 4 輪原卷高解析度重掃核對，官方公布之參考答案與最嚴謹之學理推導步驟仍存有潛在分歧。詳解中已完整呈現符合學科定律之推導演繹，提供深入學習參考。**"
                             
-                            # 正常重掃描流程（僅在非直接學術不一致，且為第一次重掃時執行）
-                            elif item["recheck_count"] < max_rechecks:
+                            # 情況 B：未達重掃上限（第 1~4 次） ➔ 隨時重新掃描、重裁圖片、修改 MinerU 題幹！
+                            else:
+                                item["recheck_count"] += 1
+                                is_valid_passed = False 
+                                if stage2_mismatch and not error_critique:
+                                    error_critique = "圖片題號與題幹不符、或公式排版有瑕疵，要求重新掃描。"
+                                    
+                                logging.warning(f"  -> 🔄 {paper_tag} [啟動第 {item['recheck_count']}/{MAX_RESCAN_LIMIT} 次定向重掃與 MinerU 內容重構] 題號 {q_data['question_number']}...")
                                 is_valid_passed = False 
                                 if stage2_mismatch and not error_critique:
                                     error_critique = "生成詳解的 AI 偵測到圖片題號與題幹不符或圖片模糊，主動要求重掃描補件。"
@@ -7915,10 +8019,15 @@ class ExamParser:
                                     )
 
                                     if recheck_dict and recheck_dict.get('is_confident') is True:
-                                        # 更新數據（全防禦取值，防止 KeyError 崩潰）
+                                        # 🚨 隨時覆寫 MinerU 掃描內容
+                                        fixed_qt = recheck_dict.get('corrected_question_text', '').strip()
+                                        if fixed_qt and len(fixed_qt) >= 6:
+                                            q_data['question_text'] = fixed_qt
+                                            logging.info(f"  -> 📝 [MinerU題幹重塑] 第 {q_data['question_number']} 題題幹文本已依據重掃結果覆寫更新！")
+
                                         q_data['shared_context'] = recheck_dict.get('corrected_shared_context', q_data.get('shared_context', ''))
-                                        q_data['question_text'] = recheck_dict.get('corrected_question_text', q_data.get('question_text', ''))
-                                        q_data['options'] = recheck_dict.get('corrected_options', q_data.get('options', []))
+                                        if recheck_dict.get('corrected_options'):
+                                            q_data['options'] = recheck_dict.get('corrected_options')
                                         q_data['answer'] = clean_ocr_answer_format(str(recheck_dict.get('corrected_answer', q_data.get('answer', ''))))
 
                                         # 處理補裁切

@@ -105,13 +105,24 @@ STANDARD_MAX_QUESTIONS = {
     "自然": 72
 }
 
+PURGED_BASENAMES_FILE = "purged_filenames.txt"
+
 def register_cloud_purge(local_path: str):
-    """登記待銷毀之雲端暫存檔路徑"""
+    """登記待銷毀之雲端暫存檔路徑（雙軌登記：階層路徑 + 扁平根目錄路徑，確保彻底抹除）"""
     try:
+        base_name = os.path.basename(local_path)
         rel_path = os.path.relpath(local_path, DATABASE_DIR).replace("\\", "/")
-        cloud_target = f"gdrive:exam_database_output/{rel_path}"
+        
+        targets = [
+            f"gdrive:exam_database_output/{rel_path}",
+            f"gdrive:exam_database_output/{base_name}"
+        ]
         with open(PURGE_FILE, "a", encoding="utf-8") as f:
-            f.write(f"{cloud_target}\n")
+            for t in targets:
+                f.write(f"{t}\n")
+                
+        with open(PURGED_BASENAMES_FILE, "a", encoding="utf-8") as bf:
+            bf.write(f"{base_name}\n")
     except Exception:
         pass
         
@@ -1497,6 +1508,16 @@ def run_database_repair_suite():
             is_complete = (current_count >= r_min)
             display_threshold = r_min
 
+        # 🚨 剛性防毒：若當前收錄題數 <= 3 題（非國寫考科），代表此前遭遇了單次 Prompt 截斷的毒快取，
+        # 立即刪除該試卷的 _raw_extracted 快取，促使 catcher.py 下次重新全卷完整掃描！
+        if current_count <= 3 and clean_sub != "國寫":
+            if os.path.exists(canonical_raw_path):
+                try:
+                    os.remove(canonical_raw_path)
+                    register_cloud_purge(canonical_raw_path)
+                    logging.info(f"🧹 [清除截斷快取] 已銷毀 {os.path.basename(canonical_raw_path)}，下次將重新完整掃描全卷！")
+                except Exception: pass
+
         # 寫入正規命名的目標檔案
         if is_complete:
             with open(canonical_db_path, "w", encoding="utf-8") as f:
@@ -1512,7 +1533,7 @@ def run_database_repair_suite():
                 try: os.remove(canonical_db_path); register_cloud_purge(canonical_db_path)
                 except: pass
             status_str = f"⏳ 題數不足 ({current_count}/{display_threshold} 題)，已降級 partial，待補齊真題"
-
+            
         # 🚨 關鍵清理：將組內所有「非正規檔名」的舊版本徹底從本機刪除，並登記雲端銷毀！
         for old_fp in file_list:
             norm_old = os.path.abspath(old_fp)
