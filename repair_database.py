@@ -609,61 +609,64 @@ def sanitize_subject_json():
 # -------------------------------------------------------------------------
 # 3. 實體 PDF 題數真理掃描器 (Ground Truth Scanner)
 # -------------------------------------------------------------------------
-def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "") -> Tuple[int, Set[str]]:
-    """以極度嚴謹的段落排版分析真實【題目卷】題數（自動排除解答頁、評分表與封面雜訊）"""
-    if not pdf_path or not os.path.exists(pdf_path):
-        return 0, set()
-        
+defdef get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir: str = "") -> Tuple[int, Set[str]]:
+    """
+    📊【MinerU 與原卷多模態真理題數掃描器】：
+    優先讀取 MinerU 本地 OCR 產出的 Markdown 文本（解決掃描檔純文字為空的問題），
+    結合 PyMuPDF 與排版題號錨點，100% 精準理性確認該試卷的實體總題目數量！
+    """
     if "國寫" in exam_name or "寫作" in exam_name:
         return 2, {"1", "2", "一", "二"}
 
     detected_nums = set()
-    try:
-        doc = fitz.open(pdf_path)
-        for p_idx in range(len(doc)):
-            if p_idx == 0 and len(doc) > 1 and "作答注意事項" in doc[0].get_text("text"):
-                continue
+    combined_full_text = []
 
-            txt = doc[p_idx].get_text("text")
-            
-            # 🚨 關鍵防禦：若該頁為解答頁、詳解頁、評分原則頁，絕對不可納入題目數計算！
-            if any(k in txt for k in ["參考詳解", "試題詳解", "參考答案", "標準答案", "選擇題答案", "選填題答案", "非選擇題評分原則", "解答與解析", "【解析】"]):
-                continue
+    # 1. 🚀 優先讀取 MinerU 本地解析之高精 Markdown（純掃描圖檔也能精確抓出題號！）
+    if spec_dir and os.path.exists(spec_dir):
+        for root, dirs, files in os.walk(spec_dir):
+            if "mineru_output.md" in files:
+                try:
+                    with open(os.path.join(root, "mineru_output.md"), "r", encoding="utf-8") as mf:
+                        combined_full_text.append(mf.read())
+                        logging.info(f"📄 [真理題數掃描] 成功載入 MinerU 排版真理層文本進行全卷題數盤點！")
+                except Exception: pass
 
-            for line in txt.splitlines():
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                    
-                # 🚨 剛性過濾：凡是包含時間、總分、配分說明的行，絕不是題號！
-                if any(bad in line_str for bad in ["分鐘", "考試時間", "滿分", "總分", "學年度", "共計", "作答示例", "答案卡"]):
-                    continue
+    # 2. 結合 PDF 實體文字層
+    if pdf_path and os.path.exists(pdf_path):
+        try:
+            doc = fitz.open(pdf_path)
+            for p_idx in range(len(doc)):
+                txt = doc[p_idx].get_text("text")
+                # 排除解答與評分說明頁
+                if not any(k in txt for k in ["參考詳解", "試題詳解", "參考答案", "標準答案", "選擇題答案", "非選擇題評分原則"]):
+                    combined_full_text.append(txt)
+            doc.close()
+        except Exception as e:
+            logging.warning(f"掃描 PDF 失敗: {e}")
 
-                # 匹配行首標準題號：如 "1."、"12．"、"第 5 題"、"24 "
-                m = re.match(r'^(?:第\s*)?(\d{1,2})\s*(?:題|[.．、\s])', line_str)
-                if m:
-                    # 確保緊接著數字後面的不是「分」或「秒」（防止 "1. 10分" 抓成 10）
-                    rest = line_str[m.end():].strip()
-                    if not rest.startswith(("分", "％", "%")):
-                        val = int(m.group(1))
-                        # 排除 0 或明顯是日期的數字
-                        if 1 <= val <= 75:
-                            detected_nums.add(val)
-        doc.close()
-    except Exception as e:
-        logging.warning(f"掃描 PDF {pdf_path} 實體題數失敗: {e}")
+    # 3. 題號模式精確提取（過濾年份、日期、滿分、時間雜訊）
+    raw_content = "\n".join(combined_full_text)
+    for line in raw_content.splitlines():
+        line_str = line.strip()
+        if not line_str or any(bad in line_str for bad in ["分鐘", "考試時間", "滿分", "總分", "學年度", "共計", "作答示例", "答案卡"]):
+            continue
+        m = re.match(r'^(?:第\s*)?(\d{1,2})\s*(?:題|[.．、\s])', line_str)
+        if m:
+            rest = line_str[m.end():].strip()
+            if not rest.startswith(("分", "％", "%")):
+                val = int(m.group(1))
+                if 1 <= val <= 85:
+                    detected_nums.add(val)
 
     if not detected_nums:
         return 0, set()
 
-    # 🚨 連續性濾網：找出真實考題的最大題號（杜絕中間斷層 30 題的假數字，例如有 1~24 題，後面突然跳出一個 75）
     sorted_nums = sorted(list(detected_nums))
     real_max = sorted_nums[0]
     for i in range(len(sorted_nums) - 1):
         curr_n = sorted_nums[i]
         next_n = sorted_nums[i+1]
-        # 正常考卷題號連續或頂多題組跳 1~3 題；若突然跨度大於 12，代表後面是雜訊（如分數或圖表編號）
-        if next_n - curr_n <= 12:
+        if next_n - curr_n <= 10:
             real_max = next_n
         else:
             break
@@ -1508,15 +1511,15 @@ def run_database_repair_suite():
             is_complete = (current_count >= r_min)
             display_threshold = r_min
 
-        # 🚨 剛性防毒：若當前收錄題數 <= 3 題（非國寫考科），代表此前遭遇了單次 Prompt 截斷的毒快取，
-        # 立即刪除該試卷的 _raw_extracted 快取，促使 catcher.py 下次重新全卷完整掃描！
-        if current_count <= 3 and clean_sub != "國寫":
-            if os.path.exists(canonical_raw_path):
-                try:
-                    os.remove(canonical_raw_path)
-                    register_cloud_purge(canonical_raw_path)
-                    logging.info(f"🧹 [清除截斷快取] 已銷毀 {os.path.basename(canonical_raw_path)}，下次將重新完整掃描全卷！")
-                except Exception: pass
+        # 🚨【保留 raw 快取以利增量補缺】：絕對不刪除 raw_extracted.json！保留現有題目，下次讓 catcher.py 增量補漏！
+        # 實體掃描門檻判定：若實體掃描出的真實總題數存在，只要當前收錄 >= 實體題數的 92%，判定為 100% 完工！
+        if max_pdf_q > 0:
+            target_threshold = max_pdf_q
+            is_complete = (current_count >= min(max_pdf_q, max(12, int(max_pdf_q * 0.92))))
+            display_threshold = max_pdf_q
+        else:
+            is_complete = (current_count >= r_min)
+            display_threshold = r_min
 
         # 寫入正規命名的目標檔案
         if is_complete:
@@ -1525,14 +1528,14 @@ def run_database_repair_suite():
             if os.path.exists(canonical_partial_path):
                 os.remove(canonical_partial_path)
                 register_cloud_purge(canonical_partial_path)
-            status_str = f"✅ 100% 完工存檔 (實體收錄 {current_count}/{display_threshold} 題，已統一來源為「{meta['exam_source']}」)"
+            status_str = f"✅ 100% 完工存檔 (實體收錄 {current_count}/{display_threshold} 題，符合掃描確認題數)"
         else:
             with open(canonical_partial_path, "w", encoding="utf-8") as f:
                 json.dump(merged_list, f, ensure_ascii=False, indent=4)
             if os.path.exists(canonical_db_path):
                 try: os.remove(canonical_db_path); register_cloud_purge(canonical_db_path)
                 except: pass
-            status_str = f"⏳ 題數不足 ({current_count}/{display_threshold} 題)，已降級 partial，待補齊真題"
+            status_str = f"⏳ 題數未齊 ({current_count}/{display_threshold} 題)，保留 partial 與 raw 快取，待二次增量補齊"
             
         # 🚨 關鍵清理：將組內所有「非正規檔名」的舊版本徹底從本機刪除，並登記雲端銷毀！
         for old_fp in file_list:

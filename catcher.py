@@ -5789,21 +5789,18 @@ class ExamParser:
                     a_pdf = q_pdf
                     logging.info(f"📑 [合卷區塊鎖定] 成功切出目標試卷：題目卷第 {q_page_idxs[0]+1}~{q_page_idxs[-1]+1} 頁 (共 {len(q_image_paths)} 頁)，官方詳解本第 {sol_page_idxs[0]+1}~{sol_page_idxs[-1]+1} 頁 (共 {len(mock_sol_page_indices)} 頁)！")
         
-        # 🆕 1. 優先檢查是否有第一階段題目快取檔（具備題數中毒自癒防線）
+        # 🆕 1. 優先加載第一階段題目快取檔（增量繼承機制：保留現有題目，絕不隨意刪除！）
+        needs_incremental_gap_fill = False
         if os.path.exists(raw_extracted_json_path):
             try:
                 with open(raw_extracted_json_path, "r", encoding="utf-8") as f:
                     cached_data = json.load(f)
 
-                # 🚨 剛性防毒檢查：若快取中只有 1~3 題，但非國寫（國寫標準為2題），代表遭遇了先前 Token 截斷的中毒快取，強制銷毀重跑！
-                is_stub_cache = len(cached_data) <= 3 and clean_subj_name != "國寫"
-                if is_stub_cache:
-                    logging.warning(f"⚠️ [偵測到截斷中毒快取] {raw_extracted_json_path} 僅有 {len(cached_data)} 題，判定為歷史截斷殘骸，立即銷毀並重新完整掃描！")
-                    os.remove(raw_extracted_json_path)
-                    all_extracted_questions = []
-                else:
-                    logging.info(f"⚡ [Stage 1 快取命中] 成功載入 {len(cached_data)} 題有效題目快取：{raw_extracted_json_path}")
+                if isinstance(cached_data, list) and len(cached_data) > 0:
+                    logging.info(f"📂 [Stage 1 增量繼承] 成功載入現有 {len(cached_data)} 題已提取題目，保留成果並啟動增量補缺...")
                     all_extracted_questions = cached_data
+                    needs_incremental_gap_fill = True
+                    
                     has_official_now = (a_pdf is not None and os.path.exists(a_pdf) and exam_type in ["GSAT", "AST", "MOCK", "MOCK_GSAT", "MOCK_AST"])
                     for q_cached in all_extracted_questions:
                         if has_official_now:
@@ -5812,7 +5809,7 @@ class ExamParser:
                         q_cached['answer_pdf_path'] = a_pdf.replace("\\", "/") if a_pdf else q_cached.get('answer_pdf_path', '')
                         q_cached['rubric_pdf_path'] = rubric_pdf.replace("\\", "/") if rubric_pdf else q_cached.get('rubric_pdf_path', '')
             except Exception as e:
-                logging.error(f"讀取 Stage 1 快取失敗 ({e})，將重新進行第一階段掃描...")
+                logging.error(f"讀取 Stage 1 快取失敗 ({e})，將重新掃描...")
                 all_extracted_questions = []
 
         # 🆕 2. 只有在無快取時，才進入龐大的第一階段 PDF 轉圖與全套 OCR 掃描
@@ -7205,21 +7202,36 @@ class ExamParser:
         # 💡 將已加載的【有效詳解】建立成對位索引表（以題號+題型為複合鍵，防止跨大題碰撞）
         partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
-        # 📊【多源真理題數探測引擎】：結合官方答案卷(AnswerKey)、實體文本高水位、與已辨識題數，100% 鎖定真實題數
-        verified_truth_q = len(all_extracted_questions)
+        # 📊【MinerU 與解答卷掃描確認總題數引擎】：
+        # 依據 MinerU 高精排版文本、官方解答卷表格與實體 PDF 題號高水位，理性判定全卷實體題數！
+        verified_truth_q = 0
         
-        # 1. 優先取用官方解答卷已辨識出的題號總數
+        # A. 優先掃描 MinerU OCR Markdown 文本中的最大題號
+        if 'full_mineru_text' in locals() and full_mineru_text:
+            m_nums = re.findall(r'(?:^|\n)\s*(?:第\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、\s)])(?!\d)', full_mineru_text)
+            extracted_m_vals = [int(n[0] or n[1]) for n in m_nums if (n[0] or n[1]) and int(n[0] or n[1]) <= 85]
+            if extracted_m_vals:
+                verified_truth_q = max(extracted_m_vals)
+                logging.info(f"📊 [MinerU 排版確認] 經 MinerU Markdown 實體掃描確認全卷總題數為：{verified_truth_q} 題")
+
+        # B. 結合官方解答卷(AnswerKey)中出現的題目總數與最大題號
         try:
-            if 'ans_map' in locals() and isinstance(ans_map, dict) and len(ans_map) >= 5:
+            if 'ans_map' in locals() and isinstance(ans_map, dict) and len(ans_map) >= 3:
                 ans_numeric_keys = [int(k) for k in ans_map.keys() if str(k).isdigit() and int(k) <= 85]
                 if ans_numeric_keys:
-                    verified_truth_q = max(verified_truth_q, max(ans_numeric_keys), len(ans_map))
+                    ans_max = max(ans_numeric_keys)
+                    verified_truth_q = max(verified_truth_q, ans_max, len(ans_map))
+                    logging.info(f"📊 [解答卷確認] 經官方解答卷對照確認總題數為：{verified_truth_q} 題")
         except Exception: pass
 
-        # 2. 結合實體文本掃描到的最大題號
+        # C. 結合實體 PDF 文字層高水位
         if 'max_paper_q_val' in locals() and max_paper_q_val > 0:
             verified_truth_q = max(verified_truth_q, max_paper_q_val)
 
+        # 保底合理基準
+        if verified_truth_q == 0:
+            verified_truth_q = len(all_extracted_questions)
+            
         confirmed_total_q = max(verified_truth_q, len(all_extracted_questions), len(loaded_partial_questions))
         preloaded_keys = [f"{q.get('question_number')}_{q.get('question_type','')}" for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))]
         
