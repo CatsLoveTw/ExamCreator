@@ -8094,9 +8094,17 @@ class ExamParser:
 
                             q_data["derived_answer"] = clean_ocr_answer_format(derived) if derived else ""
 
-                            # 🚨 2. 若本題無官方答案，has_official_answer 強制設為 false，並將 answer 欄位填入推導答案！
+                            # 🚨 2. 嚴格對位：答案相同時絕對不允許觸發衝突紅框！
                             has_conflict = item.get("_discrepancy_detected", False)
                             has_off = q_data.get('has_official_answer', False) and bool(str(q_data.get('answer', '')).strip())
+                            
+                            c_off = str(q_data.get("official_answer") or q_data.get("answer", "")).strip().replace(" ", "").replace(",", "").upper()
+                            c_der = str(q_data.get("derived_answer", "")).strip().replace(" ", "").replace(",", "").upper()
+                            
+                            # 🚨 剛性校準：只要兩者清洗後相同，衝突判定強制歸零！
+                            if c_off and c_der and c_off == c_der:
+                                has_conflict = False
+
                             if not has_off:
                                 has_conflict = False
                                 q_data['has_official_answer'] = False
@@ -8112,7 +8120,7 @@ class ExamParser:
                                     q_data["discrepancy_reason"] = f"學術嚴謹推導答案為【{q_data['derived_answer']}】，但官方原始紀錄為【{q_data['official_answer']}】（疑為答案卷錯位、印刷瑕疵或版本混淆）。"
                                 else:
                                     q_data["discrepancy_reason"] = ""
-
+                                    
                             # 成功通過，加上客觀結論句（絕不精神分裂硬凹！無官方答案或有衝突時優先取推導答案）
                             effective_ans = q_data['derived_answer'] if (has_conflict or not has_off) else (q_data.get('official_answer') or q_data.get('answer', ''))
                             
