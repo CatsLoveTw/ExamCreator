@@ -5720,45 +5720,47 @@ class ExamParser:
                 except Exception as e:
                     logging.warning(f"讀取獨立詳解卷失敗: {e}")
             else:
-                # 🚨 [單卷防切碎保護]：一般 30 頁以內的單卷 PDF，詳解必定在後半段，嚴禁將題幹大標題誤判為合輯切斷！
+                # 🚨 [單卷防切碎保護與排版邊界判定]：
                 total_p_cnt = len(all_rendered_pages)
                 if total_p_cnt <= 30:
-                    # 在後半段尋找詳解起始頁
                     sol_start_p = -1
-                    doc_peek = fitz.open(q_pdf)
                     ans_headers = [
-                    "[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", 
-                    "試題詳解", "答案與解析", "【解析】", "出處：", "參考答案", "標準答案", 
-                    "選擇題答案", "選填題答案", "非選擇題答案", "簡答", "解答"
-                ]
-                for p_i in range(int(total_p_cnt * 0.35), total_p_cnt):
-                    txt = doc_peek[p_i].get_text("text").replace(" ", "")
-                    # 1. 命中詳解/答案標題關鍵字
-                    if any(k in txt for k in ans_headers):
-                        sol_start_p = p_i
-                        break
-                    # 2. 命中答案表格標題（如「一、單選題 1. (3) 2. (1)...」）
-                    if ("答案" in txt or "解答" in txt) and any(k in txt for k in ["單選", "多選", "選填", "題號"]):
-                        sol_start_p = p_i
-                        break
-                    doc_peek.close()
+                        "[參考詳解]", "【參考詳解】", "參考詳解", "參考答案暨詳解", "考科詳解", 
+                        "試題詳解", "答案與解析", "【解析】", "出處：", "參考答案", "標準答案", 
+                        "選擇題答案", "選填題答案", "非選擇題答案", "簡答", "解答"
+                    ]
+                    try:
+                        doc_peek = fitz.open(q_pdf)
+                        # 從 35% 處開始向後掃描詳解起始標題
+                        for p_i in range(int(total_p_cnt * 0.35), total_p_cnt):
+                            txt = doc_peek[p_i].get_text("text").replace(" ", "")
+                            if any(k in txt for k in ans_headers):
+                                sol_start_p = p_i
+                                break
+                            if ("答案" in txt or "解答" in txt) and any(k in txt for k in ["單選", "多選", "選填", "題號"]):
+                                sol_start_p = p_i
+                                break
+                    except Exception as pe:
+                        logging.warning(f"掃描詳解起始頁異常: {pe}")
+                    finally:
+                        # 🚨 必須在 for 迴圈完全結束後才關閉 doc_peek，絕對不可在迴圈內部關閉！
+                        if 'doc_peek' in locals() and not doc_peek.is_closed:
+                            doc_peek.close()
 
+                    # 判定邊界
                     if sol_start_p != -1:
                         q_page_idxs = list(range(sol_start_p))
                         sol_page_idxs = list(range(sol_start_p, total_p_cnt))
+                        target_cycle = {"q_pages": q_page_idxs, "sol_pages": sol_page_idxs}
                     else:
-                        # 呼叫多模態探針探測後半段詳解起始點
-                        s_idx, e_idx = self.detect_solution_boundary_multimodal(q_pdf, all_rendered_pages)
-                        if s_idx > int(total_p_cnt * 0.3):
-                            q_page_idxs = list(range(s_idx))
-                            sol_page_idxs = list(range(s_idx, total_p_cnt))
+                        # 文字層無明顯標題時，直接採用多模態探針辨識出的真實循環邊界
+                        cycles = self.segment_compilation_cycles_multimodal(q_pdf, all_rendered_pages, year, mock_tag, clean_subj_name)
+                        if cycles and cycles[0].get("sol_pages"):
+                            target_cycle = cycles[0]
                         else:
-                            q_page_idxs = list(range(total_p_cnt))
-                            sol_page_idxs = []
-
-                    target_cycle = {"q_pages": q_page_idxs, "sol_pages": sol_page_idxs}
+                            target_cycle = cycles[0] if cycles else {"q_pages": list(range(total_p_cnt)), "sol_pages": []}
                 else:
-                    # 100+ 頁超大合訂本才啟動循環切分狀態機
+                    # 100+ 頁超大合訂本啟動循環切分狀態機
                     cycles = self.segment_compilation_cycles_multimodal(q_pdf, all_rendered_pages, year, mock_tag, clean_subj_name)
                     target_cycle = cycles[0] if cycles else {"q_pages": list(range(total_p_cnt)), "sol_pages": []}
                     
