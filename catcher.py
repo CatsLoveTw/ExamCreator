@@ -4091,10 +4091,7 @@ class ExamParser:
             sol_count = len(c['sol_pages'])
             sol_range = f"p{c['sol_pages'][0]+1}~p{c['sol_pages'][-1]+1}" if c['sol_pages'] else "無詳解"
     
-            logging.info(
-                f"  -> 📦 循環 {idx}: 題目卷共 {q_count} 頁 ({q_range}) | ",
-                f"詳解本共 {sol_count} 頁 ({sol_range})"
-            )
+            logging.info(f"  -> 📦 循環 {idx}: 題目卷共 {q_count} 頁 ({q_range}) | 詳解本共 {sol_count} 頁 ({sol_range})")
 
         return cycles
         
