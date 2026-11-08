@@ -5811,7 +5811,19 @@ class ExamParser:
                 logging.error(f"讀取 Stage 1 快取失敗 ({e})，將重新掃描...")
                 all_extracted_questions = []
 
-        # 🆕 2. 只有在無快取時，才進入龐大的第一階段 PDF 轉圖與全套 OCR 掃描
+        # 🚨 無論快取是否存在，題目卷 PDF 與圖片目錄必定就緒以供補漏使用
+        if not 'q_image_paths' in locals() or not q_image_paths:
+            q_image_paths = all_rendered_pages
+        if not 'a_image_paths' in locals():
+            a_image_paths = []
+        if not 'rubric_image_paths' in locals():
+            rubric_image_paths = []
+
+        doc = fitz.open(q_pdf)
+        cat = doc.pdf_catalog()
+        doc.xref_set_key(cat, "StructTreeRoot", "null")
+
+        # 🆕 2. 只有在【完全無快取】時，才執行全卷分頁初次掃描；若有快取則直接進入下方的【增量補漏雙引擎】
         if not all_extracted_questions:
             logging.info("📸 正在將原卷與解答 PDF 轉換成黃金 300 DPI 整頁圖片...")
             GLOBAL_METRICS.set_stage(f"📸 正在將試卷與解答 PDF 轉換為 300 DPI 整頁影像 ({year} {subject})")
@@ -6726,6 +6738,16 @@ class ExamParser:
                     all_extracted_questions = self.clean_and_verify_questions(all_extracted_questions)
                     all_extracted_questions.sort(key=lambda x: natural_sort_key(x.get('question_number', '0')))
 
+                    # 🚨 增量更新磁碟快取：將補齊後的完整題目寫回 raw_extracted，避免下次丟失！
+                    try:
+                        clean_raw_dump = [dict(q_it) for q_it in all_extracted_questions]
+                        for c_it in clean_raw_dump: c_it.pop('_cropped_pil_images', None)
+                        with open(raw_extracted_json_path, "w", encoding="utf-8") as rf:
+                            json.dump(clean_raw_dump, rf, ensure_ascii=False, indent=4)
+                        logging.info(f"💾 [快取同步] 已將補漏後的 {len(all_extracted_questions)} 題寫回 {os.path.basename(raw_extracted_json_path)}")
+                    except Exception as we:
+                        logging.warning(f"更新 raw 快取失敗: {we}")
+
                     official_explanations = {}
                     if a_pdf: official_explanations.update(self.parse_detailed_explanations(a_pdf))
                     if rubric_pdf: official_explanations.update(self.parse_detailed_explanations(rubric_pdf))
@@ -7201,18 +7223,30 @@ class ExamParser:
         # 💡 將已加載的【有效詳解】建立成對位索引表（以題號+題型為複合鍵，防止跨大題碰撞）
         partial_map = {get_unique_q_key(q): q for q in loaded_partial_questions if is_valid_solution(q.get("detailed_solution"))}
 
-        # 📊【MinerU 與解答卷掃描確認總題數引擎】：
-        # 依據 MinerU 高精排版文本、官方解答卷表格與實體 PDF 題號高水位，理性判定全卷實體題數！
+        # 📊【MinerU 與解答卷掃描確認總題數引擎（學科防偽天花板）】：
         verified_truth_q = 0
+        
+        # 依學科動態定義安全天花板（化學最多 34 題，嚴防週期表原子序 83 污染！）
+        hard_ceil = 75 if any(k in clean_subj_name for k in ["自然", "社會"]) else (
+            24 if "數" in clean_subj_name else (
+                34 if "化學" in clean_subj_name else (
+                    32 if "物理" in clean_subj_name else (
+                        54 if "生物" in clean_subj_name else (
+                            4 if "國寫" in clean_subj_name else 50
+                        )
+                    )
+                )
+            )
+        )
         
         # A. 優先掃描 MinerU OCR Markdown 文本中的最大題號
         if 'full_mineru_text' in locals() and full_mineru_text:
             m_nums = re.findall(r'(?:^|\n)\s*(?:第\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、\s)])(?!\d)', full_mineru_text)
-            extracted_m_vals = [int(n[0] or n[1]) for n in m_nums if (n[0] or n[1]) and int(n[0] or n[1]) <= 85]
+            extracted_m_vals = [int(n[0] or n[1]) for n in m_nums if (n[0] or n[1]) and int(n[0] or n[1]) <= hard_ceil]
             if extracted_m_vals:
                 verified_truth_q = max(extracted_m_vals)
-                logging.info(f"📊 [MinerU 排版確認] 經 MinerU Markdown 實體掃描確認全卷總題數為：{verified_truth_q} 題")
-
+                logging.info(f"📊 [MinerU 排版確認] 經 MinerU Markdown 實體掃描確認全卷總題數為：{verified_truth_q} 題（學科上限: {hard_ceil}）")
+                
         # B. 結合官方解答卷(AnswerKey)中出現的題目總數與最大題號
         try:
             if 'ans_map' in locals() and isinstance(ans_map, dict) and len(ans_map) >= 3:
