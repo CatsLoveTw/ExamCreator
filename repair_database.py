@@ -609,7 +609,7 @@ def sanitize_subject_json():
 # -------------------------------------------------------------------------
 # 3. 實體 PDF 題數真理掃描器 (Ground Truth Scanner)
 # -------------------------------------------------------------------------
-defdef get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir: str = "") -> Tuple[int, Set[str]]:
+def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir: str = "") -> Tuple[int, Set[str]]:
     """
     📊【MinerU 與原卷多模態真理題數掃描器】：
     優先讀取 MinerU 本地 OCR 產出的 Markdown 文本（解決掃描檔純文字為空的問題），
