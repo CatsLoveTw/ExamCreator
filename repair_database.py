@@ -609,11 +609,28 @@ def sanitize_subject_json():
 # -------------------------------------------------------------------------
 # 3. 實體 PDF 題數真理掃描器 (Ground Truth Scanner)
 # -------------------------------------------------------------------------
+def get_subject_max_ceiling(subject_name: str, exam_name: str = "") -> int:
+    """台灣大考各大科實體題數絕對天花板（徹底阻斷元素週期表原子序 1~83 鉍 Bi 污染！）"""
+    clean_s = re.sub(r'(?:考科|科)$', '', str(subject_name).strip())
+    is_gsat = any(k in exam_name for k in ["學測", "GSAT"])
+    
+    if "國寫" in clean_s or "寫作" in clean_s: return 4
+    if clean_s in ["自然", "理綜"]: return 72
+    if clean_s in ["社會", "文綜"]: return 76
+    if "數" in clean_s: return 24
+    if "物理" in clean_s: return 32
+    # 🚨 化學指考/分科絕不可能超過 34 題（含手寫小題拆分）！元素週期表 (83 Bi) 100% 攔截！
+    if "化學" in clean_s: return 34
+    if "生物" in clean_s: return 54
+    if "地科" in clean_s or "地球科學" in clean_s: return 52
+    if any(k in clean_s for k in ["歷史", "地理", "公民"]): return 48
+    if "國文" in clean_s: return 48 if is_gsat else 30
+    if "英文" in clean_s: return 58
+    return 40
+
 def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir: str = "") -> Tuple[int, Set[str]]:
     """
-    📊【MinerU 與原卷多模態真理題數掃描器】：
-    優先讀取 MinerU 本地 OCR 產出的 Markdown 文本（解決掃描檔純文字為空的問題），
-    結合 PyMuPDF 與排版題號錨點，100% 精準理性確認該試卷的實體總題目數量！
+    📊【MinerU 與原卷多模態真理題數掃描器（週期表免疫版）】
     """
     if "國寫" in exam_name or "寫作" in exam_name:
         return 2, {"1", "2", "一", "二"}
@@ -621,14 +638,16 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir:
     detected_nums = set()
     combined_full_text = []
 
-    # 1. 🚀 優先讀取 MinerU 本地解析之高精 Markdown（純掃描圖檔也能精確抓出題號！）
+    # 取得本學科嚴格上限（例如化學上限為 34，絕不可能是 83！）
+    sub_ceiling = get_subject_max_ceiling(exam_name, exam_name)
+
+    # 1. 優先讀取 MinerU 本地解析之高精 Markdown
     if spec_dir and os.path.exists(spec_dir):
         for root, dirs, files in os.walk(spec_dir):
             if "mineru_output.md" in files:
                 try:
                     with open(os.path.join(root, "mineru_output.md"), "r", encoding="utf-8") as mf:
                         combined_full_text.append(mf.read())
-                        logging.info(f"📄 [真理題數掃描] 成功載入 MinerU 排版真理層文本進行全卷題數盤點！")
                 except Exception: pass
 
     # 2. 結合 PDF 實體文字層
@@ -637,14 +656,13 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir:
             doc = fitz.open(pdf_path)
             for p_idx in range(len(doc)):
                 txt = doc[p_idx].get_text("text")
-                # 排除解答與評分說明頁
                 if not any(k in txt for k in ["參考詳解", "試題詳解", "參考答案", "標準答案", "選擇題答案", "非選擇題評分原則"]):
                     combined_full_text.append(txt)
             doc.close()
         except Exception as e:
             logging.warning(f"掃描 PDF 失敗: {e}")
 
-    # 3. 題號模式精確提取（過濾年份、日期、滿分、時間雜訊）
+    # 3. 題號模式精確提取（嚴格受限於 sub_ceiling）
     raw_content = "\n".join(combined_full_text)
     for line in raw_content.splitlines():
         line_str = line.strip()
@@ -653,9 +671,10 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir:
         m = re.match(r'^(?:第\s*)?(\d{1,2})\s*(?:題|[.．、\s])', line_str)
         if m:
             rest = line_str[m.end():].strip()
-            if not rest.startswith(("分", "％", "%")):
+            if not rest.startswith(("分", "％", "%", "℃", "g")):
                 val = int(m.group(1))
-                if 1 <= val <= 85:
+                # 🚨 剛性約束：題號必須落在學科合理天花板內，化學大於 34 的數字（如原子序 83 Bi）直接剔除！
+                if 1 <= val <= sub_ceiling:
                     detected_nums.add(val)
 
     if not detected_nums:
@@ -666,14 +685,14 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir:
     for i in range(len(sorted_nums) - 1):
         curr_n = sorted_nums[i]
         next_n = sorted_nums[i+1]
-        if next_n - curr_n <= 10:
+        if next_n - curr_n <= 6:
             real_max = next_n
         else:
             break
 
     valid_q_set = {str(n) for n in sorted_nums if n <= real_max}
     return real_max, valid_q_set
-
+    
 # -------------------------------------------------------------------------
 # 4. 跨科嚴重污染檢驗 (如生物卷出現數學/物理)
 # -------------------------------------------------------------------------
@@ -1264,10 +1283,11 @@ def run_database_repair_suite():
         if not pooled_questions:
             continue
 
-        # 尋找實體 PDF 校準題數
+        # 尋找實體 PDF 校準題數（帶入圖片目錄以讀取 MinerU 文本）
         actual_pdf = find_actual_pdf(canonical_db_path, "")
-        max_pdf_q, physical_q_set = get_real_pdf_max_question_info(actual_pdf, exam_name=meta["spec_name"])
-
+        spec_img_dir = os.path.join(target_dir, "images", meta["spec_name"])
+        max_pdf_q, physical_q_set = get_real_pdf_max_question_info(actual_pdf, exam_name=f"{clean_sub}_{meta['spec_name']}", spec_dir=spec_img_dir)
+        
         # 🚨 雙重去重閥門：合併兩份考卷時比對「題號」與「題幹指紋」，將雙倍題目合而為一
         merged_map = {}
         text_fps = {}
