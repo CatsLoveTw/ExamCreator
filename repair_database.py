@@ -739,17 +739,18 @@ def is_valid_question_strict(q: dict, max_allowed_q: int, physical_q_set: Set[st
             return False
         return True
 
-    # 🚨【純數字題號安全裁決】：
-    digits = re.findall(r'^\d+$', q_num_raw)
-    if digits:
-        val = int(digits[0])
-        # 取得合理的上限（優先採用掃描到的真實題數，若無則依學科標準天花板）
-        ceiling = max_allowed_q if max_allowed_q > 0 else STANDARD_MAX_QUESTIONS.get(expected_subject, 40)
-        
-        # 允許 +3 題的合理結構偏差（防止題組題拆小題導致編號微增）
-        # 只有當題號超出上限 4 題以上（例如 24 題的考卷卻出現 49 題），才判定為捏造幽靈題！
-        if ceiling > 0 and val > (ceiling + 3):
-            return False
+    # 🚨【純數字題號安全裁決】：自然科與社會科強制以大考綜合卷規格（72~75題）為天花板
+        digits = re.findall(r'^\d+$', q_num_raw)
+        if digits:
+            val = int(digits[0])
+            if expected_subject in ["自然", "社會"] or any(k in exam_tag for k in ["自然", "社會"]):
+                ceiling = 75
+            else:
+                ceiling = max_allowed_q if max_allowed_q > 0 else STANDARD_MAX_QUESTIONS.get(expected_subject, 40)
+            
+            # 允許 +3 題的合理結構偏差
+            if ceiling > 0 and val > (ceiling + 3):
+                return False
 
     # 跨科污染檢驗（生物卷裡的數學/物理題）
     if is_cross_subject_contamination(q, expected_subject):
@@ -1329,7 +1330,18 @@ def run_database_repair_suite():
                         base_part = q["detailed_solution"].split("**綜上所述")[0].strip()
                         q["detailed_solution"] = f"{base_part}\n\n**綜上所述，本題正確選項為：({off_a})**"
 
-            # D. 單選題防多選幻覺修復：若單選題被塞入多個字母，強制重設為官方答案
+            # D. 徹底清除「答案相同卻殘留衝突紅框」的假警報 Bug
+            cur_a_clean = str(q.get("answer", "")).strip().replace(" ", "").replace(",", "").upper()
+            off_a_clean = str(q.get("official_answer", "")).strip().replace(" ", "").replace(",", "").upper()
+            der_a_clean = str(q.get("derived_answer", "")).strip().replace(" ", "").replace(",", "").upper()
+
+            # 若推導答案與官方答案相同（例如都是 BE），強制解除衝突狀態並清空爭議理由！
+            if (der_a_clean and off_a_clean and der_a_clean == off_a_clean) or (cur_a_clean and off_a_clean and cur_a_clean == off_a_clean):
+                q["has_answer_discrepancy"] = False
+                q["discrepancy_reason"] = ""
+                q["derived_answer"] = q["official_answer"]
+
+            # 單選題防多選幻覺修復
             q_type = str(q.get("question_type", "")).strip()
             if q_type == "單選題":
                 der_ans = str(q.get("derived_answer", "")).strip()
@@ -1339,7 +1351,7 @@ def run_database_repair_suite():
                     q.pop("discrepancy_reason", None)
                     if "綜上所述" in q.get("detailed_solution", ""):
                         q["detailed_solution"] = q["detailed_solution"].split("綜上所述")[0].strip() + f"\n\n**綜上所述，本題正確選項為：({q['answer']})**"
-
+                        
             # 🚨 E. 【多選題答案逆向自癒】：若為多選題且答案被閹割為單字母，直接從詳解文字中救回完整答案（如 B ➔ BD）！
             if q_type == "多選題":
                 cur_a = str(q.get("answer", "")).strip()
