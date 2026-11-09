@@ -42,7 +42,7 @@ signal.signal(signal.SIGINT, handle_system_shutdown)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 GLOBAL_START_TIME = time.time()
-MAX_EXECUTION_TIME_SECONDS = 5.0 * 3600  # 5 小時安全時間上限，保證在 6h GHA 砍掉前優雅退出
+MAX_EXECUTION_TIME_SECONDS = 4.5 * 3600  # 5 小時安全時間上限，保證在 6h GHA 砍掉前優雅退出
 
 # 🚨 並發資源安全鎖
 GLOBAL_ERRATA_LOCK = threading.Lock()
