@@ -89,11 +89,11 @@ SUBJECT_HARD_LIMITS = {
 # =========================================================================
 EXAM_REASONABLE_RANGES = {
     "國寫": (2, 4),
-    "數學甲": (12, 20), "數學乙": (11, 18), "數學A": (15, 22), "數學B": (15, 22), "數學": (12, 22),
-    "物理": (22, 32), "化學": (22, 34), "生物": (38, 52), "地球科學": (35, 52),
-    "國文": (38, 46), "英文": (50, 60), "歷史": (36, 48), "地理": (36, 48), "公民與社會": (36, 48),
-    "社會": (65, 75),  # 學測社會標準 72 題
-    "自然": (60, 70)   # 學測自然標準 68 題
+    "數學甲": (12, 20), "數學乙": (11, 20), "數學A": (15, 22), "數學B": (15, 22), "數學": (12, 22),
+    "物理": (20, 32), "化學": (21, 34), "生物": (30, 62), "地球科學": (30, 52),
+    "國文": (36, 46), "英文": (45, 60), "歷史": (36, 50), "地理": (36, 50), "公民與社會": (36, 50),
+    "社會": (58, 76),  # 111 後學測社會約 64 題，舊課綱 72 題
+    "自然": (52, 70)   # 111 後學測自然約 54~60 題，舊課綱 68 題
 }
 
 # 保底單科天花板（防止模考與段考子題拆分後被意外斬斷）
@@ -662,19 +662,23 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir:
         except Exception as e:
             logging.warning(f"掃描 PDF 失敗: {e}")
 
-    # 3. 題號模式精確提取（嚴格受限於 sub_ceiling）
+    # 3. 題號模式精確提取（嚴格禁止匹配純空格，並徹底屏蔽週期表元素、畫卡列號與頁碼）
     raw_content = "\n".join(combined_full_text)
+    periodic_elems = ("H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr", "Rb", "Sr", "Ag", "Cd", "I", "Xe", "Cs", "Ba", "Au", "Hg", "Pb", "Bi")
     for line in raw_content.splitlines():
         line_str = line.strip()
-        if not line_str or any(bad in line_str for bad in ["分鐘", "考試時間", "滿分", "總分", "學年度", "共計", "作答示例", "答案卡"]):
+        if not line_str or any(bad in line_str for bad in ["分鐘", "考試時間", "滿分", "總分", "學年度", "共計", "作答示例", "答案卡", "週期表", "原子量", "常數", "畫卡", "列號", "頁", "占 "]):
             continue
-        m = re.match(r'^(?:第\s*)?(\d{1,2})\s*(?:題|[.．、\s])', line_str)
+        # 🚨 嚴禁匹配純空格，必須帶有明確題號標記（如 "1."、"12．"、"第 5 題"），杜絕 "20 格"、"24 Cr" 混入！
+        m = re.match(r'^(?:第\s*(\d{1,2})\s*題|(\d{1,2})\s*[.．、])(?!\d)', line_str)
         if m:
+            num_token = m.group(1) or m.group(2)
             rest = line_str[m.end():].strip()
-            if not rest.startswith(("分", "％", "%", "℃", "g")):
-                val = int(m.group(1))
-                # 🚨 剛性約束：題號必須落在學科合理天花板內，化學大於 34 的數字（如原子序 83 Bi）直接剔除！
-                if 1 <= val <= sub_ceiling:
+            if not rest.startswith(("分", "％", "%", "℃", "g", "m", "c", "s", "k")) and not any(rest.startswith(el + " ") or rest == el for el in periodic_elems):
+                val = int(num_token)
+                # 指考/分科數學只有前面選擇題用數字(通常<=10)，後面選填用 A-D、非選用一二，絕不可能有數字題號 15~24
+                effective_ceil = 12 if any(k in exam_name for k in ["數學甲", "數學乙"]) else sub_ceiling
+                if 1 <= val <= effective_ceil:
                     detected_nums.add(val)
 
     if not detected_nums:
@@ -685,7 +689,8 @@ def get_real_pdf_max_question_info(pdf_path: str, exam_name: str = "", spec_dir:
     for i in range(len(sorted_nums) - 1):
         curr_n = sorted_nums[i]
         next_n = sorted_nums[i+1]
-        if next_n - curr_n <= 6:
+        # 放寬題組長文跨度至 15，避免英文/自然閱讀題組導致提早斷裂在 7 題
+        if next_n - curr_n <= 15:
             real_max = next_n
         else:
             break
@@ -1526,23 +1531,37 @@ def run_database_repair_suite():
 
         current_count = len(merged_list)
         
-        # 🚨 [歷史課綱動態門檻]：106 年以前的舊學測/指考國文只有 23~26 題，107 年後國綜獨立才有 42 題！
+        # 🚨 [歷史課綱動態門檻]：精確還原各年代大考真實題數下限
         if clean_sub == "國文":
-            r_min = 38 if y_val >= 107 else 20
+            r_min = 36 if y_val >= 107 else 20
         elif clean_sub == "國寫":
             r_min = 2
+        elif clean_sub == "自然":
+            r_min = 52 if y_val >= 111 else 58
+        elif clean_sub == "社會":
+            r_min = 58 if y_val >= 111 else 64
+        elif clean_sub == "物理":
+            r_min = 20 if y_val >= 95 else 16
+        elif clean_sub == "生物":
+            r_min = 34 if y_val >= 100 else 23
+        elif clean_sub in ["數學A", "數學B", "數學"]:
+            r_min = 15 if (y_val >= 111 or "學測" in meta["spec_name"]) else 12
         else:
             r_min, _ = EXAM_REASONABLE_RANGES.get(clean_sub, (12, 50))
-        
-        # 🚨 剛性題數門檻：若實體掃描題數低於 r_min，以實體題數為主（容許 ±2 題浮動）；日誌顯示嚴格對齊實際檢驗值！
-        if max_pdf_q > 0:
-            target_threshold = min(max_pdf_q, r_min) if max_pdf_q < r_min else max(r_min, int(max_pdf_q * 0.9))
+
+        # 🚨 雙向護城河判決：
+        # 1. 絕對不允許低迷的誤掃數值 (如英文誤掃成 7 題) 放行不完整的殘卷 ➔ 必須 >= r_min！
+        # 2. 對數甲/數乙/化學，絕不允許畫卡格號或週期表灌水出的 max_pdf_q 誤殺已達 r_min 的完整真題！
+        if clean_sub in ["數學甲", "數學乙", "化學"]:
+            display_threshold = r_min
+            is_complete = (current_count >= r_min)
+        elif max_pdf_q >= r_min:
+            target_threshold = max(r_min, int(max_pdf_q * 0.90))
             is_complete = (current_count >= target_threshold)
             display_threshold = target_threshold
         else:
             is_complete = (current_count >= r_min)
             display_threshold = r_min
-
         # 🚨【保留 raw 快取以利增量補缺】：絕對不刪除 raw_extracted.json！保留現有題目，下次讓 catcher.py 增量補漏！
         # 實體掃描門檻判定：若實體掃描出的真實總題數存在，只要當前收錄 >= 實體題數的 92%，判定為 100% 完工！
         if max_pdf_q > 0:
