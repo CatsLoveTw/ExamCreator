@@ -2988,9 +2988,9 @@ class GeminiFreeTierManager:
             self.model_dispatch_counter += 1
             dispatch_offset = self.model_dispatch_counter
 
-        # 🚨 若有指定 preferred_model 且為 Tier 1，則以該模型起手；否則依計數器在 [3.7, 3.6, 3.5, 3.5-lite, 3.1-lite] 中均勻滾動
+        # 🚨 若有指定 preferred_model 且為 Tier 1，則以該模型起手；否則依計數器在包含 Gemini 4 Hydrogen 的主力模型群中均勻滾動
         all_usable_models = [m for m in self.models if m in [
-            "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", 
+            "gemini-4-hydrogen", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", 
             "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
             "gemini-2.5-flash"
         ]]
@@ -3028,7 +3028,15 @@ class GeminiFreeTierManager:
             self.last_model_used = model
             
             thinking_config = None
-            if any(m in model for m in ["gemini-3.8", "gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
+            if "gemini-4" in model:
+                # 🚨 [Gemini 4 Hydrogen 專屬規則]：預設為 HIGH 且不支援 MINIMAL；若非深度推導任務必須顯式指定 LOW 才能加速省 Token！
+                if enable_thinking and not any(kw in task_desc for kw in ["OCR", "掃描"]):
+                    req_lvl = thinking_level.upper()
+                    lvl = req_lvl if req_lvl in ["LOW", "MEDIUM", "HIGH", "XHIGH"] else "HIGH"
+                else:
+                    lvl = "LOW"
+                thinking_config = types.ThinkingConfig(thinking_level=lvl)
+            elif any(m in model for m in ["gemini-3.8", "gemini-3.7", "gemini-3.6", "gemini-3.5", "gemini-2.5", "gemini-3"]):
                 # 🚨 [動態思考強度適配]：正式大考真題與段考啟用 HIGH 深度推導，模考與非必要任務啟用 LOW 加速！
                 if enable_thinking and not any(kw in task_desc for kw in ["OCR", "掃描", "解答仲裁"]):
                     lvl = "HIGH" if thinking_level.upper() == "HIGH" else "LOW"
@@ -5269,10 +5277,12 @@ class ExamParser:
                 contents=arbitration_contents,
                 response_schema=AcademicArbitration,
                 temperature=0.0,
-                preferred_model="gemini-3.8-flash",  # 🚨 升級為最高旗艦 3.8-flash，確保學術爭議判定具備最高認知水準
+                preferred_model="gemini-4-hydrogen",  # 🚨 升級為最新 Gemini 4 Hydrogen，兼具高推理與 2.5 倍速度
                 enable_thinking=True,
-                task_desc="[終極學術仲裁 (Gemini 3.8)]"
+                thinking_level="HIGH",
+                task_desc="[終極學術仲裁 (Gemini 4 Hydrogen)]"
             )
+            
             if res:
                 with GLOBAL_METRICS.lock:
                     GLOBAL_METRICS.arbitration_count += 1
@@ -5413,12 +5423,14 @@ class ExamParser:
         is_official_or_school = exam_type in ["GSAT", "AST", "SCHOOL"]
 
         stem_official_pool = [
+            "gemini-4-hydrogen",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash"
         ]
         stem_mock_pool = [
+            "gemini-4-hydrogen",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-3.6-flash",
@@ -5426,12 +5438,14 @@ class ExamParser:
             "gemini-3.5-flash-lite"
         ]
         humanities_pool = [
-            "gemini-3.5-flash-lite"
+            "gemini-4-hydrogen",
+            "gemini-3.5-flash-lite",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
         ]
+        
         stem_reasoning_pool = stem_official_pool if is_official_or_school else stem_mock_pool
 
         # 2. 精確指派當前試卷的 tier1_pool，杜絕任何舊變數覆寫
@@ -7661,15 +7675,20 @@ class ExamParser:
                         target_thinking_level = "LOW"
                         use_thinking = "lite" not in override_model
                     elif is_high_cognitive:
-                        # 旗艦算力深度推演
-                        dynamic_stage2_model = "gemini-3.8-flash" if (q_num_int % 2 == 0) else "gemini-3.7-flash"
-                        target_thinking_level = "HIGH"
+                        # 🚀 旗艦雙軌分流：讓最新且速度快的 gemini-4-hydrogen 與 3.7/3.5 交替分擔高認知題目，最大化免費額度吞吐量
+                        if q_num_int % 3 == 0:
+                            dynamic_stage2_model = "gemini-4-hydrogen"
+                        elif q_num_int % 3 == 1:
+                            dynamic_stage2_model = "gemini-3.7-flash"
+                        else:
+                            dynamic_stage2_model = "gemini-3.5-flash"
+                        target_thinking_level = "HIGH" if (is_hybrid_or_handwritten or is_stem_hard) else "LOW"
                         use_thinking = True
                     else:
-                        # 單純詞彙或記憶題，採用均衡通道
-                        dynamic_stage2_model = "gemini-3.6-flash" if (q_num_int % 2 == 0) else "gemini-3.5-flash"
+                        # 一般文意理解、選擇題，在 gemini-4-hydrogen (LOW 思考) 與 3.5-flash 間輪替，快速產出
+                        dynamic_stage2_model = "gemini-4-hydrogen" if (q_num_int % 2 == 0) else "gemini-3.5-flash"
                         target_thinking_level = "LOW"
-                        use_thinking = True
+                        use_thinking = False
 
                     solutions_dict, s_err = self.ai_manager.generate_with_retry(
                         contents=batch_contents, 
@@ -9104,7 +9123,7 @@ def process_single_ticket_rerun(ticket: dict, parser: ExamParser, target_dirs: L
     logging.info("🧠 正在調用旗艦大模型執行單題名師級解析重生...")
     sol_batch, _ = parser.ai_manager.generate_with_retry(
         contents=contents, response_schema=QuestionSolutionBatch,
-        temperature=0.2, preferred_model="gemini-3.8-flash", enable_thinking=True, task_desc=f"[工單旗艦重跑 {uid}]"  # 🚨 人工工單一律出動 3.8-flash
+        temperature=0.2, preferred_model="gemini-4-hydrogen", enable_thinking=True, thinking_level="HIGH", task_desc=f"[工單旗艦重跑 {uid} (Gemini 4 Hydrogen)]"
     )
     
     if sol_batch and 'solutions' in sol_batch and sol_batch['solutions']:
@@ -9192,6 +9211,7 @@ if __name__ == "__main__":
         print(f"打散後最後一組: {API_KEYS[-1][:15]}...")
     # 推薦使用 flash 模型處理多模態 (Vision) 任務，速度快且便宜
     MODELS = [
+        "gemini-4-hydrogen",       # 最新旗艦極速主力：比 3.8 Flash 快 2.5 倍且推理更強，負責高難推導、審查與仲裁
         "gemini-3.8-flash",        # 旗艦算力：負責學術仲裁、工單重跑、理科高難推導
         "gemini-3.7-flash",        # 次旗艦：負責名師一題多解、另解速解推演
         "gemini-3.6-flash",        # 均衡主力：負責審查批判、文科名師詳解
