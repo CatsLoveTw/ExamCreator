@@ -4104,10 +4104,15 @@ class ExamParser:
         try:
             doc = fitz.open(pdf_path)
             for page_num in range(len(doc)):
-                page = doc[page_num]
-                pix = page.get_pixmap(dpi=dpi)
                 filename = f"{prefix}_page_{page_num+1:02d}.png"
                 filepath = os.path.join(target_dir, filename)
+                normalized_path = filepath.replace("\\", "/")
+                # 🚀 斷點續傳加速：若圖片已存在且完整，直接複用不重算 300 DPI
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 1024:
+                    image_paths.append(normalized_path)
+                    continue
+                page = doc[page_num]
+                pix = page.get_pixmap(dpi=dpi)
                 
                 # 全局影像強化：防止印刷淡字、微小分數線或細微符號遺漏
                 from PIL import Image, ImageEnhance
@@ -5819,12 +5824,24 @@ class ExamParser:
         if not 'rubric_image_paths' in locals():
             rubric_image_paths = []
 
-        doc = fitz.open(q_pdf)
-        cat = doc.pdf_catalog()
-        doc.xref_set_key(cat, "StructTreeRoot", "null")
+        # 計算本科合理題數下限，判斷現有 raw 快取是否缺漏大量題目
+        if "國寫" in clean_subj_name: expected_min_backfill = 2
+        elif clean_subj_name in ["數學甲", "數學乙"]: expected_min_backfill = 11
+        elif "數" in clean_subj_name: expected_min_backfill = 15
+        elif "化學" in clean_subj_name: expected_min_backfill = 21
+        elif "物理" in clean_subj_name: expected_min_backfill = 18
+        elif "自然" in clean_subj_name: expected_min_backfill = 52
+        elif "社會" in clean_subj_name: expected_min_backfill = 58
+        elif "英文" in clean_subj_name: expected_min_backfill = 45
+        elif "國文" in clean_subj_name: expected_min_backfill = 36 if y_val >= 107 else 20
+        else: expected_min_backfill = 32
 
-        # 🆕 2. 只有在【完全無快取】時，才執行全卷分頁初次掃描；若有快取則直接進入下方的【增量補漏雙引擎】
-        if not all_extracted_questions:
+        needs_page_backfill = (len(all_extracted_questions) == 0) or (len(all_extracted_questions) < expected_min_backfill)
+        if needs_page_backfill and all_extracted_questions:
+            logging.warning(f"🔄 [啟動頁面級增量補掃描] 現有快取僅 {len(all_extracted_questions)} 題（低於基準 {expected_min_backfill} 題），將保留現有成果並補掃缺漏頁面！")
+
+        # 🆕 2. 若無快取，或快取嚴重缺題（如 1/65 題殘骸），則執行缺失頁面掃描與雙引擎補漏
+        if needs_page_backfill:
             logging.info("📸 正在將原卷與解答 PDF 轉換成黃金 300 DPI 整頁圖片...")
             GLOBAL_METRICS.set_stage(f"📸 正在將試卷與解答 PDF 轉換為 300 DPI 整頁影像 ({year} {subject})")
 
@@ -5889,16 +5906,27 @@ class ExamParser:
                 except Exception: pass
 
             # 🚀【MinerU 真理分段裝配】：MinerU 做為各頁排版真理層，嚴禁單次 Prompt 試圖吞下全卷 70 題造成 Token 溢出截斷！
+            # 🚀 若已有部分題目，計算已掃描覆蓋的頁碼（若僅剩 1~3 題殘骸，為防該頁截斷漏題，不跳過已覆蓋頁，由去重合併處理）
+            covered_pages = set()
+            if len(all_extracted_questions) > 3:
+                page_counts = {}
+                for q_it in all_extracted_questions:
+                    pn = int(q_it.get("page_number", 0)) - 1
+                    if pn >= 0: page_counts[pn] = page_counts.get(pn, 0) + 1
+                # 只跳過至少有 2 題以上且非最後一頁的頁面
+                max_cov = max(page_counts.keys()) if page_counts else -1
+                covered_pages = {p for p, cnt in page_counts.items() if cnt >= 2 and p < max_cov}
+
             pages = []
             allowed_q_set = set(q_page_idxs) if 'q_page_idxs' in locals() else set(range(len(doc)))
             for page_num in range(len(doc)):
                 if page_num not in allowed_q_set: continue
                 if is_combined_pdf and page_num in ans_page_indices: continue
+                if page_num in covered_pages: continue
                 raw_page_text = doc[page_num].get_text("text")
                 p_type = self.classify_page_type(raw_page_text, page_num, len(doc))
                 if p_type in ["COVER", "TOC", "SUMMARY", "SOLUTION"]: continue
                 pages.append(page_num)
-
             page_batch_size = 2 if is_stem else 3
 
             for b_idx in range(0, len(pages), page_batch_size):
@@ -8381,17 +8409,18 @@ class ExamParser:
 
         valid_solved_questions = [q for q in all_final_questions if is_really_complete(q)]
         
-        # 2. 🚨 雙重完工判讀：依據【已正規化學科 clean_subj_name】精確核對法定題數下限！
-        min_threshold_map = {
-            "社會": 65, "自然": 60, "英文": 45, "國文": 38, 
-            "數學甲": 12, "數學乙": 10, "數學A": 15, "數學B": 15, "數學": 10, 
-            "國寫": 2
-        }
-        target_min = 20
-        for sub_k, min_v in min_threshold_map.items():
-            if sub_k in clean_subj_name:
-                target_min = min_v
-                break
+        # 2. 🚨 雙重完工判讀：與 repair_database.py 完全對齊之歷史課綱動態下限！
+        if clean_subj_name == "國文": target_min = 36 if y_val >= 107 else 20
+        elif clean_subj_name == "國寫": target_min = 2
+        elif clean_subj_name == "自然": target_min = 52 if y_val >= 111 else 58
+        elif clean_subj_name == "社會": target_min = 58 if y_val >= 111 else 64
+        elif clean_subj_name == "物理": target_min = 20 if y_val >= 95 else 16
+        elif clean_subj_name == "化學": target_min = 21
+        elif clean_subj_name == "生物": target_min = 34 if y_val >= 100 else 23
+        elif clean_subj_name == "英文": target_min = 45
+        elif clean_subj_name in ["數學甲", "數學乙"]: target_min = 11
+        elif "數" in clean_subj_name: target_min = 15 if (y_val >= 111 or exam_type in ["GSAT", "MOCK_GSAT"]) else 12
+        else: target_min = 28
 
         # 🚨 剛性門檻：題數不足、有空白詳解、或題幹殘留「詳見題目卷」者，【強制維持 partial】，下次自動補齊真題！
         has_empty_sols = any(len(str(q.get("detailed_solution", "")).strip()) < 20 for q in valid_solved_questions)
@@ -9409,9 +9438,9 @@ if __name__ == "__main__":
                 pass
 
     with GLOBAL_METRICS.lock:
-        GLOBAL_METRICS.total_papers = len(exam_tasks)
+        GLOBAL_METRICS.total_papers = len(raw_exam_tasks)
         GLOBAL_METRICS.completed_papers = pre_completed_count
-
+        
     logging.info(f"📊 [歷史進度盤點完畢] 全庫共 {len(exam_tasks)} 份試卷，已完工 {pre_completed_count} 份，剩餘 {len(exam_tasks) - pre_completed_count} 份待解析。")
     GLOBAL_METRICS.add_log(f"📊 全庫進度已載入：{pre_completed_count}/{len(exam_tasks)} 卷已完工")
 
