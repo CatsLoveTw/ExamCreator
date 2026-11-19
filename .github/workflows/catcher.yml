@@ -364,7 +364,7 @@ jobs:
 
       - name: Run parser script
         if: ${{ github.event.inputs.repair_only != 'true' && github.event.inputs.test_mineru_only != 'true' }}
-        timeout-minutes: 320
+        timeout-minutes: 290
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -372,6 +372,10 @@ jobs:
           GEMINI_PROXY_URL: ${{ secrets.GEMINI_PROXY_URL }}
           REFRESH_DIAGRAMS: ${{ github.event.inputs.refresh_diagrams == 'true' && 'true' || 'false' }}
           PROCESS_REPORTED_TICKETS_ONLY: ${{ github.event.inputs.process_reported_tickets_only == 'true' && 'true' || 'false' }}
+          OMP_NUM_THREADS: "2"
+          MKL_NUM_THREADS: "2"
+          OPENBLAS_NUM_THREADS: "2"
+          TORCH_NUM_THREADS: "2"
         run: python catcher.py
 
       - name: Push Results to Google Drive
