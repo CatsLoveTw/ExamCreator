@@ -42,7 +42,9 @@ signal.signal(signal.SIGINT, handle_system_shutdown)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 GLOBAL_START_TIME = time.time()
-MAX_EXECUTION_TIME_SECONDS = 4.5 * 3600  # 5 小時安全時間上限，保證在 6h GHA 砍掉前優雅退出
+MAX_EXECUTION_TIME_SECONDS = 4.4 * 3600  # 5 小時安全時間上限，保證在 6h GHA 砍掉前優雅退出
+
+import gc
 
 # 🚨 並發資源安全鎖
 GLOBAL_ERRATA_LOCK = threading.Lock()
@@ -1393,7 +1395,7 @@ class FreeTierKey:
         proxy_key = custom_base_url or "direct"
         with self.cache_lock:
             if proxy_key not in self.clients_cache:
-                http_opts = types.HttpOptions(timeout=900_000)
+                http_opts = types.HttpOptions(timeout=180_000)
                 if custom_base_url:
                     http_opts.base_url = custom_base_url
                 self.clients_cache[proxy_key] = genai.Client(api_key=self.api_key, http_options=http_opts)
@@ -1576,8 +1578,9 @@ class LiveDashboardMetrics:
         self.recent_rtt_list = [] # 最近 30 次 API RTT 滑動視窗
 
         self.history_file = "telemetry_history.json"
+        self._last_history_save_ts = 0.0
         self.history_data = self.load_history()
-        self.save_history()
+        self.save_history(force=True)
 
         # 🚨 全域結構化錯誤帳本 (Global Error Ledger)
         self.error_ledger_file = "pipeline_error_ledger.json"
@@ -1806,17 +1809,22 @@ class LiveDashboardMetrics:
                     if "runs" not in data: 
                         data = {"runs": []}
                     else:
-                        # 🧹 自動過濾歷史中「0題0卷」的無效崩潰紀錄，只保留真正有產出的工作階段
-                        data["runs"] = [
+                        # 🧹 只保留最近 15 筆有效運行紀錄，防止 JSON 無限膨脹拖垮記憶體與寫盤鎖
+                        valid_runs = [
                             r for r in data["runs"] 
                             if r.get("completed_questions", 0) > 0 or r.get("completed_papers", 0) > 0
                         ]
+                        data["runs"] = valid_runs[-15:]
                     return data
             except Exception: pass
         return {"runs": []}
 
-    def save_history(self):
+    def save_history(self, force: bool = False):
+        now_t = time.time()
+        if not force and (now_t - getattr(self, "_last_history_save_ts", 0.0)) < 15.0:
+            return
         with self.lock:
+            self._last_history_save_ts = now_t
             try:
                 current_session = {
                     "session_id": self.session_id,
@@ -3688,8 +3696,12 @@ def execute_and_fix_diagram_script(ai_manager, initial_prompt, response_schema, 
                 finally:
                     try:
                         import matplotlib.pyplot as plt
+                        plt.clf()
+                        plt.cla()
                         plt.close('all')
+                        isolated_scope.clear()
                     except Exception: pass
+                    gc.collect()
 
             if not exec_error and os.path.exists(norm_diagram_path) and os.path.getsize(norm_diagram_path) > 0:
                 logging.info(f"✅ [繪圖成功] 題號 {safe_q_num} 圖表已生成：{os.path.basename(norm_diagram_path)}")
@@ -7964,28 +7976,36 @@ class ExamParser:
                     
                     validator_batch_prompt = llama_cot_instruction + PROMPT_STAGE_3_VALIDATOR.format(validator_batch_intro=validator_batch_intro)
                     
-                    # 🚨 審查必須帶上本批次所有裁切圖片，徹底杜絕「文字盲審」！
+                    # 🚨 審查必須帶上本批次所有裁切圖片，並在呼叫完畢後立刻關閉圖片釋放 RAM！
                     validator_contents = [validator_batch_prompt]
+                    val_opened_imgs = []
                     for item in valid_batch:
                         q_d = item["q_data"]
                         for img_p in q_d.get('image_paths', []):
                             if os.path.exists(img_p):
                                 try:
-                                    validator_contents.append(Image.open(img_p))
+                                    im_v = Image.open(img_p)
+                                    val_opened_imgs.append(im_v)
+                                    validator_contents.append(im_v)
                                 except Exception:
                                     pass
                     
                     dynamic_val_model = tier1_pool[(q_num_int + 1) % len(tier1_pool)]
 
-                    val_dict, val_err = self.ai_manager.generate_with_retry(
-                        contents=validator_contents, 
-                        response_schema=SolutionValidatorBatch,
-                        temperature=0.0, 
-                        preferred_model=dynamic_val_model, 
-                        provider="google", 
-                        enable_thinking=True,
-                        task_desc=f"{paper_tag} [Gemini 審查 ({dynamic_val_model})]"
-                    )
+                    try:
+                        val_dict, val_err = self.ai_manager.generate_with_retry(
+                            contents=validator_contents, 
+                            response_schema=SolutionValidatorBatch,
+                            temperature=0.0, 
+                            preferred_model=dynamic_val_model, 
+                            provider="google", 
+                            enable_thinking=True,
+                            task_desc=f"{paper_tag} [Gemini 審查 ({dynamic_val_model})]"
+                        )
+                    finally:
+                        for im_v in val_opened_imgs:
+                            try: im_v.close()
+                            except Exception: pass
 
                     # 處理審查結果 (包含重掃描 OCR)
                     for idx, item in enumerate(valid_batch):
@@ -8317,10 +8337,11 @@ class ExamParser:
         # =========================================================
         # 啟動考卷內題目並行處理 (ThreadPoolExecutor)
         # =========================================================
-        max_workers = max(2, min(len(API_KEYS) * 2, 10))
+        max_workers = max(2, min(len(API_KEYS) * 2, 6))  # 🚨 上限調整為 6 條執行緒，避免高併發時 PIL/RAM 峰值過載
         logging.info(f"🚀 開始並行詳解生成！啟動 {max_workers} 條執行緒 (啟用冷啟動階梯平滑調度)...")
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             futures = set()
             thread_spawn_count = 0
             while True:
@@ -8360,19 +8381,22 @@ class ExamParser:
                     except Exception as e:
                         logging.error(f"批次處理執行緒發生例外: {e}")
                 
-                # 🚨 檢查是否接近 5 小時全域上限或收到 Web 控制台「🛑 優雅停機」指令！
+                # 🚨 檢查是否接近 4.4 小時全域上限或收到 Web 控制台「🛑 優雅停機」指令！
                 try:
                     check_global_timeout()
                 except TimeoutSafetyException as tse:
-                    logging.critical(f"🛑 [全域中斷觸發] {tse}！正在立即取消其餘批次並安全退出...")
+                    logging.critical(f"🛑 [全域中斷觸發] {tse}！正在強制解散執行緒池並安全落盤退出...")
                     for f in futures:
                         f.cancel()
+                    executor.shutdown(wait=False, cancel_futures=True)
                     raise tse
 
                 if rpd_hit:
                     for f in futures:
                         f.cancel()
                     break
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         # 最後排序題號以維持最終 JSON 整齊，防範字典序排序導致 10 排在 2 前面
         def safe_page_to_int(val):
@@ -8520,13 +8544,18 @@ class ExamParser:
         with GLOBAL_METRICS.lock:
             GLOBAL_METRICS.completed_papers += 1
         GLOBAL_METRICS.add_log(f"🎉 考卷 [{year} {subject}] 解析完成並成功存檔！")
-        # 🚨 關閉 PDF 文件手把
+        # 🚨 關閉 PDF 文件手把並強制回收 PyMuPDF C 層與 PIL 記憶體緩衝
         if doc is not None:
             try:
                 if not doc.is_closed:
                     doc.close()
             except Exception:
                 pass
+        try:
+            fitz.TOOLS.store_shrink(100)
+        except Exception:
+            pass
+        gc.collect()
 
 # 4. 自動尋找檔案腳本 (自動化遍歷)
 # ==========================================
@@ -9490,13 +9519,16 @@ if __name__ == "__main__":
             try:
                 future.result()
             except (RPDExhaustedException, TimeoutSafetyException) as exit_exc:
-                logging.critical(f"🛑 [全域安全退出] 觸發安全保護 ({exit_exc})！正在安全終止 Python...")
-                # 🚨 強制取消所有還沒執行的考卷任務
+                logging.critical(f"🛑 [全域安全退出] 觸發安全保護 ({exit_exc})！正在立即保存狀態並秒級退出...")
                 for f in futures:
                     f.cancel()
-                
-                logging.info("🎉 已保存當前所有完成進度，正常結束 Python 程序 (Exit 0)。")
-                sys.exit(0)  # 🚨 關鍵：立刻以 Exit Code 0 結束 Python，讓 YML 接手進行上傳！
+                try:
+                    GLOBAL_METRICS.save_history(force=True)
+                    logging.shutdown()
+                except Exception:
+                    pass
+                # 🚨 使用 os._exit(0) 繞過 Python atexit 對背景僵屍執行緒的死等，確保 0.1 秒內立刻交棒給 Push Results 上傳！
+                os._exit(0)
             except Exception as e:
                 logging.error(f"❌ 處理考卷時發生嚴重錯誤: {e}")
                 
