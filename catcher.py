@@ -51,6 +51,7 @@ GLOBAL_ERRATA_LOCK = threading.Lock()
 GLOBAL_ERRATA_MAP = {}  # {(subject, q_num): corrected_answer}
 MATPLOTLIB_RENDER_LOCK = threading.Lock()  # 繪圖記憶體狀態保護鎖
 PYMUPDF_LOCK = threading.Lock()            # PyMuPDF 底層 C 記憶體指標保護鎖
+MINERU_SUBPROCESS_LOCK = threading.Lock()  # 🚨 嚴禁多個 magic-pdf 同時啟動，防止 16GB RAM 瞬間 OOM 爆掉
 
 def get_errata_answer(subject: str, qn: str) -> Optional[str]:
     with GLOBAL_ERRATA_LOCK:
@@ -4199,51 +4200,110 @@ class ExamParser:
         results_lock = threading.Lock()
         
     @staticmethod
-    def extract_via_mineru(pdf_path: str, output_dir: str) -> Optional[str]:
+    def extract_via_mineru(pdf_path: str, output_dir: str, max_pages: int = 25) -> Optional[str]:
         if not pdf_path or not os.path.exists(pdf_path):
             return None
-        try:
-            import subprocess
-            import glob
-            
-            logging.info(f"🚀 [MinerU 引擎接管] 正在解析: {os.path.basename(pdf_path)}...")
-            
-            # 確保 output_dir 存在
-            os.makedirs(output_dir, exist_ok=True)
-            
-            # 使用 -o 指定目錄，並加入 --log-level=WARNING 減少干擾輸出
-            cmd = ["magic-pdf", "-p", os.path.abspath(pdf_path), "-o", os.path.abspath(output_dir), "-m", "auto"]
-            
-            # 🚨 執行時，我們不捕捉 stderr，讓報錯直接噴在 GitHub Actions Log，便於除錯
-            result = subprocess.run(cmd, timeout=240)
-            
-            if result.returncode != 0:
-                logging.warning(f"⚠️ MinerU 命令回傳代碼: {result.returncode}")
 
-            # 🚀 暴力搜尋策略：不管 MinerU 把資料夾改名成什麼，Markdown 檔案跑不掉！
-            # 只要是在 output_dir 下產出的所有 .md 檔，全部列出來
-            md_files = glob.glob(os.path.join(output_dir, "**", "*.md"), recursive=True)
-            
-            # 過濾掉空檔案
-            valid_mds = [f for f in md_files if os.path.getsize(f) > 100]
-            
-            if valid_mds:
-                # 取最新修改的 md 檔 (通常就是剛產出的那個)
-                best_md = max(valid_mds, key=os.path.getmtime)
-                with open(best_md, "r", encoding="utf-8") as f:
-                    md_content = f.read()
-                
-                logging.info(f"🎉 [MinerU 提取成功] 找到產出檔案: {os.path.basename(best_md)}")
-                return s2t(md_content.strip())
-            else:
-                # 偵錯用：列出當前資料夾目錄結構，看看 MinerU 到底把東西藏在哪了
-                logging.warning(f"⚠️ 找不到 Markdown！目標目錄 {output_dir} 下的結構：")
-                for root, dirs, files in os.walk(output_dir):
-                    logging.warning(f" -> {root}: {files}")
-                
-        except Exception as e:
-            logging.warning(f"⚠️ [MinerU 降級] 發生例外 ({e})，切換至備用通道...")
-        return None
+        # 🚨 1. 執行前先強制回收 Python/PyMuPDF 記憶體，確保把最大空間讓給 magic-pdf
+        try:
+            fitz.TOOLS.store_shrink(100)
+        except Exception:
+            pass
+        gc.collect()
+
+        # 🚨 2. Linux (GHA) 剩餘可用記憶體檢查：若低於 3.5 GB 則安全退避，避免 OOM 殺死 Runner！
+        if os.path.exists("/proc/meminfo"):
+            try:
+                with open("/proc/meminfo", "r") as mf:
+                    for line in mf:
+                        if line.startswith("MemAvailable:"):
+                            avail_mb = int(line.split()[1]) // 1024
+                            if avail_mb < 3500:
+                                logging.warning(f"⚠️ [RAM 防爆退避] 系統剩餘記憶體僅 {avail_mb} MB (< 3500 MB)，為避免 OOM 失聯，本卷暫時跳過 MinerU 改走視覺備援！")
+                                return None
+                            break
+            except Exception:
+                pass
+
+        # 🚨 3. 頁數安全上限檢查（避免 100 頁超大合訂本在 CPU 上把記憶體撐爆）
+        total_pages = 0
+        try:
+            with fitz.open(pdf_path) as d_chk:
+                total_pages = len(d_chk)
+        except Exception:
+            pass
+
+        if total_pages > 40:
+            logging.warning(f"⚠️ [大合輯保護] {os.path.basename(pdf_path)} 共 {total_pages} 頁，超過 CPU 版 MinerU 安全上限，改由分頁視覺掃描處理！")
+            return None
+
+        with MINERU_SUBPROCESS_LOCK:
+            proc = None
+            try:
+                import subprocess
+                import glob
+
+                logging.info(f"🚀 [MinerU 引擎接管] 正在解析 ({total_pages or '?'} 頁): {os.path.basename(pdf_path)}...")
+                os.makedirs(output_dir, exist_ok=True)
+
+                cmd = ["magic-pdf", "-p", os.path.abspath(pdf_path), "-o", os.path.abspath(output_dir), "-m", "auto"]
+                if total_pages > max_pages:
+                    cmd.extend(["-s", "0", "-e", str(max_pages - 1)])
+
+                # 限制底層 PyTorch / OpenMP 執行緒數，避免把 4 核 CPU 塞死導致 GHA 斷線
+                sub_env = os.environ.copy()
+                sub_env["OMP_NUM_THREADS"] = "2"
+                sub_env["MKL_NUM_THREADS"] = "2"
+                sub_env["OPENBLAS_NUM_THREADS"] = "2"
+                sub_env["TORCH_NUM_THREADS"] = "2"
+
+                popen_kwargs = {"env": sub_env}
+                if os.name == "posix":
+                    popen_kwargs["start_new_session"] = True
+                    # 降低 CPU 調度優先級 (nice +10)，永遠優先保留算力給 GitHub Runner 心跳與系統程序
+                    popen_kwargs["preexec_fn"] = lambda: os.nice(10)
+
+                proc = subprocess.Popen(cmd, **popen_kwargs)
+                returncode = proc.wait(timeout=240)
+
+                if returncode != 0:
+                    logging.warning(f"⚠️ MinerU 命令回傳代碼: {returncode}")
+
+                md_files = glob.glob(os.path.join(output_dir, "**", "*.md"), recursive=True)
+                valid_mds = [f for f in md_files if os.path.getsize(f) > 100]
+
+                if valid_mds:
+                    best_md = max(valid_mds, key=os.path.getmtime)
+                    with open(best_md, "r", encoding="utf-8") as f:
+                        md_content = f.read()
+
+                    # 🧹 隨手清理 MinerU 產生的龐大除錯中介 PDF (*_layout.pdf, *_spans.pdf, *_origin.pdf)，節省磁碟
+                    for trash_pat in ["*_layout.pdf", "*_spans.pdf", "*_origin.pdf"]:
+                        for tf in glob.glob(os.path.join(output_dir, "**", trash_pat), recursive=True):
+                            try: os.remove(tf)
+                            except Exception: pass
+
+                    logging.info(f"🎉 [MinerU 提取成功] 找到產出檔案: {os.path.basename(best_md)}")
+                    return s2t(md_content.strip())
+                else:
+                    logging.warning(f"⚠️ 找不到 Markdown！目標目錄 {output_dir} 無有效產出。")
+
+            except subprocess.TimeoutExpired:
+                logging.warning(f"⏳ [MinerU 逾時 240s] 正在連根清除整個進程群組，防止孤兒程序佔用記憶體...")
+                if proc is not None:
+                    try:
+                        if os.name == "posix":
+                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                        else:
+                            proc.kill()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        pass
+            except Exception as e:
+                logging.warning(f"⚠️ [MinerU 降級] 發生例外 ({e})，切換至備用通道...")
+            finally:
+                gc.collect()
+            return None
 
     @staticmethod
     def extract_clean_markdown_from_pdf(pdf_path: str, page_num: int) -> str:
@@ -5044,18 +5104,14 @@ class ExamParser:
         if not a_pdf or not os.path.exists(a_pdf):
             return "無官方解答。", []
 
-        # 🚀【第一優先：MinerU 本地解析表格 + AI 純文字秒級隔離】
+        # 🚀【第一優先：MinerU (magic-pdf) 本地解析表格 + AI 純文字秒級隔離】
+        temp_ans_dir = None
         try:
-            # 建立暫存目錄供 MinerU 存放解答表格 Markdown
             temp_ans_dir = os.path.abspath(f"temp_mineru_ans_{uuid.uuid4().hex[:6]}").replace("\\", "/")
             os.makedirs(temp_ans_dir, exist_ok=True)
             
             logging.info(f"🚀 [MinerU 答案引擎啟動] 先以 MinerU 本地提取解答卷排版表格 (0 Token 消耗)：{os.path.basename(a_pdf)}...")
-            mineru_markdown = self.extract_via_mineru(a_pdf, temp_ans_dir)
-            
-            # 清理臨時圖檔目錄
-            import shutil
-            shutil.rmtree(temp_ans_dir, ignore_errors=True)
+            mineru_markdown = self.extract_via_mineru(a_pdf, temp_ans_dir, max_pages=20)
 
             if mineru_markdown and len(mineru_markdown.strip()) > 50:
                 logging.info(f"⚡ [MinerU 表格提取成功] 正在以純文字向 AI 進行【{target_subject}】專屬答案抽取 (免傳大圖，極速無逾時)...")
@@ -5107,7 +5163,11 @@ class ExamParser:
                         return json.dumps(mineru_ans_map, ensure_ascii=False), [0]
         except Exception as e:
             logging.warning(f"⚠️ [MinerU 答案引擎回退] 本地表格解析跳過 ({e})，啟動原有雙模型圖片驗證保底...")
-
+        finally:
+            if temp_ans_dir and os.path.exists(temp_ans_dir):
+                import shutil
+                shutil.rmtree(temp_ans_dir, ignore_errors=True)
+                
         # -----------------------------------------------------------------
         # 🛡️【第二防線：保留原有雙模型大圖共識投票作為終極保底】
         # -----------------------------------------------------------------
