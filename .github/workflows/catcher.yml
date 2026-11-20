@@ -209,6 +209,9 @@ jobs:
           # =========================================================================
           # 🚀 第一步：優先抓取根目錄的高速壓縮包與狀態檔（秒級完成核心數據恢復）
           # =========================================================================
+          # =========================================================================
+          # 🚀 第一步：優先抓取根目錄的高速壓縮包與狀態檔（加入防 429 節流保護）
+          # =========================================================================
           rclone copy gdrive: ./gdrive_workspace \
             --include "exam_databases.zip" \
             --include "exam_images.zip" \
@@ -216,7 +219,9 @@ jobs:
             --include "*.json" \
             --include "key_status.txt" \
             --include "key_errors_summary.txt" \
-            --fast-list \
+            --fast-list --transfers 4 --checkers 8 \
+            --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms \
+            --retries 8 --low-level-retries 15 --retries-sleep 15s \
             --config rclone.conf -v || true
 
           # 1. ⚡ 智慧動態解壓縮所有題庫分卷 (完整支援 mock1.zip, mock2.zip, exams1.zip 等)
@@ -274,7 +279,10 @@ jobs:
           if grep -q "\[gdrive_mock\]" rclone.conf; then MOCK_REMOTE="gdrive_mock"; fi
 
           echo "⬇️ 檢查並拉取模擬考專用圖片包 (${MOCK_REMOTE}:mock_exam_images.zip)..."
-          rclone copyto ${MOCK_REMOTE}:mock_exam_images.zip ./gdrive_workspace/mock_exam_images.zip --config rclone.conf -v || true
+          rclone copyto ${MOCK_REMOTE}:mock_exam_images.zip ./gdrive_workspace/mock_exam_images.zip \
+            --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms \
+            --retries 8 --low-level-retries 15 --retries-sleep 15s \
+            --config rclone.conf -v || true
           if [ -f "./gdrive_workspace/mock_exam_images.zip" ]; then
             echo "⚡ 找到模考專用圖片高速包，正在秒級解壓縮..."
             unzip -q -o "./gdrive_workspace/mock_exam_images.zip" -d ./
@@ -286,7 +294,10 @@ jobs:
             echo "🔄 從模考帳號增量補齊模擬考散裝圖片..."
             rclone copy gdrive_mock:exam_database_output/模擬考 ./exam_database_output/模擬考 \
               --include "*.png" --include "*.jpg" --include "*.jpeg" --include "*.webp" \
-              --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+              --fast-list --transfers 4 --checkers 8 \
+              --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms \
+              --retries 8 --low-level-retries 15 --retries-sleep 15s \
+              --config rclone.conf -v || true
           fi
 
           # =========================================================================
@@ -295,9 +306,9 @@ jobs:
           # =========================================================================
           echo "🔄 正在從雲端增量同步並補足任何散裝、partial 檔案..."
           rclone copy gdrive:exam_database_output ./exam_database_output \
-            --fast-list \
-            --transfers 16 \
-            --checkers 32 \
+            --fast-list --transfers 4 --checkers 8 \
+            --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms \
+            --retries 8 --low-level-retries 15 --retries-sleep 15s \
             --config rclone.conf -v || true
           
           # 4. 精準還原知識庫與狀態記憶庫
@@ -332,13 +343,13 @@ jobs:
             # 🚨 關鍵修復：同時生成「檔名（匹配根目錄）」與「**/檔名（匹配子資料夾）」！
             awk 'NF {print $0 "\n**/" $0}' purged_filenames.txt | sort -u > rclone_include_rules.txt
             if [ -s "rclone_include_rules.txt" ]; then
-              # 雙重嘗試：先嘗試永久刪除，若遇共享權限 403 則自動改以移至垃圾桶確保從雲端目錄移除
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --drive-use-trash=false --config rclone.conf -v || \
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+              # 雙重嘗試：先嘗試永久刪除，若遇共享權限 403 則自動改以移至垃圾桶，並限制 TPS 防 429
+              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --drive-use-trash=false --config rclone.conf -v || \
+              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --config rclone.conf -v || true
 
               if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --drive-use-trash=false --config rclone.conf -v || \
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --drive-use-trash=false --config rclone.conf -v || \
+                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --config rclone.conf -v || true
               fi
             fi
             rm -f rclone_include_rules.txt
@@ -378,12 +389,18 @@ jobs:
           TORCH_NUM_THREADS: "2"
         run: python catcher.py
 
+      
+          
       - name: Push Results to Google Drive
         if: ${{ always() && github.event.inputs.test_mineru_only != 'true' }}
         run: |
-          echo "⬆️ 執行完畢，開啟【清理先行 + 三階段極速上傳】..."
+          echo "⬆️ 執行完畢，開啟【清理先行 + 防 429 節流三階段上傳】..."
           MOCK_REMOTE="gdrive"
           if grep -q "\[gdrive_mock\]" rclone.conf; then MOCK_REMOTE="gdrive_mock"; fi
+
+          # 🛡️ 針對 GitHub Actions 機房 IP 專用防 429 參數：壓低併發、限制 TPS、拉長退避重試與加大分塊
+          RCLONE_SAFE="--fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 8 --low-level-retries 15 --retries-sleep 20s --config rclone.conf"
+          RCLONE_ZIP_SAFE="--drive-chunk-size 256M --tpslimit 4 --tpslimit-burst 2 --drive-pacer-min-sleep 200ms --retries 8 --low-level-retries 15 --retries-sleep 20s --config rclone.conf"
 
           # =========================================================
           # 🧹 [第 0 階段：優先雲端清理] 在上傳圖片前優先執行，防超時遺漏！
@@ -391,11 +408,11 @@ jobs:
           if [ -f "pending_cloud_purges.txt" ]; then
             sed -e 's|^gdrive:exam_database_output/||' -e 's|^gdrive_mock:exam_database_output/||' pending_cloud_purges.txt | sort -u > rclone_purge_files.txt
             if [ -s "rclone_purge_files.txt" ]; then
-              rclone delete gdrive:exam_database_output --files-from rclone_purge_files.txt --fast-list --transfers 16 --checkers 32 --drive-use-trash=false --config rclone.conf -v || \
-              rclone delete gdrive:exam_database_output --files-from rclone_purge_files.txt --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+              rclone delete gdrive:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE --drive-use-trash=false -v || \
+              rclone delete gdrive:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE -v || true
               if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
-                rclone delete gdrive_mock:exam_database_output --files-from rclone_purge_files.txt --fast-list --transfers 16 --checkers 32 --drive-use-trash=false --config rclone.conf -v || \
-                rclone delete gdrive_mock:exam_database_output --files-from rclone_purge_files.txt --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+                rclone delete gdrive_mock:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE --drive-use-trash=false -v || \
+                rclone delete gdrive_mock:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE -v || true
               fi
             fi
             rm -f pending_cloud_purges.txt rclone_purge_files.txt
@@ -404,95 +421,94 @@ jobs:
           if [ -f "purged_filenames.txt" ]; then
             awk 'NF {print $0 "\n**/" $0}' purged_filenames.txt | sort -u > rclone_include_rules.txt
             if [ -s "rclone_include_rules.txt" ]; then
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --drive-use-trash=false --config rclone.conf -v || \
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE --drive-use-trash=false -v || \
+              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE -v || true
               if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --drive-use-trash=false --config rclone.conf -v || \
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 16 --checkers 32 --config rclone.conf -v || true
+                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE --drive-use-trash=false -v || \
+                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE -v || true
               fi
             fi
             rm -f purged_filenames.txt rclone_include_rules.txt
           fi
 
           # =========================================================
-          # === 第一階段：最高優先級！秒級上傳所有 JSON 資料庫與狀態檔 ===
+          # === 第一階段：最高優先級！上傳所有 JSON 資料庫與狀態檔 ===
           # =========================================================
-          echo "⚡ [第一階段] 上傳 JSON 資料庫與狀態記憶庫..."
+          echo "⚡ [第一階段] 上傳 JSON 資料庫..."
           rclone copy ./exam_database_output gdrive:exam_database_output \
             --include "*.json" \
             --include "*_validator_log.txt" \
-            --fast-list \
-            --transfers 16 \
-            --checkers 32 \
-            --config rclone.conf -v
+            $RCLONE_SAFE -v || true
+
+          sleep 2
+
+          echo "⚡ [第 1.2 階段] 合併單次上傳所有狀態記憶庫（避免 6 次獨立 copyto 觸發 429）..."
+          rclone copy . gdrive: \
+            --include "subject.json" \
+            --include "key_errors_summary.txt" \
+            --include "model_limits.json" \
+            --include "key_status.txt" \
+            --include "telemetry_history.json" \
+            --include "scheduler_state.json" \
+            --max-depth 1 \
+            $RCLONE_SAFE -v || true
+
+          sleep 2
 
           echo "📦 [第 1.5 階段] 正在將正式完成的 JSON 資料庫打包為高速單一壓縮檔 exam_databases.zip..."
-          # 🚨 關鍵過濾：只納入 *_database.json，嚴格排除 *_partial_database.json 與 *_raw_extracted.json
           rm -f exam_databases.zip
           find exam_database_output -name "*_database.json" ! -name "*_partial_database.json" ! -name "*_raw_extracted.json" | zip -q -1 exam_databases.zip -@
-          rclone copyto ./exam_databases.zip gdrive:exam_databases.zip \
-            --drive-chunk-size 64M \
-            --config rclone.conf -v
-          echo "🎉 [第 1.5 階段完成] 題庫純淨正式包打包完成（已剔除所有 partial 暫存檔）！"
+          rclone copyto ./exam_databases.zip gdrive:exam_databases.zip $RCLONE_ZIP_SAFE -v || \
+            echo "⚠️ exam_databases.zip 暫遇 429 限流（散裝 JSON 已於第一階段安全備份），繼續執行後續步驟！"
 
-          for state_file in subject.json key_errors_summary.txt model_limits.json key_status.txt telemetry_history.json scheduler_state.json; do
-            if [ -f "./$state_file" ]; then
-              rclone copyto "./$state_file" "gdrive:$state_file" --config rclone.conf -v
-            fi
-          done
-
-          echo "🎉 [第一階段完成] JSON 資料庫已 100% 安全存入雲端！"
+          echo "🎉 [第一階段完成] JSON 資料庫已安全存入雲端！"
 
           # =========================================================
-          # === 第二階段：🚀 雙軌分離高速打包 (大考圖片包 vs 模考專屬圖片包) ===
+          # === 第二階段：🚀 雙軌分離高速打包 (256M 大分塊防 429 阻斷) ===
           # =========================================================
-          MOCK_REMOTE="gdrive"
-          if grep -q "\[gdrive_mock\]" rclone.conf; then MOCK_REMOTE="gdrive_mock"; fi
-
-          # A. 打包「學測、分科、指考、學校定期考」圖片為 exam_images.zip (100% 排除模擬考)
-          echo "📦 [第二階段 A] 正在打包大考與段考圖片包 exam_images.zip (排除所有模擬考圖片)..."
+          sleep 3
+          echo "📦 [第二階段 A] 正在打包大考與段考圖片包 exam_images.zip..."
           rm -f exam_images.zip
           find exam_database_output -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.webp" \) ! -path "*/模擬考/*" 2>/dev/null | zip -q -1 exam_images.zip -@ || true
 
           if [ -f "exam_images.zip" ]; then
             echo "⚡ 正在將大考圖片包推送至主帳號 (gdrive:exam_images.zip)..."
-            rclone copyto ./exam_images.zip gdrive:exam_images.zip \
-              --drive-chunk-size 64M \
-              --config rclone.conf -v
+            rclone copyto ./exam_images.zip gdrive:exam_images.zip $RCLONE_ZIP_SAFE -v || \
+              echo "⚠️ exam_images.zip 暫遇 Google 429 防火牆限流，將改由第三階段散裝增量同步保底！"
           fi
 
-          # B. 滴水不漏打包「模擬考」所有圖片為 mock_exam_images.zip (強制由模考專用帳號儲存)
-          echo "📦 [第二階段 B] 正在打包模考專用圖片包 mock_exam_images.zip (包含題目圖、選項圖、詳解圖)..."
+          sleep 3
+          echo "📦 [第二階段 B] 正在打包模考專用圖片包 mock_exam_images.zip..."
           rm -f mock_exam_images.zip
           find exam_database_output/模擬考 -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.webp" \) 2>/dev/null | zip -q -1 mock_exam_images.zip -@ || true
 
           if [ -f "mock_exam_images.zip" ]; then
             echo "⚡ 正在將模考圖片包推送至專用帳號 (${MOCK_REMOTE}:mock_exam_images.zip)..."
-            rclone copyto ./mock_exam_images.zip ${MOCK_REMOTE}:mock_exam_images.zip \
-              --drive-chunk-size 64M \
-              --config rclone.conf -v
+            rclone copyto ./mock_exam_images.zip ${MOCK_REMOTE}:mock_exam_images.zip $RCLONE_ZIP_SAFE -v || \
+              echo "⚠️ mock_exam_images.zip 暫遇 Google 429 防火牆限流，將改由第三階段散裝增量同步保底！"
           fi
           echo "🎉 [第二階段完成] 圖片雙軌分流打包備份完畢！"
 
           # =========================================================
           # === 第三階段：散裝圖片分流同步 (保底增量備份) ===
           # =========================================================
+          sleep 2
           echo "🖼️ [第三階段] 散裝圖片雙軌增量同步..."
           rclone copy ./exam_database_output gdrive:exam_database_output \
             --exclude "模擬考/**" \
-            --fast-list --transfers 16 --checkers 32 --drive-chunk-size 64M \
-            --config rclone.conf -v || true
+            --drive-chunk-size 128M \
+            $RCLONE_SAFE -v || true
 
           if [ -d "./exam_database_output/模擬考" ]; then
             echo "🖼️ 使用模考專用帳號身分 (${MOCK_REMOTE}) 同步模擬考所有圖片..."
             rclone copy ./exam_database_output/模擬考 ${MOCK_REMOTE}:exam_database_output/模擬考 \
               --include "*.png" --include "*.jpg" --include "*.jpeg" --include "*.webp" \
-              --fast-list --transfers 16 --checkers 32 --drive-chunk-size 64M \
-              --config rclone.conf -v || true
+              --drive-chunk-size 128M \
+              $RCLONE_SAFE -v || true
           fi
 
           echo "🔄 [消除雲端同名副本] 正在檢測並合併重複同名檔案 (限時 90 秒防禦性熔斷)..."
-          timeout 90s rclone dedupe newest gdrive:exam_database_output --fast-list --config rclone.conf || true
+          timeout 90s rclone dedupe newest gdrive:exam_database_output --fast-list --tpslimit 6 --config rclone.conf || true
           echo "✅ 雲端同名副本檢查完畢！"
 
           rm -f rclone.conf key.txt exam_images.zip mock_exam_images.zip exam_databases.zip
