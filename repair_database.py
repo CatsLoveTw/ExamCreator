@@ -5,7 +5,7 @@ import os
 import re
 import json
 import logging
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set, Optional
 import fitz  # PyMuPDF
 from catcher import sanitize_latex_syntax
 
