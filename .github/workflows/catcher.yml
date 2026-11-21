@@ -207,9 +207,6 @@ jobs:
           mkdir -p gdrive_workspace
           
           # =========================================================================
-          # 🚀 第一步：優先抓取根目錄的高速壓縮包與狀態檔（秒級完成核心數據恢復）
-          # =========================================================================
-          # =========================================================================
           # 🚀 第一步：優先抓取根目錄的高速壓縮包與狀態檔（加入防 429 節流保護）
           # =========================================================================
           rclone copy gdrive: ./gdrive_workspace \
@@ -332,28 +329,11 @@ jobs:
           find ./exam_database_output -name "*.bak" -type f -delete
           echo "✅ 資料庫洗淨與修復完畢，已就緒！"
 
-      - name: 🧹 立即執行雲端殭屍檔案即時抹除 (防 5 小時後超時失效)
+      - name: 🧹 立即執行雲端上傳者對位抹除與無效化隔離
         if: ${{ github.event.inputs.test_mineru_only != 'true' }}
         run: |
-          MOCK_REMOTE="gdrive"
-          if grep -q "\[gdrive_mock\]" rclone.conf; then MOCK_REMOTE="gdrive_mock"; fi
-
-          if [ -f "purged_filenames.txt" ]; then
-            echo "🧹 [前置雲端大掃蕩] 正在同時匹配根目錄與所有子資料夾清除舊檔..."
-            # 🚨 關鍵修復：同時生成「檔名（匹配根目錄）」與「**/檔名（匹配子資料夾）」！
-            awk 'NF {print $0 "\n**/" $0}' purged_filenames.txt | sort -u > rclone_include_rules.txt
-            if [ -s "rclone_include_rules.txt" ]; then
-              # 雙重嘗試：先嘗試永久刪除，若遇共享權限 403 則自動改以移至垃圾桶，並限制 TPS 防 429
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --drive-use-trash=false --config rclone.conf -v || \
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --config rclone.conf -v || true
-
-              if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --drive-use-trash=false --config rclone.conf -v || \
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt --fast-list --transfers 4 --checkers 8 --tpslimit 6 --tpslimit-burst 4 --drive-pacer-min-sleep 150ms --retries 6 --retries-sleep 15s --config rclone.conf -v || true
-              fi
-            fi
-            rm -f rclone_include_rules.txt
-          fi
+          echo "🧹 [前置雲端精準清理] 啟動上傳者帳號對位刪除 ＋ 非擁有者移出/改名隔離引擎..."
+          python repair_database.py --cloud-purge
 
       
       - name: 🌐 啟動 Cloudflare Tunnel 即時儀表板穿透
@@ -403,33 +383,9 @@ jobs:
           RCLONE_ZIP_SAFE="--drive-chunk-size 256M --tpslimit 4 --tpslimit-burst 2 --drive-pacer-min-sleep 200ms --retries 8 --low-level-retries 15 --retries-sleep 20s --config rclone.conf"
 
           # =========================================================
-          # 🧹 [第 0 階段：優先雲端清理] 在上傳圖片前優先執行，防超時遺漏！
+          # 🧹 [第 0 階段：優先雲端清理] 根據上傳者帳號對位刪除，遇第三方擁有者自動移出或改名隔離
           # =========================================================
-          if [ -f "pending_cloud_purges.txt" ]; then
-            sed -e 's|^gdrive:exam_database_output/||' -e 's|^gdrive_mock:exam_database_output/||' pending_cloud_purges.txt | sort -u > rclone_purge_files.txt
-            if [ -s "rclone_purge_files.txt" ]; then
-              rclone delete gdrive:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE --drive-use-trash=false -v || \
-              rclone delete gdrive:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE -v || true
-              if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
-                rclone delete gdrive_mock:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE --drive-use-trash=false -v || \
-                rclone delete gdrive_mock:exam_database_output --files-from rclone_purge_files.txt $RCLONE_SAFE -v || true
-              fi
-            fi
-            rm -f pending_cloud_purges.txt rclone_purge_files.txt
-          fi
-
-          if [ -f "purged_filenames.txt" ]; then
-            awk 'NF {print $0 "\n**/" $0}' purged_filenames.txt | sort -u > rclone_include_rules.txt
-            if [ -s "rclone_include_rules.txt" ]; then
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE --drive-use-trash=false -v || \
-              rclone delete gdrive:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE -v || true
-              if [ "$MOCK_REMOTE" = "gdrive_mock" ]; then
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE --drive-use-trash=false -v || \
-                rclone delete gdrive_mock:exam_database_output --include-from rclone_include_rules.txt $RCLONE_SAFE -v || true
-              fi
-            fi
-            rm -f purged_filenames.txt rclone_include_rules.txt
-          fi
+          python repair_database.py --cloud-purge || true
 
           # =========================================================
           # === 第一階段：最高優先級！上傳所有 JSON 資料庫與狀態檔 ===
