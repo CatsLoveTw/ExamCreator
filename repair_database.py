@@ -1637,6 +1637,296 @@ def manual_purge_by_keyword(keyword: str):
 
     print(f"✅ 銷毀完畢！共清理 {purged_cnt} 個項目，並已同步寫入 pending_cloud_purges.txt 登記雲端銷毀！")
 
+def cloud_purge_from_rclone_conf(rclone_conf_path: str = "rclone.conf"):
+    """
+    🚨【根據上傳者精準刪除 + 非擁有者移出/改名無效化】三層雲端清理引擎：
+    1. 自動讀取 rclone.conf 內的 gdrive / gdrive_mock OAuth Token 與各帳號 Email
+    2. 確認檔案位於 GDRIVE_FOLDER_ID (root_folder_id) 下且本地已不再存在該相對路徑（防誤刪剛完工檔案）
+    3. Tier 1: 比對檔案 owners，只用真正的上傳者帳號執行永久刪除
+    4. Tier 2: 若為第三方帳號上傳，嘗試用 `removeParents` 移出共享資料夾
+    5. Tier 3: 若仍遇 403，改名為 `_PURGED_{fname}.deleted` 並覆寫內容為 `[]`，徹底拔除 .json 身分
+    """
+    import configparser
+    import time
+    import httpx
+
+    if not os.path.exists(rclone_conf_path):
+        logging.warning("⚠️ 找不到 rclone.conf，跳過雲端精準清理。")
+        return
+
+    target_names = set()
+    for list_file in [PURGE_FILE, PURGED_BASENAMES_FILE]:
+        if os.path.exists(list_file):
+            with open(list_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    bn = os.path.basename(line.strip())
+                    if bn:
+                        target_names.add(bn)
+
+    if not target_names:
+        logging.info("✅ 無待清理之雲端舊檔。")
+        return
+
+    cfg = configparser.ConfigParser()
+    cfg.read(rclone_conf_path, encoding="utf-8")
+
+    accounts = []
+    for sec in cfg.sections():
+        if cfg.get(sec, "type", fallback="").strip() != "drive":
+            continue
+        c_id = cfg.get(sec, "client_id", fallback="").strip()
+        c_sec = cfg.get(sec, "client_secret", fallback="").strip()
+        tok_raw = cfg.get(sec, "token", fallback="").strip()
+        root_fid = cfg.get(sec, "root_folder_id", fallback="").strip()
+        if not tok_raw:
+            continue
+        try:
+            tok_data = json.loads(tok_raw)
+        except Exception:
+            continue
+
+        refresh_tok = tok_data.get("refresh_token", "")
+        access_tok = tok_data.get("access_token", "")
+        if refresh_tok and c_id and c_sec:
+            try:
+                r_tok = httpx.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "client_id": c_id,
+                        "client_secret": c_sec,
+                        "refresh_token": refresh_tok,
+                        "grant_type": "refresh_token",
+                    },
+                    timeout=15.0,
+                )
+                if r_tok.status_code == 200:
+                    access_tok = r_tok.json().get("access_token", access_tok)
+            except Exception as te:
+                logging.warning(f"⚠️ 刷新 [{sec}] OAuth Token 失敗: {te}")
+
+        if access_tok:
+            email = ""
+            try:
+                r_ab = httpx.get(
+                    "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)",
+                    headers={"Authorization": f"Bearer {access_tok}"},
+                    timeout=15.0,
+                )
+                if r_ab.status_code == 200:
+                    email = r_ab.json().get("user", {}).get("emailAddress", "").lower()
+            except Exception:
+                pass
+            accounts.append({
+                "name": sec,
+                "token": access_tok,
+                "email": email,
+                "root_folder_id": root_fid,
+            })
+
+    if not accounts:
+        logging.warning("⚠️ rclone.conf 中沒有可用的 Google Drive OAuth 帳號。")
+        return
+
+    primary = accounts[0]
+    root_fid = primary["root_folder_id"]
+    folder_cache: Dict[str, dict] = {}
+
+    def get_rel_path_in_exam_db(file_obj: dict) -> Optional[str]:
+        """向上追溯父資料夾，確認該檔屬於本專案 exam_database_output 樹下並回傳相對路徑"""
+        parts = [file_obj.get("name", "")]
+        cur_parents = file_obj.get("parents", []) or []
+        visited = set()
+        under_root = (not root_fid)
+        found_exam_db_dir = False
+
+        for _ in range(10):
+            if not cur_parents:
+                break
+            pid = cur_parents[0]
+            if pid in visited:
+                break
+            visited.add(pid)
+            if root_fid and pid == root_fid:
+                under_root = True
+                break
+            if pid not in folder_cache:
+                try:
+                    rp = httpx.get(
+                        f"https://www.googleapis.com/drive/v3/files/{pid}",
+                        params={"fields": "id,name,parents", "supportsAllDrives": "true"},
+                        headers={"Authorization": f"Bearer {primary['token']}"},
+                        timeout=15.0,
+                    )
+                    folder_cache[pid] = rp.json() if rp.status_code == 200 else {}
+                except Exception:
+                    folder_cache[pid] = {}
+            p_info = folder_cache[pid]
+            p_name = p_info.get("name", "")
+            if not p_name:
+                break
+            if p_name == "exam_database_output":
+                found_exam_db_dir = True
+                if not root_fid:
+                    break
+            else:
+                parts.insert(0, p_name)
+            cur_parents = p_info.get("parents", []) or []
+
+        if not found_exam_db_dir:
+            return None
+        if root_fid and not under_root:
+            return None
+        return "/".join(parts)
+
+    # 批次查詢雲端相符檔名 (每批 12 個檔名避免 query 過長)
+    name_list = sorted(list(target_names))
+    matched_files: Dict[str, dict] = {}
+    for i in range(0, len(name_list), 12):
+        chunk = name_list[i : i + 12]
+        or_clauses = " or ".join([f"name = '{n.replace(chr(39), chr(92)+chr(39))}'" for n in chunk])
+        query = f"({or_clauses}) and trashed = false"
+        page_token = None
+        while True:
+            params = {
+                "q": query,
+                "fields": "nextPageToken,files(id,name,mimeType,parents,ownedByMe,owners(emailAddress))",
+                "pageSize": 100,
+                "supportsAllDrives": "true",
+                "includeItemsFromAllDrives": "true",
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            try:
+                resp = httpx.get(
+                    "https://www.googleapis.com/drive/v3/files",
+                    params=params,
+                    headers={"Authorization": f"Bearer {primary['token']}"},
+                    timeout=20.0,
+                )
+                if resp.status_code != 200:
+                    logging.warning(f"⚠️ Drive API 查詢異常 ({resp.status_code}): {resp.text[:150]}")
+                    break
+                data = resp.json()
+                for f_item in data.get("files", []):
+                    matched_files[f_item["id"]] = f_item
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+            except Exception as qe:
+                logging.warning(f"⚠️ Drive API 查詢失敗: {qe}")
+                break
+
+    logging.info(f"🔍 [雲端權限稽核] 共搜尋到 {len(matched_files)} 個相符雲端項目，正在進行路徑驗證與擁有者對位處理...")
+
+    for fid, f_obj in matched_files.items():
+        fname = f_obj.get("name", "")
+        rel_path = get_rel_path_in_exam_db(f_obj)
+        if not rel_path:
+            continue
+
+        # 🛡️ 防誤刪保護：若本機磁碟在該精確路徑已有正常實體檔案，絕對不可刪除！
+        local_exact = os.path.join(DATABASE_DIR, rel_path)
+        if os.path.exists(local_exact) and os.path.getsize(local_exact) > 0:
+            logging.info(f"🛡️ [跳過保護] 本機目前存在新版 {rel_path}，保留雲端檔案。")
+            continue
+
+        owners = [o.get("emailAddress", "").lower() for o in (f_obj.get("owners") or [])]
+        parents = f_obj.get("parents", []) or []
+        is_folder = (f_obj.get("mimeType") == "application/vnd.google-apps.folder")
+        handled = False
+
+        # -----------------------------------------------------
+        # Tier 1: 根據上傳者帳號精準對位刪除
+        # -----------------------------------------------------
+        owner_accounts = [a for a in accounts if (a["email"] and a["email"] in owners)]
+        if not owner_accounts and f_obj.get("ownedByMe"):
+            owner_accounts = [primary]
+
+        for acc in owner_accounts:
+            try:
+                r_del = httpx.delete(
+                    f"https://www.googleapis.com/drive/v3/files/{fid}",
+                    params={"supportsAllDrives": "true"},
+                    headers={"Authorization": f"Bearer {acc['token']}"},
+                    timeout=15.0,
+                )
+                if r_del.status_code in (200, 204):
+                    logging.info(f"🗑️ [上傳者對位刪除成功 ({acc['name']})] {rel_path}")
+                    handled = True
+                    break
+            except Exception:
+                pass
+
+        if handled:
+            time.sleep(0.15)
+            continue
+
+        # -----------------------------------------------------
+        # Tier 2: 非己方擁有 ➔ 嘗試 `removeParents` 將檔案移出共享資料夾
+        # -----------------------------------------------------
+        if parents:
+            parent_str = ",".join(parents)
+            for acc in accounts:
+                try:
+                    r_rm = httpx.patch(
+                        f"https://www.googleapis.com/drive/v3/files/{fid}",
+                        params={"removeParents": parent_str, "supportsAllDrives": "true"},
+                        headers={"Authorization": f"Bearer {acc['token']}", "Content-Type": "application/json"},
+                        json={},
+                        timeout=15.0,
+                    )
+                    if r_rm.status_code == 200:
+                        logging.info(f"📤 [移出共享資料夾成功 ({acc['name']})] {rel_path} (原上傳者: {owners})")
+                        handled = True
+                        break
+                except Exception:
+                    pass
+
+        if handled:
+            time.sleep(0.15)
+            continue
+
+        # -----------------------------------------------------
+        # Tier 3: 終極隔離術 ➔ 改名為 `_PURGED_*.deleted` 並將內容覆寫為 `[]`
+        # -----------------------------------------------------
+        for acc in accounts:
+            try:
+                new_name = f"_PURGED_{fname}.deleted"
+                r_ren = httpx.patch(
+                    f"https://www.googleapis.com/drive/v3/files/{fid}",
+                    params={"supportsAllDrives": "true"},
+                    headers={"Authorization": f"Bearer {acc['token']}", "Content-Type": "application/json"},
+                    json={"name": new_name},
+                    timeout=15.0,
+                )
+                if r_ren.status_code == 200:
+                    if not is_folder:
+                        httpx.patch(
+                            f"https://www.googleapis.com/upload/drive/v3/files/{fid}",
+                            params={"uploadType": "media", "supportsAllDrives": "true"},
+                            headers={"Authorization": f"Bearer {acc['token']}", "Content-Type": "application/json"},
+                            content=b"[]",
+                            timeout=15.0,
+                        )
+                    logging.info(f"🔒 [無效化隔離成功 ({acc['name']})] {rel_path} ➔ 已改名為 {new_name} 並清空內容！")
+                    handled = True
+                    break
+            except Exception as ce:
+                logging.warning(f"⚠️ [{acc['name']}] 改名隔離 {rel_path} 失敗: {ce}")
+
+        if not handled:
+            logging.warning(f"⚠️ 無法清理雲端檔案 {rel_path} (擁有者: {owners})，請確認該帳號在共享資料夾至少具備編輯權限。")
+        time.sleep(0.15)
+
+    # 清理暫存追蹤清單，避免重複查詢
+    for list_file in [PURGE_FILE, PURGED_BASENAMES_FILE]:
+        if os.path.exists(list_file):
+            try:
+                os.remove(list_file)
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "--purge":
@@ -1645,5 +1935,7 @@ if __name__ == "__main__":
             manual_purge_by_keyword(target_kw)
         else:
             print("❌ 請指定要銷毀的關鍵字，例如: python repair_database.py --purge 107學年度_指考模擬_理組")
+    elif len(sys.argv) > 1 and sys.argv[1] == "--cloud-purge":
+        cloud_purge_from_rclone_conf("rclone.conf")
     else:
         run_database_repair_suite()
